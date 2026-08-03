@@ -1,6 +1,8 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { z } from 'zod';
 import { pool } from '../../database/pool.js';
+import { env } from '../../config/env.js';
 import { transaction } from '../../database/transaction.js';
 import { asyncHandler } from '../../core/async-handler.js';
 import { routeParam } from '../../core/route-param.js';
@@ -8,6 +10,7 @@ import { created, noContent, ok } from '../../core/http.js';
 import { NotFoundError, ValidationError } from '../../core/errors.js';
 import { assertPermission, requirePermission } from '../../middleware/permission.js';
 import { buildInsert, buildUpdate } from '../shared/sql.js';
+import { deleteCloudinaryImage, uploadAnimalImage } from '../../services/cloudinary.service.js';
 
 type Def = {
   table: string;
@@ -98,6 +101,14 @@ const partoSchema = z.object({
   })).min(1)
 });
 
+const birthImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: env.MAX_IMAGE_MB * 1024 * 1024 },
+  fileFilter: (_req, file, callback) => file.mimetype.startsWith('image/')
+    ? callback(null, true)
+    : callback(new ValidationError('Solo se permiten imágenes.')),
+});
+
 export const birthsRouter = Router();
 birthsRouter.get('/', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(
   `SELECT p.*, m.nombre madre, pa.nombre padre,
@@ -115,28 +126,180 @@ birthsRouter.get('/', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (
 
 birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(async (req, res) => {
   const input = partoSchema.parse(req.body);
-  const result = await transaction(async (client) => {
-    const { crias, ...head } = input;
-    const parto = (await client.query(buildInsert('parto', { ...head, registrado_por: req.user!.id }))).rows[0];
-    let order = 1;
-    for (const item of crias) {
-      const cria = (await client.query(buildInsert('animal', {
-        ...item.animal,
-        fecha_nacimiento: input.fecha_parto.slice(0, 10),
-        id_madre: input.id_madre,
-        id_padre: input.id_padre ?? null,
-        registrado_por: req.user!.id
+  try {
+    const result = await transaction(async (client) => {
+      const mother = (await client.query(
+        `SELECT id_animal,id_especie,sexo,estado
+         FROM animal
+         WHERE id_animal=$1 AND deleted_at IS NULL
+         FOR SHARE`,
+        [input.id_madre],
+      )).rows[0] as { id_animal: string; id_especie: string; sexo: string; estado: string } | undefined;
+
+      if (!mother || mother.sexo !== 'HEMBRA') {
+        throw new ValidationError('La madre seleccionada no existe o no es hembra.');
+      }
+      if (mother.estado !== 'ACTIVO') {
+        throw new ValidationError('La madre debe estar activa para registrar el parto.');
+      }
+
+      if (input.id_padre) {
+        const father = (await client.query(
+          `SELECT id_animal,id_especie,sexo,estado
+           FROM animal
+           WHERE id_animal=$1 AND deleted_at IS NULL
+           FOR SHARE`,
+          [input.id_padre],
+        )).rows[0] as { id_animal: string; id_especie: string; sexo: string; estado: string } | undefined;
+        if (!father || father.sexo !== 'MACHO') {
+          throw new ValidationError('El padre seleccionado no existe o no es macho.');
+        }
+        if (father.id_especie !== mother.id_especie) {
+          throw new ValidationError('El padre y la madre deben pertenecer a la misma especie.');
+        }
+      }
+
+      const birthDate = new Date(input.fecha_parto);
+      if (Number.isNaN(birthDate.getTime())) throw new ValidationError('La fecha del parto no es válida.');
+      const birthDay = birthDate.toISOString().slice(0, 10);
+      await client.query("SELECT set_config('app.fecha_movimiento', $1, true)", [input.fecha_parto]);
+      await client.query("SELECT set_config('app.motivo_cambio', 'Nacimiento', true)");
+      const { crias, ...head } = input;
+      const parto = (await client.query(buildInsert('parto', {
+        ...head,
+        registrado_por: req.user!.id,
       }))).rows[0];
-      await client.query(buildInsert('parto_cria', {
-        id_parto: parto.id_parto,
-        id_cria: cria.id_animal,
-        estado_nacimiento: item.estado_nacimiento,
-        peso_nacimiento_kg: item.peso_nacimiento_kg ?? null,
-        orden_nacimiento: order++,
-        observaciones: item.observaciones ?? null
-      }));
+
+      const createdChildren: Array<Record<string, unknown>> = [];
+      let order = 1;
+      for (const item of crias) {
+        if (item.animal.id_especie !== mother.id_especie) {
+          throw new ValidationError(`La especie de la cría ${order} debe coincidir con la de la madre.`);
+        }
+
+        if (item.animal.id_grupo_actual) {
+          const group = (await client.query(
+            `SELECT id_especie,activo FROM grupo WHERE id_grupo=$1 AND deleted_at IS NULL`,
+            [item.animal.id_grupo_actual],
+          )).rows[0] as { id_especie: string | null; activo: boolean } | undefined;
+          if (!group || !group.activo) throw new ValidationError(`El grupo de la cría ${order} no está disponible.`);
+          if (group.id_especie && group.id_especie !== mother.id_especie) {
+            throw new ValidationError(`El grupo de la cría ${order} no corresponde a su especie.`);
+          }
+        }
+
+        if (item.animal.id_ubicacion_actual) {
+          const location = (await client.query(
+            `SELECT activo FROM ubicacion WHERE id_ubicacion=$1 AND deleted_at IS NULL`,
+            [item.animal.id_ubicacion_actual],
+          )).rows[0] as { activo: boolean } | undefined;
+          if (!location || !location.activo) throw new ValidationError(`El corral o potrero de la cría ${order} no está disponible.`);
+        }
+
+        const childState = item.estado_nacimiento === 'MUERTA' ? 'MUERTO' : item.animal.estado;
+        const cria = (await client.query(buildInsert('animal', {
+          ...item.animal,
+          id_especie: mother.id_especie,
+          estado: childState,
+          fecha_nacimiento: birthDay,
+          fecha_ingreso: birthDay,
+          id_madre: input.id_madre,
+          id_padre: input.id_padre ?? null,
+          registrado_por: req.user!.id,
+        }))).rows[0];
+
+        const partoCria = (await client.query(buildInsert('parto_cria', {
+          id_parto: parto.id_parto,
+          id_cria: cria.id_animal,
+          estado_nacimiento: item.estado_nacimiento,
+          peso_nacimiento_kg: item.peso_nacimiento_kg ?? null,
+          orden_nacimiento: order,
+          observaciones: item.observaciones ?? null,
+        }))).rows[0];
+
+        if (item.peso_nacimiento_kg) {
+          await client.query(buildInsert('pesaje', {
+            id_animal: cria.id_animal,
+            fecha_pesaje: input.fecha_parto,
+            peso_kg: item.peso_nacimiento_kg,
+            metodo: 'PESO_AL_NACER',
+            observaciones: item.observaciones ?? null,
+            registrado_por: req.user!.id,
+          }));
+        }
+
+
+
+        createdChildren.push({
+          id_parto_cria: partoCria.id_parto_cria,
+          id_cria: cria.id_animal,
+          cria: cria.nombre,
+          sexo: cria.sexo,
+          estado_nacimiento: item.estado_nacimiento,
+          peso_nacimiento_kg: item.peso_nacimiento_kg ?? null,
+          orden_nacimiento: order,
+        });
+        order += 1;
+      }
+
+      return { ...parto, crias: createdChildren };
+    }, req.user!.id);
+    return created(res, result);
+  } catch (error) {
+    const databaseError = error as { code?: string; message?: string };
+    if (databaseError.code === 'P0001') {
+      throw new ValidationError(databaseError.message || 'El parto no cumple las reglas del sistema.');
     }
-    return parto;
-  }, req.user!.id);
-  return created(res, result);
+    throw error;
+  }
 }));
+
+birthsRouter.post(
+  '/:id/crias/:childId/imagenes',
+  requirePermission('PARTO_ADMINISTRAR'),
+  birthImageUpload.single('imagen'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw new ValidationError('Debes seleccionar una imagen.');
+    const birthId = routeParam(req.params.id, 'id');
+    const childId = routeParam(req.params.childId, 'childId');
+    const relation = await pool.query(
+      `SELECT 1
+       FROM parto_cria pc
+       JOIN parto p ON p.id_parto=pc.id_parto AND p.deleted_at IS NULL
+       JOIN animal a ON a.id_animal=pc.id_cria AND a.deleted_at IS NULL
+       WHERE pc.id_parto=$1 AND pc.id_cria=$2 AND pc.deleted_at IS NULL`,
+      [birthId, childId],
+    );
+    if (!relation.rowCount) throw new NotFoundError('La cría no pertenece al parto indicado.');
+
+    const cloud = await uploadAnimalImage(req.file.buffer, childId);
+    try {
+      const profile = req.body.es_perfil === 'true' || req.body.es_perfil === true;
+      const row = await transaction(async (client) => {
+        if (profile) {
+          await client.query(
+            'UPDATE animal_imagen SET es_perfil=FALSE WHERE id_animal=$1 AND deleted_at IS NULL',
+            [childId],
+          );
+        }
+        return (await client.query(buildInsert('animal_imagen', {
+          id_animal: childId,
+          public_id: cloud.public_id,
+          url: cloud.url,
+          secure_url: cloud.secure_url,
+          formato: cloud.format,
+          ancho: cloud.width,
+          alto: cloud.height,
+          bytes: cloud.bytes,
+          es_perfil: profile,
+          descripcion: req.body.descripcion || null,
+          registrado_por: req.user!.id,
+        }))).rows[0];
+      }, req.user!.id);
+      return created(res, row);
+    } catch (error) {
+      await deleteCloudinaryImage(cloud.public_id);
+      throw error;
+    }
+  }),
+);
