@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import {
   ArrowLeftRight, Baby, Beef, Bell, BookOpen, ChevronRight, ClipboardList, Droplets,
-  HeartOff, Home, LayoutDashboard, LogOut, MapPin, Menu, Milk, ShieldCheck, Sprout, Syringe,
+  HeartOff, Home, LayoutDashboard, LogOut, Menu, Milk, Moon, ShieldCheck, ShoppingCart, Sprout, Sun, Syringe,
   UserCircle, UserCog, Users, Warehouse, Weight, X, type LucideIcon,
 } from 'lucide-react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { IconButton } from '../components/ui';
+import { useTheme } from '../theme/ThemeContext';
 
 interface Destination {
   to: string;
@@ -20,7 +21,6 @@ const destinations: Destination[] = [
   { to: '/', label: 'Panel', icon: LayoutDashboard, permissions: ['DASHBOARD_CONSULTAR'], section: 'principal' },
   { to: '/animales', label: 'Animales', icon: Beef, permissions: ['ANIMAL_CONSULTAR'], section: 'principal' },
   { to: '/grupos', label: 'Grupos', icon: Users, permissions: ['GRUPO_CONSULTAR'], section: 'principal' },
-  { to: '/ubicaciones', label: 'Ubicaciones', icon: MapPin, permissions: ['UBICACION_CONSULTAR'], section: 'principal' },
   { to: '/potreros', label: 'Potreros', icon: Sprout, permissions: ['POTRERO_CONSULTAR'], section: 'principal' },
   { to: '/corrales', label: 'Corrales', icon: Warehouse, permissions: ['CORRAL_CONSULTAR'], section: 'principal' },
   { to: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, permissions: ['MOVIMIENTO_CONSULTAR'], section: 'operaciones' },
@@ -30,6 +30,7 @@ const destinations: Destination[] = [
   { to: '/produccion', label: 'Producción', icon: Milk, permissions: ['PRODUCCION_CONSULTAR', 'LACTANCIA_CONSULTAR'], section: 'operaciones' },
   { to: '/pesajes', label: 'Pesajes', icon: Weight, permissions: ['PESAJE_CONSULTAR'], section: 'operaciones' },
   { to: '/muertes', label: 'Muertes y bajas', icon: HeartOff, permissions: ['MUERTE_CONSULTAR'], section: 'operaciones' },
+  { to: '/ventas', label: 'Ventas', icon: ShoppingCart, permissions: ['VENTA_CONSULTAR'], section: 'operaciones' },
   { to: '/catalogos', label: 'Catálogos', icon: BookOpen, permissions: ['CATALOGO_CONSULTAR'], section: 'administracion' },
   { to: '/usuarios', label: 'Usuarios', icon: UserCog, permissions: ['USUARIO_CONSULTAR'], section: 'administracion' },
   { to: '/roles', label: 'Roles y permisos', icon: ShieldCheck, permissions: ['ROL_CONSULTAR'], section: 'administracion' },
@@ -40,6 +41,7 @@ const sectionNames = { principal: 'Gestión principal', operaciones: 'Operacione
 
 export function AppShell() {
   const { user, hasPermission, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const visible = useMemo(() => destinations.filter((item) => !item.permissions || hasPermission(...item.permissions)), [hasPermission]);
@@ -72,7 +74,7 @@ export function AppShell() {
       <div className="shell-main">
         <header className="topbar">
           <div className="topbar-left"><IconButton label="Abrir menú" className="mobile-menu-button" onClick={() => setOpen(true)}><Menu size={22} /></IconButton><div><span className="breadcrumb">M&M Ganadería</span><h2>{current?.label ?? 'Gestión ganadera'}</h2></div></div>
-          <div className="topbar-actions"><IconButton label="Notificaciones"><Bell size={19} /></IconButton><NavLink to="/perfil" className="profile-link"><UserCircle size={21} /><span>Mi perfil</span></NavLink></div>
+          <div className="topbar-actions"><IconButton label={theme === 'dark' ? 'Usar tema claro' : 'Usar tema oscuro'} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</IconButton><IconButton label="Notificaciones"><Bell size={19} /></IconButton><NavLink to="/perfil" className="profile-link"><UserCircle size={21} /><span>Mi perfil</span></NavLink></div>
         </header>
         <main className="page-content"><Outlet /></main>
         <footer className="app-footer"><Home size={14} /><span>M&M Ganadería · Servidor lafortuna</span></footer>

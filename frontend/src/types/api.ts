@@ -85,11 +85,28 @@ export interface Animal {
   fecha_ingreso: string | null;
   estado: 'ACTIVO' | 'MUERTO' | 'VENDIDO' | 'TRASLADADO' | 'DESAPARECIDO' | 'INACTIVO';
   foto_perfil: string | null;
+  propietario_principal?: string | null;
+  propietarios?: AnimalOwner[];
   ultimo_pesaje?: { peso_kg: string | number; fecha: string } | null;
   imagenes?: AnimalImage[];
   colores?: { id_color: string; nombre: string; es_principal: boolean }[];
   razas?: { id_raza: string; nombre: string; porcentaje: number | null }[];
   total?: number;
+}
+
+
+export interface AnimalOwner {
+  id_usuario: string;
+  nombre: string;
+  correo: string;
+  porcentaje: number | string | null;
+  es_principal: boolean;
+}
+
+export interface OwnerOption {
+  id_usuario: string;
+  nombre: string;
+  correo: string;
 }
 
 export interface AnimalImage {
@@ -373,6 +390,30 @@ export interface GenericRecord {
   [key: string]: unknown;
   animal?: string | null;
   codigo_arete?: string | null;
+}
+
+export interface SaleAnimalDetail {
+  id_venta_detalle: string;
+  id_animal: string;
+  animal: string;
+  codigo_arete: string | null;
+  precio_individual: number | string | null;
+  observaciones: string | null;
+}
+
+export interface AnimalSale {
+  id_venta: string;
+  fecha_venta: string;
+  comprador_nombre: string;
+  comprador_contacto: string | null;
+  destino: string | null;
+  precio_total: number | string | null;
+  moneda: string;
+  observaciones: string | null;
+  estado: 'COMPLETADA' | 'ANULADA';
+  anulado_en: string | null;
+  registrado_por_nombre: string;
+  animales: SaleAnimalDetail[];
 }
 
 export interface AuditEntry {

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, Beef, Droplets, MapPin, Mars, Syringe, Users, Venus } from 'lucide-react';
+import { ArrowRight, Beef, Droplets, Mars, Syringe, Users, Venus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { apiRequest } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
@@ -20,7 +20,6 @@ export function DashboardPage() {
     { label: 'Hembras', value: data.hembras, icon: Venus, route: '/animales?sexo=HEMBRA', permission: 'ANIMAL_CONSULTAR', tone: 'pink' },
     { label: 'Machos', value: data.machos, icon: Mars, route: '/animales?sexo=MACHO', permission: 'ANIMAL_CONSULTAR', tone: 'blue' },
     { label: 'Grupos', value: data.grupos, icon: Users, route: '/grupos', permission: 'GRUPO_CONSULTAR', tone: 'purple' },
-    { label: 'Ubicaciones', value: data.ubicaciones, icon: MapPin, route: '/ubicaciones', permission: 'UBICACION_CONSULTAR', tone: 'orange' },
     { label: 'Litros hoy', value: `${formatNumber(data.litros_hoy)} L`, icon: Droplets, route: '/produccion', permission: 'PRODUCCION_CONSULTAR', tone: 'cyan' },
     { label: 'Tratamientos hoy', value: data.tratamientos_hoy, icon: Syringe, route: '/sanidad', permission: 'SANIDAD_CONSULTAR', tone: 'red' },
   ];

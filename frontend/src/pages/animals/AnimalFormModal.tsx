@@ -5,7 +5,7 @@ import { apiRequest, ApiError } from '../../api/client';
 import { useToast } from '../../components/ToastContext';
 import { Button, Field, Input, Modal, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
-import type { Animal, Group, Location } from '../../types/api';
+import type { Animal, Corral, Group, OwnerOption, Pasture } from '../../types/api';
 import { nullIfEmpty, numberOrNull } from '../../utils';
 
 interface AnimalFormModalProps {
@@ -30,6 +30,7 @@ interface FormState {
   estado: Animal['estado'];
   colores: { id: string; principal: boolean }[];
   razas: { id: string; porcentaje: string }[];
+  propietarios: { id: string; porcentaje: string; principal: boolean }[];
   peso_inicial_kg: string;
   fecha_pesaje_inicial: string;
   metodo_pesaje_inicial: string;
@@ -58,6 +59,7 @@ function emptyForm(): FormState {
     estado: 'ACTIVO',
     colores: [],
     razas: [],
+    propietarios: [],
     peso_inicial_kg: '',
     fecha_pesaje_inicial: localToday(),
     metodo_pesaje_inicial: '',
@@ -80,9 +82,17 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
     queryKey: ['groups', 'select'],
     queryFn: () => apiRequest<Group[]>('/grupos?limit=100'),
   });
-  const locations = useQuery({
-    queryKey: ['locations'],
-    queryFn: () => apiRequest<Location[]>('/ubicaciones'),
+  const pastures = useQuery({
+    queryKey: ['pastures', 'animal-form'],
+    queryFn: () => apiRequest<Pasture[]>('/potreros'),
+  });
+  const corrals = useQuery({
+    queryKey: ['corrals', 'animal-form'],
+    queryFn: () => apiRequest<Corral[]>('/corrales'),
+  });
+  const owners = useQuery({
+    queryKey: ['animal-owner-options'],
+    queryFn: () => apiRequest<OwnerOption[]>('/animales/opciones/propietarios'),
   });
   const mothers = useQuery({
     queryKey: ['animals', 'mothers'],
@@ -116,6 +126,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
       estado: animal.estado,
       colores: animal.colores?.map((item) => ({ id: item.id_color, principal: item.es_principal })) ?? [],
       razas: animal.razas?.map((item) => ({ id: item.id_raza, porcentaje: item.porcentaje?.toString() ?? '' })) ?? [],
+      propietarios: animal.propietarios?.map((item) => ({ id: item.id_usuario, porcentaje: item.porcentaje?.toString() ?? '', principal: item.es_principal })) ?? [],
       peso_inicial_kg: '',
       fecha_pesaje_inicial: localToday(),
       metodo_pesaje_inicial: '',
@@ -141,6 +152,11 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
     [breeds.data, form.id_especie],
   );
 
+  const availableLocations = useMemo(() => [
+    ...(pastures.data ?? []).map((item) => ({ id: item.id_ubicacion, label: `${item.nombre} · Potrero` })),
+    ...(corrals.data ?? []).map((item) => ({ id: item.id_ubicacion, label: `${item.nombre} · Corral` })),
+  ].sort((a, b) => a.label.localeCompare(b.label)), [pastures.data, corrals.data]);
+
   function baseBody() {
     return {
       codigo_arete: nullIfEmpty(form.codigo_arete),
@@ -158,6 +174,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
       estado: form.estado,
       colores: form.colores.map((item) => ({ id: item.id, principal: item.principal })),
       razas: form.razas.map((item) => ({ id: item.id, porcentaje: numberOrNull(item.porcentaje) })),
+      propietarios: form.propietarios.map((item) => ({ id: item.id, porcentaje: numberOrNull(item.porcentaje), principal: item.principal })),
     };
   }
 
@@ -247,6 +264,20 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
     razas: current.razas.some((item) => item.id === id)
       ? current.razas.filter((item) => item.id !== id)
       : [...current.razas, { id, porcentaje: '' }],
+  }));
+
+  const toggleOwner = (id: string) => setForm((current) => {
+    const exists = current.propietarios.some((item) => item.id === id);
+    const next = exists
+      ? current.propietarios.filter((item) => item.id !== id)
+      : [...current.propietarios, { id, porcentaje: '', principal: current.propietarios.length === 0 }];
+    if (next.length && !next.some((item) => item.principal)) next[0] = { ...next[0], principal: true };
+    return { ...current, propietarios: next };
+  });
+
+  const setPrincipalOwner = (id: string) => setForm((current) => ({
+    ...current,
+    propietarios: current.propietarios.map((item) => ({ ...item, principal: item.id === id })),
   }));
 
   return (
@@ -375,7 +406,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
         </div>
 
         <div className="form-section">
-          <h3>Clasificación y ubicación</h3>
+          <h3>Clasificación y lugar actual</h3>
           <div className="form-grid">
             <Field label="Grupo actual">
               <Select value={form.id_grupo_actual} onChange={(event) => setForm((current) => ({ ...current, id_grupo_actual: event.target.value }))}>
@@ -383,10 +414,10 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
                 {groups.data?.map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre}</option>)}
               </Select>
             </Field>
-            <Field label="Ubicación actual">
+            <Field label="Corral o potrero actual">
               <Select value={form.id_ubicacion_actual} onChange={(event) => setForm((current) => ({ ...current, id_ubicacion_actual: event.target.value }))}>
-                <option value="">Sin ubicación</option>
-                {locations.data?.map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.tipo}</option>)}
+                <option value="">Sin corral o potrero</option>
+                {availableLocations.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
               </Select>
             </Field>
             <Field label="Fecha de ingreso">
@@ -419,6 +450,23 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
                 ))}
               </Select>
             </Field>
+          </div>
+        </div>
+
+        <div className="form-section">
+          <h3>Propietarios</h3>
+          <p className="muted">Selecciona uno o varios propietarios. Solo uno puede quedar como principal.</p>
+          <div className="choice-grid">
+            {owners.data?.map((owner) => {
+              const selected = form.propietarios.find((item) => item.id === owner.id_usuario);
+              return <div className={`choice-card ${selected ? 'selected' : ''}`} key={owner.id_usuario}>
+                <label><input type="checkbox" checked={Boolean(selected)} onChange={() => toggleOwner(owner.id_usuario)} /><span>{owner.nombre}<small>{owner.correo}</small></span></label>
+                {selected ? <>
+                  <label className="radio-small"><input type="radio" name="principal-owner" checked={selected.principal} onChange={() => setPrincipalOwner(owner.id_usuario)} />Principal</label>
+                  <Input type="number" min="0" max="100" step="0.01" placeholder="% de propiedad" value={selected.porcentaje} onChange={(event) => setForm((current) => ({ ...current, propietarios: current.propietarios.map((item) => item.id === owner.id_usuario ? { ...item, porcentaje: event.target.value } : item) }))} />
+                </> : null}
+              </div>;
+            })}
           </div>
         </div>
 

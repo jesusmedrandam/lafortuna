@@ -21,6 +21,12 @@ const relation = z.object({
   principal: z.boolean().optional(),
 });
 
+const ownerRelation = z.object({
+  id: z.string().uuid(),
+  porcentaje: z.number().min(0).max(100).nullable().optional(),
+  principal: z.boolean().optional(),
+});
+
 const schema = z.object({
   codigo_arete: z.string().max(60).nullable().optional(),
   nombre: z.string().trim().min(1).max(120),
@@ -37,6 +43,13 @@ const schema = z.object({
   estado: z.enum(['ACTIVO', 'MUERTO', 'VENDIDO', 'TRASLADADO', 'DESAPARECIDO', 'INACTIVO']).optional(),
   colores: z.array(relation).default([]),
   razas: z.array(relation).default([]),
+  propietarios: z.array(ownerRelation).default([]).superRefine((items, ctx) => {
+    if (items.filter((item) => item.principal).length > 1) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Solo un propietario puede ser principal.' });
+    }
+    const total = items.reduce((sum, item) => sum + (item.porcentaje ?? 0), 0);
+    if (total > 100.001) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'La suma de porcentajes no puede superar 100%.' });
+  }),
 });
 
 const createSchema = schema.extend({
@@ -102,6 +115,11 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
   const offsetIndex = params.length;
   const result = await pool.query(
     `SELECT a.*,e.nombre especie,g.nombre grupo,u.nombre ubicacion,im.secure_url foto_perfil,
+      (SELECT TRIM(CONCAT(up.nombres,' ',up.apellidos))
+       FROM animal_propietario ap
+       JOIN usuario up ON up.id_usuario=ap.id_usuario
+       WHERE ap.id_animal=a.id_animal AND ap.fecha_hasta IS NULL AND ap.deleted_at IS NULL
+       ORDER BY ap.es_principal DESC,up.nombres,up.apellidos LIMIT 1) propietario_principal,
       (SELECT jsonb_build_object('peso_kg',p.peso_kg,'fecha',p.fecha_pesaje)
        FROM pesaje p
        WHERE p.id_animal=a.id_animal AND p.deleted_at IS NULL
@@ -120,14 +138,33 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
   return ok(res, result.rows, { page: p.page, limit: p.limit, total: result.rows[0]?.total ?? 0 });
 }));
 
+animalsRouter.get('/opciones/propietarios', requirePermission('ANIMAL_CONSULTAR', 'ANIMAL_CREAR', 'ANIMAL_MODIFICAR'), asyncHandler(async (_req, res) => {
+  const rows = (await pool.query(
+    `SELECT id_usuario,TRIM(CONCAT(nombres,' ',apellidos)) nombre,correo
+     FROM usuario
+     WHERE deleted_at IS NULL AND activo=TRUE AND correo_verificado=TRUE
+     ORDER BY nombres,apellidos`,
+  )).rows;
+  return ok(res, rows);
+}));
+
 animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
   const result = await pool.query(
     `SELECT a.*,e.nombre especie,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
+      (SELECT ip.secure_url FROM animal_imagen ip
+       WHERE ip.id_animal=a.id_animal AND ip.es_perfil=TRUE AND ip.deleted_at IS NULL
+       ORDER BY ip.created_at DESC LIMIT 1) foto_perfil,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
-        'id_imagen',i.id_imagen,'secure_url',i.secure_url,'es_perfil',i.es_perfil,
-        'descripcion',i.descripcion,'orden',i.orden
-      ) ORDER BY i.es_perfil DESC,i.orden,i.created_at)
+        'id_imagen',i.id_imagen,'secure_url',i.secure_url,'url',i.url,'public_id',i.public_id,
+        'es_perfil',i.es_perfil,'descripcion',i.descripcion,'orden',i.orden,'created_at',i.created_at
+      ) ORDER BY i.es_perfil DESC,i.created_at DESC,i.orden DESC)
       FROM animal_imagen i WHERE i.id_animal=a.id_animal AND i.deleted_at IS NULL),'[]') imagenes,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_usuario',ap.id_usuario,'nombre',TRIM(CONCAT(up.nombres,' ',up.apellidos)),
+        'correo',up.correo,'porcentaje',ap.porcentaje_propiedad,'es_principal',ap.es_principal
+      ) ORDER BY ap.es_principal DESC,up.nombres,up.apellidos)
+      FROM animal_propietario ap JOIN usuario up ON up.id_usuario=ap.id_usuario
+      WHERE ap.id_animal=a.id_animal AND ap.fecha_hasta IS NULL AND ap.deleted_at IS NULL),'[]') propietarios,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_color',c.id_color,'nombre',c.nombre,'es_principal',ac.es_principal
       )) FROM animal_color ac JOIN color_animal c ON c.id_color=ac.id_color
@@ -155,6 +192,7 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
 async function saveRelations(client: PoolClient, id: string, input: {
   colores?: Array<z.infer<typeof relation>>;
   razas?: Array<z.infer<typeof relation>>;
+  propietarios?: Array<z.infer<typeof ownerRelation>>;
   registrado_por: string;
 }) {
   if (input.colores) {
@@ -179,6 +217,22 @@ async function saveRelations(client: PoolClient, id: string, input: {
       }));
     }
   }
+  if (input.propietarios) {
+    await client.query(
+      'UPDATE animal_propietario SET fecha_hasta=CURRENT_DATE WHERE id_animal=$1 AND fecha_hasta IS NULL AND deleted_at IS NULL',
+      [id],
+    );
+    for (const item of input.propietarios) {
+      await client.query(buildInsert('animal_propietario', {
+        id_animal: id,
+        id_usuario: item.id,
+        porcentaje_propiedad: item.porcentaje ?? null,
+        es_principal: item.principal ?? false,
+        fecha_desde: new Date().toISOString().slice(0, 10),
+        registrado_por: input.registrado_por,
+      }));
+    }
+  }
 }
 
 animalsRouter.post(
@@ -197,6 +251,7 @@ animalsRouter.post(
         const {
           colores,
           razas,
+          propietarios,
           peso_inicial_kg,
           fecha_pesaje_inicial,
           metodo_pesaje_inicial,
@@ -213,10 +268,11 @@ animalsRouter.post(
         await saveRelations(client, idAnimal, {
           colores,
           razas,
+          propietarios,
           registrado_por: req.user!.id,
         });
 
-        let initialWeight = null;
+        let initialWeight: { peso_kg: unknown; fecha_pesaje: unknown } | null = null;
         if (peso_inicial_kg !== null && peso_inicial_kg !== undefined) {
           initialWeight = (await client.query(buildInsert('pesaje', {
             id_animal: idAnimal,
@@ -228,7 +284,7 @@ animalsRouter.post(
           }))).rows[0];
         }
 
-        let profileImage = null;
+        let profileImage: { secure_url?: string } | null = null;
         if (cloud) {
           profileImage = (await client.query(buildInsert('animal_imagen', {
             id_animal: idAnimal,
@@ -268,7 +324,7 @@ animalsRouter.patch('/:id', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(
   const input = schema.partial().parse(req.body);
   const id = routeParam(req.params.id, 'id');
   const result = await transaction(async (client) => {
-    const { colores, razas, ...animal } = input;
+    const { colores, razas, propietarios, ...animal } = input;
     let row;
     if (Object.keys(animal).length) {
       row = (await client.query(buildUpdate('animal', 'id_animal', id, animal))).rows[0];
@@ -278,7 +334,7 @@ animalsRouter.patch('/:id', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(
       row = query.rows[0];
       if (!row) throw new NotFoundError();
     }
-    await saveRelations(client, id, { colores, razas, registrado_por: req.user!.id });
+    await saveRelations(client, id, { colores, razas, propietarios, registrado_por: req.user!.id });
     return row;
   }, req.user!.id);
   return ok(res, result);

@@ -13,7 +13,6 @@ import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import { AnimalsPage } from '../pages/animals/AnimalsPage';
 import { AnimalDetailPage } from '../pages/animals/AnimalDetailPage';
 import { GroupsPage } from '../pages/groups/GroupsPage';
-import { LocationsPage } from '../pages/locations/LocationsPage';
 import { PasturesPage } from '../pages/locations/PasturesPage';
 import { CorralsPage } from '../pages/locations/CorralsPage';
 import { ProfilePage } from '../pages/profile/ProfilePage';
@@ -30,6 +29,7 @@ import { BirthsPage } from '../pages/reproduction/BirthsPage';
 import { ProductionPage } from '../pages/production/ProductionPage';
 import { CatalogsPage } from '../pages/catalogs/CatalogsPage';
 import { AnimalRecordsPage } from '../pages/records/AnimalRecordsPage';
+import { SalesPage } from '../pages/sales/SalesPage';
 
 function ProtectedRoot() {
   const { user, ready } = useAuth();
@@ -66,7 +66,6 @@ export function AppRouter() {
           <Route path="animales" element={<PermissionRoute permissions={['ANIMAL_CONSULTAR']}><AnimalsPage /></PermissionRoute>} />
           <Route path="animales/:id" element={<PermissionRoute permissions={['ANIMAL_CONSULTAR']}><AnimalDetailPage /></PermissionRoute>} />
           <Route path="grupos" element={<PermissionRoute permissions={['GRUPO_CONSULTAR']}><GroupsPage /></PermissionRoute>} />
-          <Route path="ubicaciones" element={<PermissionRoute permissions={['UBICACION_CONSULTAR']}><LocationsPage /></PermissionRoute>} />
           <Route path="potreros" element={<PermissionRoute permissions={['POTRERO_CONSULTAR']}><PasturesPage /></PermissionRoute>} />
           <Route path="corrales" element={<PermissionRoute permissions={['CORRAL_CONSULTAR']}><CorralsPage /></PermissionRoute>} />
           <Route path="perfil" element={<ProfilePage />} />
@@ -77,6 +76,7 @@ export function AppRouter() {
           <Route path="produccion" element={<PermissionRoute permissions={['PRODUCCION_CONSULTAR', 'LACTANCIA_CONSULTAR']}><ProductionPage /></PermissionRoute>} />
           <Route path="pesajes" element={<PermissionRoute permissions={['PESAJE_CONSULTAR']}><AnimalRecordsPage mode="pesajes" /></PermissionRoute>} />
           <Route path="muertes" element={<PermissionRoute permissions={['MUERTE_CONSULTAR']}><AnimalRecordsPage mode="muertes" /></PermissionRoute>} />
+          <Route path="ventas" element={<PermissionRoute permissions={['VENTA_CONSULTAR']}><SalesPage /></PermissionRoute>} />
           <Route path="catalogos" element={<PermissionRoute permissions={['CATALOGO_CONSULTAR']}><CatalogsPage /></PermissionRoute>} />
           <Route path="usuarios" element={<PermissionRoute permissions={['USUARIO_CONSULTAR']}><UsersPage /></PermissionRoute>} />
           <Route path="roles" element={<PermissionRoute permissions={['ROL_CONSULTAR']}><RolesPage /></PermissionRoute>} />
