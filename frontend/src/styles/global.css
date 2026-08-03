@@ -786,3 +786,69 @@ body, .shell-main, .page-content, .topbar, .card, .input, .modal { transition: b
   .lightbox-arrow-right { right: 8px; left: auto; }
 }
 .birth-profile-preview, .birth-extra-photo-button { width: 100%; color: inherit; font: inherit; }
+
+/* ========================================================================== */
+/* Detalle compacto del animal                                                 */
+/* ========================================================================== */
+.animal-detail-page .page-header { margin-bottom: 14px; }
+.animal-detail-actions { display: flex; align-items: center; gap: 7px; }
+.animal-detail-actions .icon-button { width: 40px; height: 40px; border: 1px solid var(--border); background: var(--surface); }
+.detail-action-danger { color: var(--danger) !important; }
+.animal-detail-summary-card { padding: 16px; }
+.animal-detail-summary-layout { display: grid; grid-template-columns: 172px minmax(0, 1fr); gap: 18px; align-items: start; }
+.animal-profile-compact-wrap { position: relative; width: 172px; }
+.animal-profile-compact { width: 172px; height: 172px; border: 0; border-radius: 16px; overflow: hidden; background: var(--primary-soft); color: var(--primary); display: grid; place-items: center; position: relative; padding: 0; }
+.animal-profile-compact:disabled { cursor: default; }
+.animal-profile-compact img { width: 100%; height: 100%; object-fit: cover; }
+.compact-expand-indicator { position: absolute; left: 8px; bottom: 8px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.62); }
+.profile-camera-overlay { position: absolute; right: 8px; bottom: 8px; z-index: 3; width: 38px; height: 38px; color: #fff !important; background: rgba(0,0,0,.72) !important; border: 1px solid rgba(255,255,255,.45); box-shadow: 0 5px 14px rgba(0,0,0,.22); }
+.profile-camera-overlay:hover { background: var(--primary) !important; color: #fff !important; }
+.animal-summary-content { min-width: 0; }
+.animal-summary-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.animal-summary-heading h2 { margin: 0 0 3px; font-size: 1.3rem; }
+.animal-summary-heading p { margin: 0; color: var(--muted); line-height: 1.35; }
+.animal-compact-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; margin-top: 4px; }
+.animal-compact-info { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 6px; align-items: start; padding: 10px 10px 10px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.animal-compact-info:nth-child(odd):not(.animal-compact-info-wide) { padding-right: 16px; }
+.animal-compact-info svg { margin-top: 2px; color: var(--primary); }
+.animal-compact-info span { min-width: 0; display: grid; gap: 1px; }
+.animal-compact-info small { color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .045em; font-weight: 700; }
+.animal-compact-info strong { font-size: .86rem; line-height: 1.35; overflow-wrap: anywhere; }
+.animal-compact-info-wide { grid-column: 1 / -1; }
+.animal-compact-tags { display: flex; flex-wrap: wrap; gap: 8px 18px; padding-top: 11px; color: var(--muted); font-size: .82rem; }
+.animal-compact-tags strong { color: var(--text); }
+.animal-gallery-compact-section { margin-top: 20px; }
+.animal-gallery-compact-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.animal-gallery-compact-header h2 { margin: 0; font-size: 1.15rem; }
+.animal-gallery-compact-header p { margin: 2px 0 0; color: var(--muted); font-size: .82rem; }
+.animal-gallery-compact-header .icon-button { width: 40px; height: 40px; border: 1px solid var(--border); background: var(--surface); color: var(--primary); }
+.animal-carousel-compact-card { width: min(690px, 100%); padding: 10px; }
+.animal-carousel-compact-stage { min-height: 260px; max-height: 390px; border-radius: 14px; }
+.animal-carousel-compact-stage .carousel-image-button { min-height: 260px; max-height: 390px; }
+.animal-carousel-compact-stage .carousel-image-button img { max-height: 390px; }
+.animal-carousel-compact-stage .carousel-image-button > span { width: 34px; height: 34px; padding: 0; border-radius: 50%; display: grid; place-items: center; font-size: 0; }
+.animal-upload-dialog { display: grid; grid-template-columns: minmax(150px, 230px) minmax(260px, 1fr); gap: 18px; align-items: start; }
+.animal-upload-dialog > img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 14px; border: 1px solid var(--border); background: var(--surface-alt); }
+.image-lightbox-details .icon-button { color: #fff; background: rgba(255,255,255,.13); border: 1px solid rgba(255,255,255,.18); }
+.image-lightbox-details .icon-button:hover { color: #fff; background: rgba(255,255,255,.24); }
+:root[data-theme='dark'] .animal-detail-actions .icon-button,
+:root[data-theme='dark'] .animal-gallery-compact-header .icon-button { background: var(--surface); }
+
+@media (max-width: 760px) {
+  .animal-detail-summary-layout { grid-template-columns: 118px minmax(0, 1fr); gap: 12px; }
+  .animal-profile-compact-wrap, .animal-profile-compact { width: 118px; }
+  .animal-profile-compact { height: 118px; }
+  .animal-summary-heading { flex-direction: column; gap: 7px; }
+  .animal-compact-info-grid { grid-template-columns: 1fr; }
+  .animal-compact-info-wide { grid-column: auto; }
+  .animal-compact-info:nth-child(odd):not(.animal-compact-info-wide) { padding-right: 0; }
+  .animal-upload-dialog { grid-template-columns: 1fr; }
+  .animal-upload-dialog > img { width: min(240px, 100%); justify-self: center; }
+}
+
+@media (max-width: 480px) {
+  .animal-detail-summary-layout { grid-template-columns: 1fr; }
+  .animal-profile-compact-wrap { width: 132px; }
+  .animal-profile-compact { width: 132px; height: 132px; }
+  .animal-detail-actions .icon-button { width: 38px; height: 38px; }
+}

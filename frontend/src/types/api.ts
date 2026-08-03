@@ -87,7 +87,27 @@ export interface Animal {
   foto_perfil: string | null;
   propietario_principal?: string | null;
   propietarios?: AnimalOwner[];
-  ultimo_pesaje?: { peso_kg: string | number; fecha: string } | null;
+  ultimo_pesaje?: { id_pesaje?: string; peso_kg: string | number; fecha: string; metodo?: string | null } | null;
+  ultimo_tratamiento?: {
+    id_tratamiento: string;
+    fecha: string;
+    tipo: string;
+    medicamento: string;
+    via: string;
+    dosis: string | number;
+    unidad: string | null;
+    descripcion: string | null;
+    observaciones: string | null;
+  } | null;
+  ultimo_movimiento?: {
+    id_movimiento: string;
+    fecha: string;
+    ubicacion_origen: string | null;
+    ubicacion_destino: string | null;
+    grupo_origen: string | null;
+    grupo_destino: string | null;
+    motivo: string | null;
+  } | null;
   imagenes?: AnimalImage[];
   colores?: { id_color: string; nombre: string; es_principal: boolean }[];
   razas?: { id_raza: string; nombre: string; porcentaje: number | null }[];

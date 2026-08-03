@@ -57,6 +57,7 @@ const createSchema = schema.extend({
   fecha_pesaje_inicial: z.string().min(1).nullable().optional(),
   metodo_pesaje_inicial: z.string().trim().max(80).nullable().optional(),
   observaciones_pesaje_inicial: z.string().trim().max(300).nullable().optional(),
+  descripcion_foto_perfil: z.string().trim().max(300).nullable().optional(),
 });
 
 const createUpload = multer({
@@ -175,7 +176,40 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       WHERE ar.id_animal=a.id_animal AND ar.deleted_at IS NULL),'[]') razas,
       (SELECT jsonb_build_object('id_pesaje',pe.id_pesaje,'peso_kg',pe.peso_kg,'fecha',pe.fecha_pesaje,'metodo',pe.metodo)
        FROM pesaje pe WHERE pe.id_animal=a.id_animal AND pe.deleted_at IS NULL
-       ORDER BY pe.fecha_pesaje DESC LIMIT 1) ultimo_pesaje
+       ORDER BY pe.fecha_pesaje DESC LIMIT 1) ultimo_pesaje,
+      (SELECT jsonb_build_object(
+        'id_tratamiento',ta.id_tratamiento,'fecha',ta.fecha_aplicacion,
+        'tipo',tt.nombre,'medicamento',me.nombre_comercial,'via',va.nombre,
+        'dosis',ta.dosis,'unidad',COALESCE(um.simbolo,um.nombre),
+        'descripcion',ta.descripcion,'observaciones',ta.observaciones
+       )
+       FROM tratamiento_animal ta
+       JOIN tipo_tratamiento tt ON tt.id_tipo_tratamiento=ta.id_tipo_tratamiento
+       JOIN medicamento me ON me.id_medicamento=ta.id_medicamento
+       JOIN via_administracion va ON va.id_via_administracion=ta.id_via_administracion
+       JOIN unidad_medida um ON um.id_unidad=ta.id_unidad_dosis
+       WHERE ta.id_animal=a.id_animal AND ta.deleted_at IS NULL
+       ORDER BY ta.fecha_aplicacion DESC LIMIT 1) ultimo_tratamiento,
+      (SELECT jsonb_build_object(
+        'id_movimiento',mv.id_movimiento,
+        'fecha',COALESCE(md.aplicado_en,mv.aplicado_en,mv.fecha_movimiento),
+        'ubicacion_origen',uo.nombre,'ubicacion_destino',ud.nombre,
+        'grupo_origen',go.nombre,'grupo_destino',gd.nombre,
+        'motivo',mv.motivo
+       )
+       FROM movimiento_animal_detalle md
+       JOIN movimiento_animal mv ON mv.id_movimiento=md.id_movimiento
+       LEFT JOIN ubicacion uo ON uo.id_ubicacion=COALESCE(md.id_ubicacion_anterior,mv.id_ubicacion_origen)
+       LEFT JOIN ubicacion ud ON ud.id_ubicacion=COALESCE(md.id_ubicacion_destino,mv.id_ubicacion_destino)
+       LEFT JOIN grupo go ON go.id_grupo=COALESCE(md.id_grupo_anterior,mv.id_grupo_origen)
+       LEFT JOIN grupo gd ON gd.id_grupo=COALESCE(md.id_grupo_destino,mv.id_grupo_destino)
+       WHERE md.id_animal=a.id_animal
+         AND md.seleccionado=TRUE
+         AND md.estado='APLICADO'
+         AND md.deleted_at IS NULL
+         AND mv.estado='COMPLETADO'
+         AND mv.deleted_at IS NULL
+       ORDER BY COALESCE(md.aplicado_en,mv.aplicado_en,mv.fecha_movimiento) DESC LIMIT 1) ultimo_movimiento
      FROM animal a
      JOIN especie e ON e.id_especie=a.id_especie
      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
@@ -256,6 +290,7 @@ animalsRouter.post(
           fecha_pesaje_inicial,
           metodo_pesaje_inicial,
           observaciones_pesaje_inicial,
+          descripcion_foto_perfil,
           ...animal
         } = input;
 
@@ -296,7 +331,7 @@ animalsRouter.post(
             alto: cloud.height,
             bytes: cloud.bytes,
             es_perfil: true,
-            descripcion: 'Foto de perfil registrada al crear el animal.',
+            descripcion: descripcion_foto_perfil || 'Foto de perfil registrada al crear el animal.',
             registrado_por: req.user!.id,
           }))).rows[0];
         }

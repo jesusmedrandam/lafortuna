@@ -35,6 +35,7 @@ interface FormState {
   fecha_pesaje_inicial: string;
   metodo_pesaje_inicial: string;
   observaciones_pesaje_inicial: string;
+  descripcion_foto_perfil: string;
 }
 
 function localToday() {
@@ -64,6 +65,7 @@ function emptyForm(): FormState {
     fecha_pesaje_inicial: localToday(),
     metodo_pesaje_inicial: '',
     observaciones_pesaje_inicial: '',
+    descripcion_foto_perfil: '',
   };
 }
 
@@ -131,6 +133,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
       fecha_pesaje_inicial: localToday(),
       metodo_pesaje_inicial: '',
       observaciones_pesaje_inicial: '',
+      descripcion_foto_perfil: '',
     });
   }, [animal]);
 
@@ -198,6 +201,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
         fecha_pesaje_inicial: weight ? form.fecha_pesaje_inicial || localToday() : null,
         metodo_pesaje_inicial: weight ? nullIfEmpty(form.metodo_pesaje_inicial) : null,
         observaciones_pesaje_inicial: weight ? nullIfEmpty(form.observaciones_pesaje_inicial) : null,
+        descripcion_foto_perfil: profileFile ? nullIfEmpty(form.descripcion_foto_perfil) : null,
       };
 
       const multipart = new FormData();
@@ -245,6 +249,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
     if (profilePreview?.startsWith('blob:')) URL.revokeObjectURL(profilePreview);
     setProfileFile(null);
     setProfilePreview(null);
+    setForm((current) => ({ ...current, descripcion_foto_perfil: '' }));
   }
 
   const toggleColor = (id: string) => setForm((current) => ({
@@ -313,11 +318,20 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
                   )}
                   <input type="file" accept="image/*" onChange={chooseProfile} />
                 </label>
-                {profileFile ? (
+                {profileFile ? <>
+                  <Field label="Descripción de la foto" hint="Se mostrará al ampliar la imagen.">
+                    <Textarea
+                      rows={3}
+                      maxLength={300}
+                      value={form.descripcion_foto_perfil}
+                      onChange={(event) => setForm((current) => ({ ...current, descripcion_foto_perfil: event.target.value }))}
+                      placeholder="Ej.: Foto tomada al ingresar a la finca."
+                    />
+                  </Field>
                   <Button type="button" variant="ghost" onClick={removeProfile}>
                     <Trash2 size={16} /> Quitar foto
                   </Button>
-                ) : null}
+                </> : null}
               </div>
 
               <div className="animal-weight-panel">
