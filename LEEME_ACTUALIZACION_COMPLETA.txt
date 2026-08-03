@@ -1,0 +1,62 @@
+M&M GANADERÍA — ACTUALIZACIÓN COMPLETA DE MÓDULOS
+
+Este paquete contiene el repositorio completo:
+- Backend Node.js + TypeScript en la raíz.
+- Frontend React + Vite dentro de frontend/.
+
+NO ES UN PARCHE PARCIAL. Puede usarse para restaurar el repositorio completo sin mezclar carpetas incompletas.
+
+MÓDULOS DEL FRONTEND INCLUIDOS
+1. Autenticación, activación y recuperación de contraseña.
+2. Perfil: datos personales, cambio de correo y foto mediante Cloudinary.
+3. Usuarios, roles y permisos. Las cuentas nuevas quedan sin rol por defecto.
+4. Animales: CRUD, foto de perfil, galería y peso inicial.
+5. Grupos, ubicaciones, potreros y corrales.
+6. Movimientos colectivos: todos, grupo o selección manual; permite desmarcar excepciones y aplicar/cancelar borradores.
+7. Sanidad: jornadas colectivas y tratamientos individuales.
+8. Limpieza de potreros: productos, tanques/bombadas y operadores.
+9. Reproducción: partos con varias crías y abortos.
+10. Producción: lactancias y registros de leche.
+11. Pesajes.
+12. Muertes y bajas.
+13. Catálogos.
+14. Auditoría.
+
+CÓMO SUBIRLO AL MISMO REPOSITORIO
+La estructura debe quedar:
+
+Repositorio/
+├── src/                 Backend
+├── scripts/
+├── docs/
+├── package.json
+├── tsconfig.json
+└── frontend/
+    ├── src/             Frontend
+    ├── public/
+    ├── package.json
+    ├── index.html
+    └── vite.config.ts
+
+Recomendación segura:
+1. Conserva una copia del repositorio actual.
+2. Reemplaza el contenido del repositorio por el contenido de esta carpeta completa.
+3. NO subas archivos .env, node_modules ni dist.
+4. Confirma que src/server.ts y frontend/src/main.tsx existan.
+5. Sube los cambios a GitHub.
+
+RENDER — BACKEND LAFORTUNA
+Root Directory: vacío
+Build Command: npm install && npm run build
+Start Command: npm start
+
+RENDER — FRONTEND MEDRANDA
+Root Directory: frontend
+Build Command: npm install && npm run build
+Publish Directory: dist
+Variable: VITE_API_URL=https://lafortuna.onrender.com/api
+Rewrite: /* -> /index.html
+
+Después del cambio usa Clear build cache & deploy en los dos servicios.
+
+No se incluyen credenciales. Las variables existentes en Render no se borran al reemplazar archivos de GitHub.

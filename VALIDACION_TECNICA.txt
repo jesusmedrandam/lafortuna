@@ -1,0 +1,11 @@
+VALIDACIÓN REALIZADA
+
+- Se revisaron 79 archivos TypeScript/TSX mediante el compilador TypeScript 5.8.3 en modo de transpilación.
+- Resultado: 0 errores de sintaxis.
+- Se verificaron todos los imports relativos del backend y frontend.
+- Resultado: 0 rutas de archivo faltantes.
+- Se comprobó que AppRouter no utiliza pantallas de “Próxima etapa”.
+- Se verificó que el registro público del backend no asigna un rol automáticamente.
+- Se integraron las correcciones previas de autenticación, Cloudinary, foto/peso inicial y perfiles.
+
+La instalación final de dependencias y el build con las versiones de package.json se ejecutarán en Render con npm install && npm run build.
