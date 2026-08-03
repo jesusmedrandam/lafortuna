@@ -1,0 +1,390 @@
+export interface ApiSuccess<T> {
+  ok: true;
+  data: T;
+  meta?: Record<string, unknown>;
+}
+
+export interface ApiFailure {
+  ok: false;
+  error: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+  requestId?: string;
+}
+
+export interface AuthUser {
+  id: string;
+  correo: string;
+  nombres: string;
+  apellidos: string;
+  fotoPerfilUrl: string | null;
+  roles: string[];
+  permissions: string[];
+  sessionVersion: number;
+}
+
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresInMinutes: number;
+  user: AuthUser;
+}
+
+export interface Profile {
+  id_usuario: string;
+  nombres: string;
+  apellidos: string;
+  telefono: string | null;
+  correo: string;
+  fecha_nacimiento: string | null;
+  foto_perfil_url: string | null;
+  ultimo_acceso: string | null;
+  created_at: string;
+  auth: AuthUser | null;
+}
+
+export interface DashboardSummary {
+  animales_total: number;
+  animales_activos: number;
+  hembras: number;
+  machos: number;
+  grupos: number;
+  ubicaciones: number;
+  litros_hoy: string | number;
+  tratamientos_hoy: number;
+}
+
+export interface CatalogItem {
+  [key: string]: unknown;
+  codigo?: string | null;
+  nombre?: string;
+  descripcion?: string | null;
+  activo?: boolean;
+}
+
+export interface Animal {
+  id_animal: string;
+  codigo_arete: string | null;
+  nombre: string;
+  descripcion: string | null;
+  id_especie: string;
+  especie: string;
+  sexo: 'MACHO' | 'HEMBRA';
+  fecha_nacimiento: string | null;
+  id_madre: string | null;
+  madre?: string | null;
+  id_padre: string | null;
+  padre?: string | null;
+  id_origen: string;
+  id_grupo_actual: string | null;
+  grupo: string | null;
+  id_ubicacion_actual: string | null;
+  ubicacion: string | null;
+  fecha_ingreso: string | null;
+  estado: 'ACTIVO' | 'MUERTO' | 'VENDIDO' | 'TRASLADADO' | 'DESAPARECIDO' | 'INACTIVO';
+  foto_perfil: string | null;
+  ultimo_pesaje?: { peso_kg: string | number; fecha: string } | null;
+  imagenes?: AnimalImage[];
+  colores?: { id_color: string; nombre: string; es_principal: boolean }[];
+  razas?: { id_raza: string; nombre: string; porcentaje: number | null }[];
+  total?: number;
+}
+
+export interface AnimalImage {
+  id_imagen: string;
+  id_animal?: string;
+  secure_url: string;
+  url?: string;
+  public_id?: string;
+  es_perfil: boolean;
+  descripcion: string | null;
+  orden: number | null;
+  created_at?: string;
+}
+
+export interface Group {
+  id_grupo: string;
+  codigo: string | null;
+  nombre: string;
+  id_tipo_grupo: string;
+  tipo_grupo: string;
+  id_especie: string | null;
+  especie: string | null;
+  descripcion: string | null;
+  capacidad: number | null;
+  activo: boolean;
+  total_animales: number;
+  total?: number;
+}
+
+export interface Location {
+  id_ubicacion: string;
+  codigo: string | null;
+  nombre: string;
+  tipo: 'POTRERO' | 'CORRAL' | 'OTRO';
+  descripcion: string | null;
+  latitud: number | null;
+  longitud: number | null;
+  activo: boolean;
+  total_animales: number;
+}
+
+export interface PastureGrass {
+  id_potrero_pasto?: string;
+  id_tipo_pasto: string;
+  pasto?: string;
+  porcentaje_estimado: number | null;
+  area_estimada: number | null;
+  id_unidad_area: string | null;
+  fecha_siembra: string | null;
+  observaciones: string | null;
+}
+
+export interface Pasture {
+  id_potrero: string;
+  id_ubicacion: string;
+  nombre: string;
+  codigo: string | null;
+  descripcion: string | null;
+  activo: boolean;
+  area: number | null;
+  id_unidad_area: string | null;
+  id_tipo_uso_potrero: string;
+  tipo_uso: string;
+  capacidad_estimada: number | null;
+  disponibilidad_agua: boolean | null;
+  fecha_ultimo_descanso: string | null;
+  observaciones: string | null;
+  pastos: PastureGrass[];
+}
+
+export interface Corral {
+  id_corral: string;
+  id_ubicacion: string;
+  nombre: string;
+  codigo: string | null;
+  descripcion: string | null;
+  activo: boolean;
+  id_tipo_corral: string;
+  tipo_corral: string;
+  area: number | null;
+  id_unidad_area: string | null;
+  capacidad: number | null;
+  material_piso: string | null;
+  cubierto: boolean | null;
+  disponibilidad_agua: boolean | null;
+  observaciones: string | null;
+}
+
+export interface DataVersion {
+  modulo: string;
+  version: number;
+  updated_at: string;
+}
+
+export interface UserRoleSummary {
+  id_rol: string;
+  codigo: string;
+  nombre: string;
+}
+
+export interface AdminUser {
+  id_usuario: string;
+  nombres: string;
+  apellidos: string;
+  telefono: string | null;
+  correo: string;
+  fecha_nacimiento: string | null;
+  foto_perfil_url: string | null;
+  activo: boolean;
+  correo_verificado: boolean;
+  ultimo_acceso: string | null;
+  created_at: string;
+  roles: UserRoleSummary[];
+}
+
+export interface PermissionItem {
+  id_permiso: string;
+  codigo: string;
+  nombre: string;
+  descripcion: string | null;
+  modulo: string;
+  activo: boolean;
+}
+
+export interface RoleItem {
+  id_rol: string;
+  codigo: string;
+  nombre: string;
+  descripcion: string | null;
+  activo: boolean;
+  protegido: boolean;
+  permisos: PermissionItem[];
+}
+
+export type SelectionMode = 'TODOS' | 'GRUPO' | 'SELECCION_MANUAL';
+
+export interface SelectableAnimal {
+  id_animal: string;
+  codigo_arete: string | null;
+  nombre: string;
+  sexo: 'MACHO' | 'HEMBRA';
+  id_grupo_actual: string | null;
+  grupo: string | null;
+  id_ubicacion_actual: string | null;
+  ubicacion: string | null;
+  seleccionado: boolean;
+  observaciones?: string | null;
+  dosis_aplicada?: number | null;
+  id_unidad_dosis?: string | null;
+}
+
+export interface MovementDetail {
+  id_detalle: string;
+  id_animal: string;
+  animal: string;
+  arete: string | null;
+  seleccionado: boolean;
+  estado: string;
+  mensaje_error: string | null;
+}
+
+export interface Movement {
+  id_movimiento: string;
+  modo_seleccion: SelectionMode;
+  id_grupo_filtro: string | null;
+  id_ubicacion_origen: string | null;
+  id_ubicacion_destino: string | null;
+  id_grupo_origen: string | null;
+  id_grupo_destino: string | null;
+  ubicacion_origen: string | null;
+  ubicacion_destino: string | null;
+  grupo_origen: string | null;
+  grupo_destino: string | null;
+  fecha_movimiento: string;
+  motivo: string | null;
+  observaciones: string | null;
+  estado: string;
+  total_candidatos: number;
+  total_seleccionados: number;
+  aplicado_en: string | null;
+  detalles: MovementDetail[];
+}
+
+export interface SanitaryDetail {
+  id_detalle: string;
+  id_animal: string;
+  animal: string;
+  seleccionado: boolean;
+  dosis_aplicada: number | string | null;
+  estado: string;
+}
+
+export interface SanitaryCampaign {
+  id_jornada: string;
+  id_tipo_tratamiento: string;
+  id_medicamento: string;
+  id_via_administracion: string;
+  dosis_general: number | string;
+  id_unidad_dosis: string;
+  tipo_tratamiento: string;
+  medicamento: string;
+  via: string;
+  unidad: string;
+  modo_seleccion: SelectionMode;
+  id_grupo_filtro: string | null;
+  fecha_aplicacion: string;
+  responsable: string | null;
+  observaciones: string | null;
+  estado: string;
+  total_candidatos: number;
+  total_seleccionados: number;
+  aplicado_en: string | null;
+  detalles: SanitaryDetail[];
+}
+
+export interface CleaningProduct {
+  producto: string;
+  cantidad_total: number | string;
+  unidad: string;
+  cantidad_por_tanque: number | string | null;
+}
+
+export interface CleaningOperator {
+  id_operador: string;
+  nombre: string;
+  funcion: string | null;
+  horas_trabajadas: number | string | null;
+}
+
+export interface PastureCleaning {
+  id_limpieza: string;
+  id_potrero: string;
+  id_tipo_limpieza: string;
+  potrero: string;
+  tipo_limpieza: string;
+  fecha_inicio: string;
+  fecha_finalizacion: string | null;
+  cantidad_tanques: number | string | null;
+  capacidad_tanque_litros: number | string | null;
+  area_intervenida: number | string | null;
+  id_unidad_area: string | null;
+  estado: string;
+  observaciones: string | null;
+  productos: CleaningProduct[];
+  operadores: CleaningOperator[];
+}
+
+export interface Operator {
+  id_operador: string;
+  id_usuario: string | null;
+  nombres: string;
+  apellidos: string | null;
+  telefono: string | null;
+  especialidad: string | null;
+  activo: boolean;
+}
+
+export interface BirthChild {
+  id_parto_cria: string;
+  id_cria: string;
+  cria: string;
+  sexo: 'MACHO' | 'HEMBRA';
+  estado_nacimiento: string;
+  peso_nacimiento_kg: number | string | null;
+  orden_nacimiento: number;
+}
+
+export interface Birth {
+  id_parto: string;
+  id_madre: string;
+  id_padre: string | null;
+  madre: string;
+  padre: string | null;
+  fecha_parto: string;
+  tipo_parto: string;
+  observaciones: string | null;
+  crias: BirthChild[];
+}
+
+export interface GenericRecord {
+  [key: string]: unknown;
+  animal?: string | null;
+  codigo_arete?: string | null;
+}
+
+export interface AuditEntry {
+  id_auditoria: number;
+  id_usuario: string | null;
+  usuario: string | null;
+  tabla_afectada: string;
+  id_registro: string | null;
+  accion: string;
+  datos_anteriores: Record<string, unknown> | null;
+  datos_nuevos: Record<string, unknown> | null;
+  ip: string | null;
+  user_agent: string | null;
+  created_at: string;
+}

@@ -1,0 +1,6 @@
+import bcrypt from 'bcryptjs';
+import { env } from '../src/config/env.js';
+import { transaction } from '../src/database/transaction.js';
+import { pool } from '../src/database/pool.js';
+async function main(){if(!env.BOOTSTRAP_ADMIN_EMAIL||!env.BOOTSTRAP_ADMIN_PASSWORD)throw new Error('Configura BOOTSTRAP_ADMIN_EMAIL y BOOTSTRAP_ADMIN_PASSWORD.');const email=env.BOOTSTRAP_ADMIN_EMAIL.toLowerCase();await transaction(async c=>{const hash=await bcrypt.hash(env.BOOTSTRAP_ADMIN_PASSWORD!,12);const user=(await c.query(`INSERT INTO usuario(nombres,apellidos,correo,password_hash,activo,correo_verificado) VALUES($1,$2,$3,$4,TRUE,TRUE) ON CONFLICT DO NOTHING RETURNING id_usuario`,[env.BOOTSTRAP_ADMIN_NAMES,env.BOOTSTRAP_ADMIN_LASTNAMES,email,hash])).rows[0]??(await c.query('SELECT id_usuario FROM usuario WHERE LOWER(correo)=$1 AND deleted_at IS NULL',[email])).rows[0];const role=(await c.query("SELECT id_rol FROM rol WHERE codigo='ADMINISTRADOR' AND deleted_at IS NULL")).rows[0];if(!role)throw new Error('No existe el rol ADMINISTRADOR. Ejecuta el script de catálogos.');await c.query('INSERT INTO usuario_rol(id_usuario,id_rol) VALUES($1,$2) ON CONFLICT DO NOTHING',[user.id_usuario,role.id_rol]);console.log(`Administrador listo: ${email}`);});await pool.end();}
+main().catch(async error=>{console.error(error);await pool.end();process.exit(1);});
