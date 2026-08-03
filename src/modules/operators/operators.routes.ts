@@ -1,0 +1,15 @@
+import { Router } from 'express';
+import { z } from 'zod';
+import { pool } from '../../database/pool.js';
+import { asyncHandler } from '../../core/async-handler.js';
+import { routeParam } from '../../core/route-param.js';
+import { created, noContent, ok } from '../../core/http.js';
+import { NotFoundError } from '../../core/errors.js';
+import { requirePermission } from '../../middleware/permission.js';
+import { buildInsert, buildUpdate } from '../shared/sql.js';
+const schema=z.object({id_usuario:z.string().uuid().nullable().optional(),nombres:z.string().trim().min(2).max(100),apellidos:z.string().max(100).nullable().optional(),telefono:z.string().max(25).nullable().optional(),especialidad:z.string().max(120).nullable().optional(),activo:z.boolean().optional()});
+export const operatorsRouter=Router();
+operatorsRouter.get('/',requirePermission('LIMPIEZA_CONSULTAR'),asyncHandler(async(_req,res)=>ok(res,(await pool.query('SELECT * FROM operador WHERE deleted_at IS NULL ORDER BY activo DESC,nombres,apellidos')).rows)));
+operatorsRouter.post('/',requirePermission('LIMPIEZA_ADMINISTRAR'),asyncHandler(async(req,res)=>created(res,(await pool.query(buildInsert('operador',schema.parse(req.body)))).rows[0])));
+operatorsRouter.patch('/:id',requirePermission('LIMPIEZA_ADMINISTRAR'),asyncHandler(async(req,res)=>{const row=(await pool.query(buildUpdate('operador','id_operador',routeParam(req.params.id, 'id'),schema.partial().parse(req.body)))).rows[0];if(!row)throw new NotFoundError();return ok(res,row);}));
+operatorsRouter.delete('/:id',requirePermission('LIMPIEZA_ADMINISTRAR'),asyncHandler(async(req,res)=>{const r=await pool.query('UPDATE operador SET deleted_at=NOW(),activo=FALSE WHERE id_operador=$1 AND deleted_at IS NULL',[routeParam(req.params.id, 'id')]);if(!r.rowCount)throw new NotFoundError();return noContent(res);}));

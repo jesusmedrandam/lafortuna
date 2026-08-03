@@ -1,0 +1,9 @@
+import { Router } from 'express';
+import { z } from 'zod';
+import { pool } from '../../database/pool.js';
+import { asyncHandler } from '../../core/async-handler.js';
+import { ok } from '../../core/http.js';
+import { requirePermission } from '../../middleware/permission.js';
+const schema=z.object({modo:z.enum(['TODOS','GRUPO','SELECCION_MANUAL']),id_grupo:z.string().uuid().nullable().optional(),ids:z.array(z.string().uuid()).default([]),filtros:z.object({id_especie:z.string().uuid().optional(),sexo:z.enum(['MACHO','HEMBRA']).optional(),id_ubicacion:z.string().uuid().optional(),estado:z.string().optional()}).default({})});
+export const selectionRouter=Router();
+selectionRouter.post('/animales/preview',requirePermission('ANIMAL_CONSULTAR'),asyncHandler(async(req,res)=>{const x=schema.parse(req.body);const params:any[]=[];const where=["a.deleted_at IS NULL","a.estado='ACTIVO'"];const add=(col:string,v:any)=>{params.push(v);where.push(`${col}=$${params.length}`)};if(x.modo==='GRUPO'){if(!x.id_grupo)throw new Error('id_grupo es obligatorio.');add('a.id_grupo_actual',x.id_grupo);}if(x.modo==='SELECCION_MANUAL'){params.push(x.ids);where.push(`a.id_animal=ANY($${params.length}::uuid[])`);}if(x.filtros.id_especie)add('a.id_especie',x.filtros.id_especie);if(x.filtros.sexo)add('a.sexo',x.filtros.sexo);if(x.filtros.id_ubicacion)add('a.id_ubicacion_actual',x.filtros.id_ubicacion);if(x.filtros.estado)add('a.estado',x.filtros.estado);const rows=(await pool.query(`SELECT a.id_animal,a.codigo_arete,a.nombre,a.sexo,a.id_grupo_actual,g.nombre grupo,a.id_ubicacion_actual,u.nombre ubicacion,TRUE seleccionado FROM animal a LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual WHERE ${where.join(' AND ')} ORDER BY a.nombre`,params)).rows;return ok(res,rows,{total:rows.length});}));

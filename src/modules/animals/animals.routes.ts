@@ -1,0 +1,294 @@
+import { randomUUID } from 'node:crypto';
+import { Router } from 'express';
+import type { PoolClient } from 'pg';
+import multer from 'multer';
+import { z } from 'zod';
+import { env } from '../../config/env.js';
+import { pool } from '../../database/pool.js';
+import { transaction } from '../../database/transaction.js';
+import { asyncHandler } from '../../core/async-handler.js';
+import { routeParam } from '../../core/route-param.js';
+import { created, noContent, ok } from '../../core/http.js';
+import { NotFoundError, ValidationError } from '../../core/errors.js';
+import { paginationSchema, offset } from '../../core/pagination.js';
+import { requirePermission } from '../../middleware/permission.js';
+import { deleteCloudinaryImage, uploadAnimalImage } from '../../services/cloudinary.service.js';
+import { buildInsert, buildUpdate } from '../shared/sql.js';
+
+const relation = z.object({
+  id: z.string().uuid(),
+  porcentaje: z.number().min(0).max(100).nullable().optional(),
+  principal: z.boolean().optional(),
+});
+
+const schema = z.object({
+  codigo_arete: z.string().max(60).nullable().optional(),
+  nombre: z.string().trim().min(1).max(120),
+  descripcion: z.string().max(300).nullable().optional(),
+  id_especie: z.string().uuid(),
+  sexo: z.enum(['MACHO', 'HEMBRA']),
+  fecha_nacimiento: z.string().date().nullable().optional(),
+  id_madre: z.string().uuid().nullable().optional(),
+  id_padre: z.string().uuid().nullable().optional(),
+  id_origen: z.string().uuid(),
+  id_grupo_actual: z.string().uuid().nullable().optional(),
+  id_ubicacion_actual: z.string().uuid().nullable().optional(),
+  fecha_ingreso: z.string().date().nullable().optional(),
+  estado: z.enum(['ACTIVO', 'MUERTO', 'VENDIDO', 'TRASLADADO', 'DESAPARECIDO', 'INACTIVO']).optional(),
+  colores: z.array(relation).default([]),
+  razas: z.array(relation).default([]),
+});
+
+const createSchema = schema.extend({
+  peso_inicial_kg: z.number().positive().max(5000).nullable().optional(),
+  fecha_pesaje_inicial: z.string().min(1).nullable().optional(),
+  metodo_pesaje_inicial: z.string().trim().max(80).nullable().optional(),
+  observaciones_pesaje_inicial: z.string().trim().max(300).nullable().optional(),
+});
+
+const createUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: env.MAX_IMAGE_MB * 1024 * 1024 },
+  fileFilter: (_req, file, callback) => {
+    if (!file.mimetype.startsWith('image/')) {
+      callback(new ValidationError('La foto de perfil debe ser una imagen.'));
+      return;
+    }
+    callback(null, true);
+  },
+});
+
+function createPayload(body: unknown) {
+  if (typeof body === 'object' && body !== null && 'data' in body) {
+    const raw = (body as { data?: unknown }).data;
+    if (typeof raw !== 'string') throw new ValidationError('Los datos del animal no son válidos.');
+    try {
+      return createSchema.parse(JSON.parse(raw));
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new ValidationError('Los datos del animal no contienen un JSON válido.');
+      throw error;
+    }
+  }
+  return createSchema.parse(body);
+}
+
+export const animalsRouter = Router();
+
+animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
+  const p = paginationSchema.extend({
+    sexo: z.enum(['MACHO', 'HEMBRA']).optional(),
+    estado: z.string().optional(),
+    id_grupo: z.string().uuid().optional(),
+    id_ubicacion: z.string().uuid().optional(),
+    id_especie: z.string().uuid().optional(),
+  }).parse(req.query);
+  const params: unknown[] = [];
+  const where = ['a.deleted_at IS NULL'];
+  const add = (condition: string, value: unknown) => {
+    params.push(value);
+    where.push(condition.replace('?', `$${params.length}`));
+  };
+  if (p.q) {
+    params.push(`%${p.q}%`, `%${p.q}%`);
+    where.push(`(a.nombre ILIKE $${params.length - 1} OR a.codigo_arete ILIKE $${params.length})`);
+  }
+  if (p.sexo) add('a.sexo=?', p.sexo);
+  if (p.estado) add('a.estado=?', p.estado);
+  if (p.id_grupo) add('a.id_grupo_actual=?', p.id_grupo);
+  if (p.id_ubicacion) add('a.id_ubicacion_actual=?', p.id_ubicacion);
+  if (p.id_especie) add('a.id_especie=?', p.id_especie);
+  params.push(p.limit, offset(p.page, p.limit));
+  const limitIndex = params.length - 1;
+  const offsetIndex = params.length;
+  const result = await pool.query(
+    `SELECT a.*,e.nombre especie,g.nombre grupo,u.nombre ubicacion,im.secure_url foto_perfil,
+      (SELECT jsonb_build_object('peso_kg',p.peso_kg,'fecha',p.fecha_pesaje)
+       FROM pesaje p
+       WHERE p.id_animal=a.id_animal AND p.deleted_at IS NULL
+       ORDER BY p.fecha_pesaje DESC LIMIT 1) ultimo_pesaje,
+      COUNT(*) OVER()::int total
+     FROM animal a
+     JOIN especie e ON e.id_especie=a.id_especie
+     LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
+     LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
+     LEFT JOIN animal_imagen im ON im.id_animal=a.id_animal AND im.es_perfil AND im.deleted_at IS NULL
+     WHERE ${where.join(' AND ')}
+     ORDER BY a.nombre
+     LIMIT $${limitIndex} OFFSET $${offsetIndex}`,
+    params,
+  );
+  return ok(res, result.rows, { page: p.page, limit: p.limit, total: result.rows[0]?.total ?? 0 });
+}));
+
+animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
+  const result = await pool.query(
+    `SELECT a.*,e.nombre especie,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_imagen',i.id_imagen,'secure_url',i.secure_url,'es_perfil',i.es_perfil,
+        'descripcion',i.descripcion,'orden',i.orden
+      ) ORDER BY i.es_perfil DESC,i.orden,i.created_at)
+      FROM animal_imagen i WHERE i.id_animal=a.id_animal AND i.deleted_at IS NULL),'[]') imagenes,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_color',c.id_color,'nombre',c.nombre,'es_principal',ac.es_principal
+      )) FROM animal_color ac JOIN color_animal c ON c.id_color=ac.id_color
+      WHERE ac.id_animal=a.id_animal AND ac.deleted_at IS NULL),'[]') colores,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_raza',r.id_raza,'nombre',r.nombre,'porcentaje',ar.porcentaje
+      )) FROM animal_raza ar JOIN raza_animal r ON r.id_raza=ar.id_raza
+      WHERE ar.id_animal=a.id_animal AND ar.deleted_at IS NULL),'[]') razas,
+      (SELECT jsonb_build_object('id_pesaje',pe.id_pesaje,'peso_kg',pe.peso_kg,'fecha',pe.fecha_pesaje,'metodo',pe.metodo)
+       FROM pesaje pe WHERE pe.id_animal=a.id_animal AND pe.deleted_at IS NULL
+       ORDER BY pe.fecha_pesaje DESC LIMIT 1) ultimo_pesaje
+     FROM animal a
+     JOIN especie e ON e.id_especie=a.id_especie
+     LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
+     LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
+     LEFT JOIN animal m ON m.id_animal=a.id_madre
+     LEFT JOIN animal p ON p.id_animal=a.id_padre
+     WHERE a.id_animal=$1 AND a.deleted_at IS NULL`,
+    [routeParam(req.params.id, 'id')],
+  );
+  if (!result.rows[0]) throw new NotFoundError();
+  return ok(res, result.rows[0]);
+}));
+
+async function saveRelations(client: PoolClient, id: string, input: {
+  colores?: Array<z.infer<typeof relation>>;
+  razas?: Array<z.infer<typeof relation>>;
+  registrado_por: string;
+}) {
+  if (input.colores) {
+    await client.query('UPDATE animal_color SET deleted_at=NOW() WHERE id_animal=$1 AND deleted_at IS NULL', [id]);
+    for (const item of input.colores) {
+      await client.query(buildInsert('animal_color', {
+        id_animal: id,
+        id_color: item.id,
+        es_principal: item.principal ?? false,
+        registrado_por: input.registrado_por,
+      }));
+    }
+  }
+  if (input.razas) {
+    await client.query('UPDATE animal_raza SET deleted_at=NOW() WHERE id_animal=$1 AND deleted_at IS NULL', [id]);
+    for (const item of input.razas) {
+      await client.query(buildInsert('animal_raza', {
+        id_animal: id,
+        id_raza: item.id,
+        porcentaje: item.porcentaje ?? null,
+        registrado_por: input.registrado_por,
+      }));
+    }
+  }
+}
+
+animalsRouter.post(
+  '/',
+  requirePermission('ANIMAL_CREAR'),
+  createUpload.single('foto_perfil'),
+  asyncHandler(async (req, res) => {
+    const input = createPayload(req.body);
+    const idAnimal = randomUUID();
+    let cloud: Awaited<ReturnType<typeof uploadAnimalImage>> | null = null;
+
+    if (req.file) cloud = await uploadAnimalImage(req.file.buffer, idAnimal);
+
+    try {
+      const result = await transaction(async (client) => {
+        const {
+          colores,
+          razas,
+          peso_inicial_kg,
+          fecha_pesaje_inicial,
+          metodo_pesaje_inicial,
+          observaciones_pesaje_inicial,
+          ...animal
+        } = input;
+
+        const row = (await client.query(buildInsert('animal', {
+          id_animal: idAnimal,
+          ...animal,
+          registrado_por: req.user!.id,
+        }))).rows[0];
+
+        await saveRelations(client, idAnimal, {
+          colores,
+          razas,
+          registrado_por: req.user!.id,
+        });
+
+        let initialWeight = null;
+        if (peso_inicial_kg !== null && peso_inicial_kg !== undefined) {
+          initialWeight = (await client.query(buildInsert('pesaje', {
+            id_animal: idAnimal,
+            fecha_pesaje: fecha_pesaje_inicial || new Date().toISOString(),
+            peso_kg: peso_inicial_kg,
+            metodo: metodo_pesaje_inicial || null,
+            observaciones: observaciones_pesaje_inicial || 'Peso inicial registrado al crear el animal.',
+            registrado_por: req.user!.id,
+          }))).rows[0];
+        }
+
+        let profileImage = null;
+        if (cloud) {
+          profileImage = (await client.query(buildInsert('animal_imagen', {
+            id_animal: idAnimal,
+            public_id: cloud.public_id,
+            url: cloud.url,
+            secure_url: cloud.secure_url,
+            formato: cloud.format,
+            ancho: cloud.width,
+            alto: cloud.height,
+            bytes: cloud.bytes,
+            es_perfil: true,
+            descripcion: 'Foto de perfil registrada al crear el animal.',
+            registrado_por: req.user!.id,
+          }))).rows[0];
+        }
+
+        return {
+          ...row,
+          foto_perfil: profileImage?.secure_url ?? null,
+          ultimo_pesaje: initialWeight
+            ? { peso_kg: initialWeight.peso_kg, fecha: initialWeight.fecha_pesaje }
+            : null,
+        };
+      }, req.user!.id);
+
+      return created(res, result);
+    } catch (error) {
+      if (cloud?.public_id) {
+        await deleteCloudinaryImage(cloud.public_id).catch(() => undefined);
+      }
+      throw error;
+    }
+  }),
+);
+
+animalsRouter.patch('/:id', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
+  const input = schema.partial().parse(req.body);
+  const id = routeParam(req.params.id, 'id');
+  const result = await transaction(async (client) => {
+    const { colores, razas, ...animal } = input;
+    let row;
+    if (Object.keys(animal).length) {
+      row = (await client.query(buildUpdate('animal', 'id_animal', id, animal))).rows[0];
+      if (!row) throw new NotFoundError();
+    } else {
+      const query = await client.query('SELECT * FROM animal WHERE id_animal=$1 AND deleted_at IS NULL', [id]);
+      row = query.rows[0];
+      if (!row) throw new NotFoundError();
+    }
+    await saveRelations(client, id, { colores, razas, registrado_por: req.user!.id });
+    return row;
+  }, req.user!.id);
+  return ok(res, result);
+}));
+
+animalsRouter.delete('/:id', requirePermission('ANIMAL_ELIMINAR'), asyncHandler(async (req, res) => {
+  const result = await pool.query(
+    "UPDATE animal SET deleted_at=NOW(),estado='INACTIVO' WHERE id_animal=$1 AND deleted_at IS NULL",
+    [routeParam(req.params.id, 'id')],
+  );
+  if (!result.rowCount) throw new NotFoundError();
+  return noContent(res);
+}));
