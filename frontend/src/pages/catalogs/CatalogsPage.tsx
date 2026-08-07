@@ -13,7 +13,7 @@ const catalogDefinitions = [
   ['tipos-grupo', 'Tipos de grupo'], ['pastos', 'Tipos de pasto'], ['usos-potrero', 'Usos de potrero'], ['tipos-corral', 'Tipos de corral'],
   ['tipos-limpieza', 'Tipos de limpieza'], ['categorias-agroquimicos', 'Categorías agroquímicas'], ['agroquimicos', 'Productos agroquímicos'],
   ['tipos-tratamiento', 'Tipos de tratamiento'], ['vias', 'Vías de administración'], ['medicamentos', 'Medicamentos'],
-  ['productos-venta', 'Productos de venta'],
+  ['productos-venta', 'Productos de venta'], ['compradores', 'Compradores'],
 ] as const;
 type CatalogName = typeof catalogDefinitions[number][0];
 
@@ -44,7 +44,8 @@ export function CatalogsPage() {
     if (catalog === 'tipos-limpieza') return ['codigo','nombre','requiere_productos','descripcion'];
     if (catalog === 'agroquimicos') return ['id_categoria_producto','nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','instrucciones'];
     if (catalog === 'medicamentos') return ['nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','dias_retiro_leche','dias_retiro_carne'];
-    if (catalog === 'productos-venta') return ['codigo','nombre','unidad','descripcion'];
+    if (catalog === 'productos-venta') return ['codigo','nombre','id_unidad_venta','descripcion'];
+    if (catalog === 'compradores') return ['codigo','nombre','contacto','destino','descripcion'];
     return ['codigo','nombre','descripcion'];
   }, [catalog]);
 
@@ -84,7 +85,7 @@ export function CatalogsPage() {
   const displayValue = (item: CatalogItem, field: string) => {
     if (field === 'id_especie') return itemLabel(species.data?.find((value) => itemId(value) === String(item[field])) ?? { nombre: '—' });
     if (field === 'id_categoria_producto') return itemLabel(categories.data?.find((value) => itemId(value) === String(item[field])) ?? { nombre: '—' });
-    if (field === 'id_unidad_predeterminada') return itemLabel(units.data?.find((value) => itemId(value) === String(item[field])) ?? { nombre: '—' });
+    if (field === 'id_unidad_predeterminada' || field === 'id_unidad_venta') return itemLabel(units.data?.find((value) => itemId(value) === String(item[field])) ?? { nombre: '—' });
     if (field === 'requiere_productos') return item[field] ? 'Sí' : 'No';
     return String(item[field] ?? '—');
   };
@@ -103,10 +104,10 @@ export function CatalogsPage() {
       const label = field.replace(/^id_/, '').replaceAll('_', ' ');
       if (field === 'id_especie') return <Field key={field} label="Especie" required={catalog === 'razas'}><Select value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">Sin especie específica</option>{species.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>;
       if (field === 'id_categoria_producto') return <Field key={field} label="Categoría" required><Select value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">Selecciona</option>{categories.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>;
-      if (field === 'id_unidad_predeterminada') return <Field key={field} label="Unidad predeterminada"><Select value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">Sin unidad</option>{units.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)} {item.simbolo ? `(${item.simbolo})` : ''}</option>)}</Select></Field>;
+      if (field === 'id_unidad_predeterminada' || field === 'id_unidad_venta') return <Field key={field} label={field === 'id_unidad_venta' ? 'Unidad de venta' : 'Unidad predeterminada'} required={field === 'id_unidad_venta'}><Select required={field === 'id_unidad_venta'} value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">{field === 'id_unidad_venta' ? 'Selecciona una unidad' : 'Sin unidad'}</option>{units.data?.filter((item) => item.activo !== false).map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)} {item.simbolo ? `(${item.simbolo})` : ''}</option>)}</Select></Field>;
       if (field === 'requiere_productos') return <label key={field} className="checkbox"><input type="checkbox" checked={Boolean(form[field])} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.checked }))} />Requiere registrar productos aplicados</label>;
       if (field === 'descripcion' || field === 'instrucciones') return <Field key={field} label={label}><Textarea value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))} /></Field>;
-      return <Field key={field} label={label} required={['codigo','nombre','nombre_comercial','unidad'].includes(field)}><Input type={field.startsWith('dias_') ? 'number' : 'text'} min={field.startsWith('dias_') ? 0 : undefined} value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))} /></Field>;
+      return <Field key={field} label={label} required={['codigo','nombre','nombre_comercial'].includes(field)}><Input type={field.startsWith('dias_') ? 'number' : 'text'} min={field.startsWith('dias_') ? 0 : undefined} value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))} /></Field>;
     })}<label className="checkbox"><input type="checkbox" checked={form.activo} onChange={(event) => setForm((current) => ({ ...current, activo: event.target.checked }))} />Activo</label></div></Modal> : null}
     {deleteId ? <ConfirmDialog title="Desactivar elemento" message="El elemento quedará inactivo y se conservarán las relaciones históricas." onClose={() => setDeleteId(null)} onConfirm={() => remove.mutate(deleteId)} loading={remove.isPending} /> : null}
   </div>;

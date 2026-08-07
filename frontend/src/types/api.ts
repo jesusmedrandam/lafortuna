@@ -460,6 +460,7 @@ export interface SaleAnimalDetail {
 
 export interface AnimalSale {
   id_venta: string;
+  id_comprador: string | null;
   fecha_venta: string;
   comprador_nombre: string;
   comprador_contacto: string | null;
@@ -486,6 +487,7 @@ export interface SaleProductDetail {
 
 export interface ProductSale {
   id_venta_producto: string;
+  id_comprador: string | null;
   fecha_venta: string;
   periodicidad: 'DIARIA' | 'SEMANAL';
   comprador_nombre: string;
