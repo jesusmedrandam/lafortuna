@@ -1,12 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Edit3, Plus, Sprout, Trash2 } from 'lucide-react';
+import { CalendarDays, ChevronRight, Clock3, Droplets, Edit3, Plus, Sprout, Trash2, Users } from 'lucide-react';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
 import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
-import type { Pasture } from '../../types/api';
+import type { Pasture, PastureDetail } from '../../types/api';
 import { formatDate, formatNumber, nullIfEmpty, numberOrNull } from '../../utils';
 
 interface GrassForm { id_tipo_pasto: string; porcentaje_estimado: string; area_estimada: string; id_unidad_area: string; fecha_siembra: string; observaciones: string }
@@ -24,7 +24,45 @@ function PastureModal({ pasture, onClose }: { pasture?: Pasture | null; onClose:
 }
 
 export function PasturesPage() {
-  const { hasPermission } = useAuth(); const [editing, setEditing] = useState<Pasture | null | undefined>(undefined);
+  const { hasPermission } = useAuth(); const [editing, setEditing] = useState<Pasture | null | undefined>(undefined); const [detailId, setDetailId] = useState<string | null>(null);
   const query = useQuery({ queryKey: ['pastures'], queryFn: () => apiRequest<Pasture[]>('/potreros') });
-  return <div><PageHeader title="Potreros" description="Registra tamaño, uso, capacidad, agua y múltiples tipos de pasto." action={hasPermission('POTRERO_ADMINISTRAR') ? <Button onClick={() => setEditing(null)}><Plus size={18} />Nuevo potrero</Button> : undefined} />{query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : query.data?.length === 0 ? <EmptyState icon={Sprout} title="Sin potreros" description="Registra el primer potrero de la propiedad." /> : <div className="record-grid">{query.data?.map((pasture) => <Card key={pasture.id_potrero} className="record-card"><div className="record-card-header"><div className="record-icon"><Sprout size={22} /></div><div><h3>{pasture.nombre}</h3><span>{pasture.tipo_uso}</span></div><Badge tone={pasture.activo ? 'success' : 'neutral'}>{pasture.activo ? 'Activo' : 'Inactivo'}</Badge></div><div className="record-details"><span><small>Área</small><strong>{pasture.area != null ? formatNumber(pasture.area) : '—'}</strong></span><span><small>Capacidad</small><strong>{pasture.capacidad_estimada ?? '—'}</strong></span><span><small>Agua</small><strong>{pasture.disponibilidad_agua ? 'Disponible' : 'No'}</strong></span><span><small>Último descanso</small><strong>{formatDate(pasture.fecha_ultimo_descanso)}</strong></span></div><div className="tag-section"><strong>Pastos</strong><div>{pasture.pastos.length ? pasture.pastos.map((item) => <Badge key={item.id_potrero_pasto ?? item.id_tipo_pasto} tone="info">{item.pasto}{item.porcentaje_estimado != null ? ` ${item.porcentaje_estimado}%` : ''}</Badge>) : <span className="muted">Sin pastos registrados</span>}</div></div>{hasPermission('POTRERO_ADMINISTRAR') ? <div className="record-actions"><Button variant="ghost" onClick={() => setEditing(pasture)}><Edit3 size={17} />Editar</Button></div> : null}</Card>)}</div>}{editing !== undefined ? <PastureModal pasture={editing} onClose={() => setEditing(undefined)} /> : null}</div>;
+  const detail = useQuery({ queryKey: ['pastures', detailId, 'summary'], queryFn: () => apiRequest<PastureDetail>(`/potreros/${detailId}/resumen`), enabled: Boolean(detailId) });
+  const openEdit = (pasture: Pasture) => { setDetailId(null); setEditing(pasture); };
+  return <div>
+    <PageHeader title="Potreros" description="Consulta ocupación, descanso, pastos e historial de cada potrero." action={hasPermission('POTRERO_ADMINISTRAR') ? <Button onClick={() => setEditing(null)}><Plus size={18} />Nuevo potrero</Button> : undefined} />
+    {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : query.data?.length === 0 ? <EmptyState icon={Sprout} title="Sin potreros" description="Registra el primer potrero de la propiedad." /> : <Card className="pasture-list">
+      <div className="pasture-list-head"><span>Potrero</span><span>Área</span><span>Pastos</span><span>Estado actual</span><span /></div>
+      {query.data?.map((pasture) => <button type="button" className="pasture-list-row" key={pasture.id_potrero} onClick={() => setDetailId(pasture.id_potrero)}>
+        <span className="pasture-name"><span className="pasture-mini-icon"><Sprout size={18} /></span><span><strong>{pasture.nombre}</strong><small>{pasture.tipo_uso}{pasture.codigo ? ` · ${pasture.codigo}` : ''}</small></span></span>
+        <span><strong>{pasture.area != null ? `${formatNumber(pasture.area)}${pasture.unidad_area ? ` ${pasture.unidad_area}` : ''}` : 'Sin registrar'}</strong><small>{pasture.capacidad_estimada != null ? `Capacidad: ${pasture.capacidad_estimada}` : 'Sin capacidad'}</small></span>
+        <span className="pasture-grass-summary"><strong>{pasture.pastos.length ? pasture.pastos.map((item) => item.pasto).filter(Boolean).join(', ') : 'Sin pastos'}</strong><small>{pasture.pastos.length} {pasture.pastos.length === 1 ? 'tipo registrado' : 'tipos registrados'}</small></span>
+        <span><Badge tone={Number(pasture.total_animales) > 0 ? 'info' : 'success'}>{Number(pasture.total_animales) > 0 ? 'Ocupado' : 'En descanso'}</Badge><small>{Number(pasture.total_animales)} animales</small></span>
+        <span className="pasture-row-actions">{hasPermission('POTRERO_ADMINISTRAR') ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); openEdit(pasture); }}><Edit3 size={16} /><span>Editar</span></Button> : null}<ChevronRight size={19} /></span>
+      </button>)}
+    </Card>}
+    {detailId ? <Modal title="Detalle del potrero" onClose={() => setDetailId(null)} wide footer={detail.data && hasPermission('POTRERO_ADMINISTRAR') ? <Button onClick={() => openEdit(detail.data)}><Edit3 size={17} />Editar potrero</Button> : undefined}>
+      {detail.isLoading ? <LoadingState /> : detail.isError ? <ErrorState message={(detail.error as Error).message} onRetry={() => void detail.refetch()} /> : detail.data ? <PastureDetailContent pasture={detail.data} /> : null}
+    </Modal> : null}
+    {editing !== undefined ? <PastureModal pasture={editing} onClose={() => setEditing(undefined)} /> : null}
+  </div>;
+}
+
+function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
+  const status = pasture.ocupacion.estado;
+  return <div className="pasture-detail">
+    <div className="pasture-detail-heading"><div className="record-icon"><Sprout size={23} /></div><div><h2>{pasture.nombre}</h2><p>{pasture.tipo_uso}{pasture.codigo ? ` · ${pasture.codigo}` : ''}</p></div><Badge tone={status === 'OCUPADO' ? 'info' : 'success'}>{status === 'OCUPADO' ? 'Ocupado' : 'En descanso'}</Badge></div>
+    <div className="pasture-summary-grid">
+      <div><Sprout size={19} /><span><small>Área</small><strong>{pasture.area != null ? `${formatNumber(pasture.area)}${pasture.unidad_area ? ` ${pasture.unidad_area}` : ''}` : 'Sin registrar'}</strong></span></div>
+      <div><Users size={19} /><span><small>Animales actuales</small><strong>{pasture.ocupacion.total_animales}</strong></span></div>
+      <div><CalendarDays size={19} /><span><small>Última ocupación</small><strong>{formatDate(pasture.ocupacion.fecha_ultima_ocupacion)}</strong></span></div>
+      <div><Clock3 size={19} /><span><small>Días de última ocupación</small><strong>{pasture.ocupacion.dias_ultima_ocupacion ?? '—'}</strong></span></div>
+      <div><CalendarDays size={19} /><span><small>Último descanso</small><strong>{formatDate(pasture.ocupacion.fecha_ultimo_descanso)}</strong></span></div>
+      <div><Clock3 size={19} /><span><small>{status === 'DESCANSO' ? 'Días en descanso' : 'Duración del último descanso'}</small><strong>{pasture.ocupacion.dias_descanso ?? '—'}</strong></span></div>
+      <div><Droplets size={19} /><span><small>Agua</small><strong>{pasture.disponibilidad_agua ? 'Disponible' : 'No disponible'}</strong></span></div>
+      <div><Users size={19} /><span><small>Capacidad estimada</small><strong>{pasture.capacidad_estimada ?? '—'}</strong></span></div>
+    </div>
+    <section className="pasture-detail-section"><h3>Pastos</h3><div className="pasture-grass-list">{pasture.pastos.length ? pasture.pastos.map((grass) => <div key={grass.id_potrero_pasto ?? grass.id_tipo_pasto}><strong>{grass.pasto}</strong><span>{grass.porcentaje_estimado != null ? `${grass.porcentaje_estimado}% estimado` : 'Porcentaje no registrado'}{grass.area_estimada != null ? ` · ${formatNumber(grass.area_estimada)} de área` : ''}</span></div>) : <p className="muted">Sin pastos registrados.</p>}</div></section>
+    {(pasture.descripcion || pasture.observaciones) ? <section className="pasture-detail-section"><h3>Información adicional</h3>{pasture.descripcion ? <p>{pasture.descripcion}</p> : null}{pasture.observaciones ? <p className="muted">{pasture.observaciones}</p> : null}</section> : null}
+    <section className="pasture-detail-section"><div className="section-heading-inline"><div><h3>Historial de ocupaciones</h3><p className="muted">Cada período muestra el descanso que tuvo el potrero antes de ser ocupado.</p></div></div>{pasture.historial_ocupaciones.length ? <div className="pasture-history-table"><div className="pasture-history-head"><span>Ocupación</span><span>Duración</span><span>Animales</span><span>Descanso previo</span></div>{pasture.historial_ocupaciones.map((period, index) => <div className="pasture-history-row" key={`${period.inicio}-${index}`}><span><strong>{formatDate(period.inicio)}</strong><small>hasta {period.fin ? formatDate(period.fin) : 'la actualidad'}</small></span><span><strong>{period.dias_ocupacion} días</strong></span><span><strong>{period.total_animales}</strong></span><span><strong>{period.dias_descanso_previo != null ? `${period.dias_descanso_previo} días` : 'Sin dato previo'}</strong><small>{period.descanso_previo_desde ? `desde ${formatDate(period.descanso_previo_desde)}` : ''}</small></span></div>)}</div> : <EmptyState icon={CalendarDays} title="Sin historial" description="Este potrero todavía no registra períodos de ocupación." />}</section>
+  </div>;
 }

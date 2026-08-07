@@ -54,6 +54,10 @@ export interface DashboardSummary {
   ubicaciones: number;
   litros_hoy: string | number;
   tratamientos_hoy: number;
+  potreros_ocupados: number;
+  ventas_mes: number;
+  ingresos_hoy: string | number;
+  ingresos_mes: string | number;
 }
 
 export interface CatalogItem {
@@ -203,7 +207,30 @@ export interface Pasture {
   disponibilidad_agua: boolean | null;
   fecha_ultimo_descanso: string | null;
   observaciones: string | null;
+  unidad_area?: string | null;
+  total_animales: number;
   pastos: PastureGrass[];
+}
+
+export interface PastureOccupationPeriod {
+  inicio: string;
+  fin: string | null;
+  total_animales: number;
+  descanso_previo_desde: string | null;
+  dias_ocupacion: number;
+  dias_descanso_previo: number | null;
+}
+
+export interface PastureDetail extends Pasture {
+  ocupacion: {
+    estado: 'OCUPADO' | 'DESCANSO';
+    fecha_ultima_ocupacion: string | null;
+    dias_ultima_ocupacion: number | null;
+    fecha_ultimo_descanso: string | null;
+    dias_descanso: number | null;
+    total_animales: number;
+  };
+  historial_ocupaciones: PastureOccupationPeriod[];
 }
 
 export interface Corral {
@@ -444,6 +471,33 @@ export interface AnimalSale {
   anulado_en: string | null;
   registrado_por_nombre: string;
   animales: SaleAnimalDetail[];
+}
+
+export interface SaleProductDetail {
+  id_venta_producto_detalle: string;
+  id_producto_venta: string;
+  producto: string;
+  unidad: string;
+  cantidad: number | string;
+  precio_unitario: number | string;
+  subtotal: number | string;
+  observaciones: string | null;
+}
+
+export interface ProductSale {
+  id_venta_producto: string;
+  fecha_venta: string;
+  periodicidad: 'DIARIA' | 'SEMANAL';
+  comprador_nombre: string;
+  comprador_contacto: string | null;
+  destino: string | null;
+  precio_total: number | string;
+  moneda: string;
+  observaciones: string | null;
+  estado: 'COMPLETADA' | 'ANULADA';
+  anulado_en: string | null;
+  registrado_por_nombre: string;
+  productos: SaleProductDetail[];
 }
 
 export interface AuditEntry {
