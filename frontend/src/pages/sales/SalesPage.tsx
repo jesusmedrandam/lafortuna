@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ban, Package, Plus, ShoppingCart, Trash2, Users } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { AnimalSelectionBuilder, type AnimalSelectionValue } from '../../components/AnimalSelectionBuilder';
@@ -78,7 +79,7 @@ function ProductSalesList({ sales, canAdmin, onCreate, onCancel, cancelling }: {
 }
 
 function BuyerPreview({ buyer }: { buyer?: CatalogItem }) {
-  if (!buyer) return <p className="muted buyer-empty">Registra y selecciona un comprador desde Catálogos → Compradores.</p>;
+  if (!buyer) return <div className="buyer-empty"><span>Primero registra el comprador en el catálogo.</span><Link className="button button-secondary" to="/catalogos?catalog=compradores">Registrar comprador</Link></div>;
   return <div className="buyer-preview"><span><small>Comprador seleccionado</small><strong>{itemLabel(buyer)}</strong></span><span><small>Contacto</small><strong>{String(buyer.contacto ?? 'Sin contacto')}</strong></span><span><small>Destino habitual</small><strong>{String(buyer.destino ?? 'Sin destino')}</strong></span></div>;
 }
 
