@@ -54,7 +54,7 @@ CREATE INDEX IF NOT EXISTS idx_venta_producto_detalle_venta ON venta_producto_de
 INSERT INTO producto_venta(codigo,nombre,unidad,descripcion)
 VALUES
   ('LECHE','Leche','L','Leche destinada a la venta'),
-  ('QUESO','Queso','kg','Queso destinado a la venta')
+  ('QUESO','Queso','lb','Queso destinado a la venta')
 ON CONFLICT (codigo) DO NOTHING;
 
 COMMIT;

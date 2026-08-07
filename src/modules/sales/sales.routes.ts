@@ -18,8 +18,7 @@ const detailSchema = z.object({
 
 const saleSchema = z.object({
   fecha_venta: z.string().datetime(),
-  comprador_nombre: z.string().trim().min(2).max(200),
-  comprador_contacto: z.string().trim().max(160).nullable().optional(),
+  id_comprador: z.string().uuid(),
   destino: z.string().trim().max(220).nullable().optional(),
   precio_total: z.number().min(0).nullable().optional(),
   moneda: z.string().trim().length(3).default('USD'),
@@ -37,8 +36,7 @@ const productDetailSchema = z.object({
 const productSaleSchema = z.object({
   fecha_venta: z.string().datetime(),
   periodicidad: z.enum(['DIARIA', 'SEMANAL']),
-  comprador_nombre: z.string().trim().min(2).max(200),
-  comprador_contacto: z.string().trim().max(160).nullable().optional(),
+  id_comprador: z.string().uuid(),
   destino: z.string().trim().max(220).nullable().optional(),
   moneda: z.string().trim().length(3).default('USD'),
   observaciones: z.string().trim().max(2000).nullable().optional(),
@@ -81,7 +79,7 @@ salesRouter.get('/productos', requirePermission('VENTA_CONSULTAR'), asyncHandler
           'id_venta_producto_detalle', d.id_venta_producto_detalle,
           'id_producto_venta', p.id_producto_venta,
           'producto', p.nombre,
-          'unidad', p.unidad,
+          'unidad', COALESCE(um.simbolo,um.nombre,p.unidad,'Sin unidad'),
           'cantidad', d.cantidad,
           'precio_unitario', d.precio_unitario,
           'subtotal', d.subtotal,
@@ -89,6 +87,7 @@ salesRouter.get('/productos', requirePermission('VENTA_CONSULTAR'), asyncHandler
         ) ORDER BY p.nombre)
         FROM venta_producto_detalle d
         JOIN producto_venta p ON p.id_producto_venta=d.id_producto_venta
+        LEFT JOIN unidad_medida um ON um.id_unidad=p.id_unidad_venta
         WHERE d.id_venta_producto=v.id_venta_producto AND d.deleted_at IS NULL
       ), '[]'::jsonb) productos
      FROM venta_producto v
@@ -105,6 +104,14 @@ salesRouter.post('/', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async
   if (uniqueIds.size !== input.animales.length) throw new ValidationError('No repitas animales en la misma venta.');
 
   const sale = await transaction(async (client) => {
+    const buyer = (await client.query(
+      `SELECT id_comprador,nombre,contacto,destino
+       FROM comprador
+       WHERE id_comprador=$1 AND deleted_at IS NULL AND activo=TRUE`,
+      [input.id_comprador],
+    )).rows[0];
+    if (!buyer) throw new NotFoundError('El comprador no existe o está inactivo.');
+
     const animals = (await client.query(
       `SELECT id_animal,nombre,estado,id_grupo_actual,id_ubicacion_actual
        FROM animal
@@ -121,6 +128,9 @@ salesRouter.post('/', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async
     const { animales, ...header } = input;
     const row = (await client.query(buildInsert('venta_animal', {
       ...header,
+      comprador_nombre: buyer.nombre,
+      comprador_contacto: buyer.contacto ?? null,
+      destino: header.destino ?? buyer.destino ?? null,
       moneda: header.moneda.toUpperCase(),
       registrado_por: req.user!.id,
     }))).rows[0];
@@ -188,6 +198,14 @@ salesRouter.post('/productos', requirePermission('VENTA_ADMINISTRAR'), asyncHand
   if (uniqueIds.size !== input.productos.length) throw new ValidationError('No repitas productos en la misma venta.');
 
   const sale = await transaction(async (client) => {
+    const buyer = (await client.query(
+      `SELECT id_comprador,nombre,contacto,destino
+       FROM comprador
+       WHERE id_comprador=$1 AND deleted_at IS NULL AND activo=TRUE`,
+      [input.id_comprador],
+    )).rows[0];
+    if (!buyer) throw new NotFoundError('El comprador no existe o está inactivo.');
+
     const products = (await client.query(
       `SELECT id_producto_venta,nombre
        FROM producto_venta
@@ -204,9 +222,10 @@ salesRouter.post('/productos', requirePermission('VENTA_ADMINISTRAR'), asyncHand
     const row = (await client.query(buildInsert('venta_producto', {
       fecha_venta: input.fecha_venta,
       periodicidad: input.periodicidad,
-      comprador_nombre: input.comprador_nombre,
-      comprador_contacto: input.comprador_contacto ?? null,
-      destino: input.destino ?? null,
+      id_comprador: input.id_comprador,
+      comprador_nombre: buyer.nombre,
+      comprador_contacto: buyer.contacto ?? null,
+      destino: input.destino ?? buyer.destino ?? null,
       precio_total: total,
       moneda: input.moneda.toUpperCase(),
       observaciones: input.observaciones ?? null,

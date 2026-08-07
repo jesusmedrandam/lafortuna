@@ -25,7 +25,8 @@ const definitions = {
   'tipos-tratamiento': { table:'tipo_tratamiento', id:'id_tipo_tratamiento', columns:['codigo','nombre','descripcion','activo'], order:'nombre' },
   vias: { table:'via_administracion', id:'id_via_administracion', columns:['codigo','nombre','descripcion','activo'], order:'nombre' },
   medicamentos: { table:'medicamento', id:'id_medicamento', columns:['nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','dias_retiro_leche','dias_retiro_carne','activo'], order:'nombre_comercial' },
-  'productos-venta': { table:'producto_venta', id:'id_producto_venta', columns:['codigo','nombre','unidad','descripcion','activo'], order:'nombre' }
+  'productos-venta': { table:'producto_venta', id:'id_producto_venta', columns:['codigo','nombre','id_unidad_venta','descripcion','activo'], order:'nombre' },
+  compradores: { table:'comprador', id:'id_comprador', columns:['codigo','nombre','contacto','destino','descripcion','activo'], order:'nombre' }
 } as const;
 type CatalogName=keyof typeof definitions;
 const nameSchema=z.enum(Object.keys(definitions) as [CatalogName,...CatalogName[]]);
