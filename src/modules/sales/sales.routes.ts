@@ -27,6 +27,24 @@ const saleSchema = z.object({
   animales: z.array(detailSchema).min(1),
 });
 
+const productDetailSchema = z.object({
+  id_producto_venta: z.string().uuid(),
+  cantidad: z.number().positive(),
+  precio_unitario: z.number().min(0),
+  observaciones: z.string().trim().max(300).nullable().optional(),
+});
+
+const productSaleSchema = z.object({
+  fecha_venta: z.string().datetime(),
+  periodicidad: z.enum(['DIARIA', 'SEMANAL']),
+  comprador_nombre: z.string().trim().min(2).max(200),
+  comprador_contacto: z.string().trim().max(160).nullable().optional(),
+  destino: z.string().trim().max(220).nullable().optional(),
+  moneda: z.string().trim().length(3).default('USD'),
+  observaciones: z.string().trim().max(2000).nullable().optional(),
+  productos: z.array(productDetailSchema).min(1),
+});
+
 export const salesRouter = Router();
 
 salesRouter.get('/', requirePermission('VENTA_CONSULTAR'), asyncHandler(async (_req, res) => {
@@ -47,6 +65,33 @@ salesRouter.get('/', requirePermission('VENTA_CONSULTAR'), asyncHandler(async (_
         WHERE d.id_venta=v.id_venta AND d.deleted_at IS NULL
       ), '[]'::jsonb) animales
      FROM venta_animal v
+     JOIN usuario u ON u.id_usuario=v.registrado_por
+     WHERE v.deleted_at IS NULL
+     ORDER BY v.fecha_venta DESC, v.created_at DESC`,
+  )).rows;
+  return ok(res, rows);
+}));
+
+salesRouter.get('/productos', requirePermission('VENTA_CONSULTAR'), asyncHandler(async (_req, res) => {
+  const rows = (await pool.query(
+    `SELECT v.*,
+      TRIM(CONCAT(u.nombres, ' ', u.apellidos)) registrado_por_nombre,
+      COALESCE((
+        SELECT jsonb_agg(jsonb_build_object(
+          'id_venta_producto_detalle', d.id_venta_producto_detalle,
+          'id_producto_venta', p.id_producto_venta,
+          'producto', p.nombre,
+          'unidad', p.unidad,
+          'cantidad', d.cantidad,
+          'precio_unitario', d.precio_unitario,
+          'subtotal', d.subtotal,
+          'observaciones', d.observaciones
+        ) ORDER BY p.nombre)
+        FROM venta_producto_detalle d
+        JOIN producto_venta p ON p.id_producto_venta=d.id_producto_venta
+        WHERE d.id_venta_producto=v.id_venta_producto AND d.deleted_at IS NULL
+      ), '[]'::jsonb) productos
+     FROM venta_producto v
      JOIN usuario u ON u.id_usuario=v.registrado_por
      WHERE v.deleted_at IS NULL
      ORDER BY v.fecha_venta DESC, v.created_at DESC`,
@@ -135,6 +180,72 @@ salesRouter.post('/', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async
   cache.forgetModuleVersion('ventas');
   cache.forgetModuleVersion('animales');
   return created(res, sale);
+}));
+
+salesRouter.post('/productos', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async (req, res) => {
+  const input = productSaleSchema.parse(req.body);
+  const uniqueIds = new Set(input.productos.map((item) => item.id_producto_venta));
+  if (uniqueIds.size !== input.productos.length) throw new ValidationError('No repitas productos en la misma venta.');
+
+  const sale = await transaction(async (client) => {
+    const products = (await client.query(
+      `SELECT id_producto_venta,nombre
+       FROM producto_venta
+       WHERE id_producto_venta=ANY($1::uuid[]) AND deleted_at IS NULL AND activo=TRUE`,
+      [[...uniqueIds]],
+    )).rows;
+    if (products.length !== uniqueIds.size) throw new NotFoundError('Uno o más productos no existen o están inactivos.');
+
+    const details = input.productos.map((item) => ({
+      ...item,
+      subtotal: Number((item.cantidad * item.precio_unitario).toFixed(2)),
+    }));
+    const total = Number(details.reduce((sum, item) => sum + item.subtotal, 0).toFixed(2));
+    const row = (await client.query(buildInsert('venta_producto', {
+      fecha_venta: input.fecha_venta,
+      periodicidad: input.periodicidad,
+      comprador_nombre: input.comprador_nombre,
+      comprador_contacto: input.comprador_contacto ?? null,
+      destino: input.destino ?? null,
+      precio_total: total,
+      moneda: input.moneda.toUpperCase(),
+      observaciones: input.observaciones ?? null,
+      registrado_por: req.user!.id,
+    }))).rows[0];
+
+    for (const detail of details) {
+      await client.query(buildInsert('venta_producto_detalle', {
+        id_venta_producto: row.id_venta_producto,
+        id_producto_venta: detail.id_producto_venta,
+        cantidad: detail.cantidad,
+        precio_unitario: detail.precio_unitario,
+        subtotal: detail.subtotal,
+        observaciones: detail.observaciones ?? null,
+      }));
+    }
+    return { ...row, productos: details };
+  }, req.user!.id);
+
+  cache.forgetModuleVersion('ventas');
+  return created(res, sale);
+}));
+
+salesRouter.patch('/productos/:id/anular', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async (req, res) => {
+  const id = routeParam(req.params.id, 'id');
+  const current = (await pool.query(
+    `SELECT estado FROM venta_producto
+     WHERE id_venta_producto=$1 AND deleted_at IS NULL`,
+    [id],
+  )).rows[0];
+  if (!current) throw new NotFoundError('Venta de productos no encontrada.');
+  if (current.estado === 'ANULADA') throw new ConflictError('La venta ya está anulada.');
+  const row = (await pool.query(
+    `UPDATE venta_producto SET estado='ANULADA',anulado_en=NOW(),updated_at=NOW()
+     WHERE id_venta_producto=$1 RETURNING *`,
+    [id],
+  )).rows[0];
+  cache.forgetModuleVersion('ventas');
+  return ok(res, row);
 }));
 
 salesRouter.patch('/:id/anular', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async (req, res) => {

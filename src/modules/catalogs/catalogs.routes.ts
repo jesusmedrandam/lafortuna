@@ -24,7 +24,8 @@ const definitions = {
   agroquimicos: { table:'producto_agroquimico', id:'id_producto', columns:['id_categoria_producto','nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','instrucciones','activo'], order:'nombre_comercial' },
   'tipos-tratamiento': { table:'tipo_tratamiento', id:'id_tipo_tratamiento', columns:['codigo','nombre','descripcion','activo'], order:'nombre' },
   vias: { table:'via_administracion', id:'id_via_administracion', columns:['codigo','nombre','descripcion','activo'], order:'nombre' },
-  medicamentos: { table:'medicamento', id:'id_medicamento', columns:['nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','dias_retiro_leche','dias_retiro_carne','activo'], order:'nombre_comercial' }
+  medicamentos: { table:'medicamento', id:'id_medicamento', columns:['nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','dias_retiro_leche','dias_retiro_carne','activo'], order:'nombre_comercial' },
+  'productos-venta': { table:'producto_venta', id:'id_producto_venta', columns:['codigo','nombre','unidad','descripcion','activo'], order:'nombre' }
 } as const;
 type CatalogName=keyof typeof definitions;
 const nameSchema=z.enum(Object.keys(definitions) as [CatalogName,...CatalogName[]]);
