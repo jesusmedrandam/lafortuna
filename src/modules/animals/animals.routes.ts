@@ -204,9 +204,18 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
        ORDER BY ip.created_at DESC LIMIT 1) foto_perfil,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_imagen',i.id_imagen,'secure_url',i.secure_url,'url',i.url,'public_id',i.public_id,
-        'es_perfil',i.es_perfil,'descripcion',i.descripcion,'orden',i.orden,'created_at',i.created_at
+        'es_perfil',i.es_perfil,'descripcion',i.descripcion,'orden',i.orden,'created_at',i.created_at,
+        'tipo_archivo',i.tipo_archivo,'mime_type',i.mime_type,'nombre_original',i.nombre_original,
+        'animales',COALESCE((SELECT jsonb_agg(jsonb_build_object(
+          'id_animal',ar_a.id_animal,'nombre',ar_a.nombre,'codigo_arete',ar_a.codigo_arete
+        ) ORDER BY ar_a.nombre)
+        FROM animal_imagen_relacion ar JOIN animal ar_a ON ar_a.id_animal=ar.id_animal AND ar_a.deleted_at IS NULL
+        WHERE ar.id_imagen=i.id_imagen AND ar.deleted_at IS NULL),'[]'::jsonb)
       ) ORDER BY i.es_perfil DESC,i.created_at DESC,i.orden DESC)
-      FROM animal_imagen i WHERE i.id_animal=a.id_animal AND i.deleted_at IS NULL),'[]') imagenes,
+      FROM animal_imagen i WHERE i.deleted_at IS NULL AND (i.id_animal=a.id_animal OR EXISTS(
+        SELECT 1 FROM animal_imagen_relacion air
+        WHERE air.id_imagen=i.id_imagen AND air.id_animal=a.id_animal AND air.deleted_at IS NULL
+      ))),'[]') imagenes,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_usuario',ap.id_usuario,'nombre',TRIM(CONCAT(up.nombres,' ',up.apellidos)),
         'correo',up.correo,'porcentaje',ap.porcentaje_propiedad,'es_principal',ap.es_principal
@@ -323,9 +332,10 @@ animalsRouter.post(
   asyncHandler(async (req, res) => {
     const input = createPayload(req.body);
     const idAnimal = randomUUID();
+    const profilePhoto = req.file;
     let cloud: Awaited<ReturnType<typeof uploadAnimalImage>> | null = null;
 
-    if (req.file) cloud = await uploadAnimalImage(req.file.buffer, idAnimal);
+    if (profilePhoto) cloud = await uploadAnimalImage(profilePhoto.buffer, idAnimal);
 
     try {
       const result = await transaction(async (client) => {
@@ -377,10 +387,18 @@ animalsRouter.post(
             ancho: cloud.width,
             alto: cloud.height,
             bytes: cloud.bytes,
+            tipo_archivo: 'IMAGEN',
+            mime_type: profilePhoto?.mimetype ?? 'image/jpeg',
+            nombre_original: profilePhoto?.originalname ?? null,
             es_perfil: true,
             descripcion: descripcion_foto_perfil || 'Foto de perfil registrada al crear el animal.',
             registrado_por: req.user!.id,
           }))).rows[0];
+          await client.query(buildInsert('animal_imagen_relacion', {
+            id_imagen: (profileImage as { id_imagen: string }).id_imagen,
+            id_animal: idAnimal,
+            registrado_por: req.user!.id,
+          }));
         }
 
         return {

@@ -263,7 +263,7 @@ birthsRouter.post(
     const birthId = routeParam(req.params.id, 'id');
     const childId = routeParam(req.params.childId, 'childId');
     const relation = await pool.query(
-      `SELECT 1
+      `SELECT p.id_madre
        FROM parto_cria pc
        JOIN parto p ON p.id_parto=pc.id_parto AND p.deleted_at IS NULL
        JOIN animal a ON a.id_animal=pc.id_cria AND a.deleted_at IS NULL
@@ -282,7 +282,7 @@ birthsRouter.post(
             [childId],
           );
         }
-        return (await client.query(buildInsert('animal_imagen', {
+        const image=(await client.query(buildInsert('animal_imagen', {
           id_animal: childId,
           public_id: cloud.public_id,
           url: cloud.url,
@@ -291,10 +291,20 @@ birthsRouter.post(
           ancho: cloud.width,
           alto: cloud.height,
           bytes: cloud.bytes,
+          tipo_archivo: 'IMAGEN',
+          mime_type: req.file!.mimetype,
+          nombre_original: req.file!.originalname,
           es_perfil: profile,
           descripcion: req.body.descripcion || null,
           registrado_por: req.user!.id,
         }))).rows[0];
+        const relatedIds=profile ? [childId] : [...new Set([childId,relation.rows[0].id_madre])];
+        for(const relatedId of relatedIds) {
+          await client.query(buildInsert('animal_imagen_relacion', {
+            id_imagen:image.id_imagen,id_animal:relatedId,registrado_por:req.user!.id,
+          }));
+        }
+        return image;
       }, req.user!.id);
       return created(res, row);
     } catch (error) {

@@ -23,6 +23,7 @@ const envSchema = z.object({
   CLOUDINARY_API_SECRET: z.string().optional(),
   CLOUDINARY_FOLDER: z.string().default('mm-ganaderia/animales'),
   MAX_IMAGE_MB: z.coerce.number().positive().default(8),
+  MAX_MEDIA_MB: z.coerce.number().positive().default(40),
   BREVO_API_KEY: z.string().optional(),
   BREVO_SENDER_EMAIL: z.string().email().optional(),
   BREVO_SENDER_NAME: z.string().default('M&M Ganadería'),

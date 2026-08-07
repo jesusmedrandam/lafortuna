@@ -22,7 +22,7 @@ Antes de ejecutar `bootstrap:admin`, configura la nueva `DATABASE_URL`, las dos 
 - `GET /api/dashboard/resumen`
 - CRUD `/api/animales`, `/api/grupos`, `/api/ubicaciones`
 - CRUD compuesto `/api/potreros`, `/api/corrales`
-- Fotos `/api/animales/:id/imagenes` y `/api/imagenes/:id`
+- Multimedia `/api/animales/:id/imagenes`, `/api/imagenes` y `/api/imagenes/:id`
 - Selección previa `/api/selecciones/animales/preview`
 - Movimientos `/api/movimientos`
 - Jornadas colectivas `/api/jornadas-sanitarias`
@@ -35,9 +35,9 @@ Antes de ejecutar `bootstrap:admin`, configura la nueva `DATABASE_URL`, las dos 
 
 La clave de caché incorpora la versión de `version_datos`. Los triggers de PostgreSQL incrementan la versión cuando hay cambios; por tanto, las respuestas antiguas dejan de utilizarse automáticamente. Si `REDIS_URL` no está configurada, se usa una caché de memoria para desarrollo.
 
-## Imágenes
+## Multimedia
 
-El navegador envía `multipart/form-data` con el archivo en el campo `imagen`. El servidor valida el tipo y tamaño, lo sube a Cloudinary y almacena en PostgreSQL únicamente URL, `public_id` y metadatos. La clave privada de Cloudinary nunca se envía al frontend.
+El navegador envía `multipart/form-data` con el archivo en el campo `archivo` (se conserva compatibilidad con `imagen`). El servidor acepta fotos y videos, valida su tamaño, los sube a Cloudinary y almacena en PostgreSQL únicamente URL, `public_id` y metadatos. Una misma foto o video puede relacionarse con varios animales; las fotos de perfil permanecen individuales. La clave privada de Cloudinary nunca se envía al frontend. El límite general se controla con `MAX_MEDIA_MB` (40 MB por defecto).
 
 ## Render
 

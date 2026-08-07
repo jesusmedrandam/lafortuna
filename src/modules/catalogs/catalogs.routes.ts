@@ -6,7 +6,6 @@ import { created, noContent, ok } from '../../core/http.js';
 import { NotFoundError, ValidationError } from '../../core/errors.js';
 import { requirePermission } from '../../middleware/permission.js';
 import { pool } from '../../database/pool.js';
-import { cache } from '../../services/cache.service.js';
 import { buildInsert, buildUpdate, pick } from '../shared/sql.js';
 
 const definitions = {
@@ -34,10 +33,10 @@ export const catalogsRouter=Router();
 
 catalogsRouter.get('/:catalog',requirePermission('CATALOGO_CONSULTAR'),asyncHandler(async(req,res)=>{
   const name=nameSchema.parse(routeParam(req.params.catalog, 'catalog')); const def=definitions[name];
-  const rows=await cache.remember('catalogos',name,600,async()=> (await pool.query(`SELECT * FROM ${def.table} WHERE deleted_at IS NULL ORDER BY activo DESC, ${def.order}`)).rows);
-  const version=(await pool.query('SELECT version FROM version_datos WHERE modulo=$1',['catalogos'])).rows[0]?.version ?? 1;
-  const etag=`W/\"catalogos-${version}-${name}\"`; if(req.header('if-none-match')===etag) return res.status(304).end(); res.set('ETag',etag); return ok(res,rows);
+  const rows=(await pool.query(`SELECT * FROM ${def.table} WHERE deleted_at IS NULL ORDER BY activo DESC, ${def.order}`)).rows;
+  res.set('Cache-Control','no-store');
+  return ok(res,rows);
 }));
-catalogsRouter.post('/:catalog',requirePermission('CATALOGO_ADMINISTRAR'),asyncHandler(async(req,res)=>{const name=nameSchema.parse(routeParam(req.params.catalog, 'catalog'));const def=definitions[name];const data=pick(req.body,def.columns);if(!Object.keys(data).length)throw new ValidationError('No hay campos válidos.');const row=(await pool.query(buildInsert(def.table,data))).rows[0];cache.forgetModuleVersion('catalogos');return created(res,row);}));
-catalogsRouter.patch('/:catalog/:id',requirePermission('CATALOGO_ADMINISTRAR'),asyncHandler(async(req,res)=>{const name=nameSchema.parse(routeParam(req.params.catalog, 'catalog'));const def=definitions[name];const row=(await pool.query(buildUpdate(def.table,def.id,routeParam(req.params.id, 'id'),pick(req.body,def.columns)))).rows[0];if(!row)throw new NotFoundError();cache.forgetModuleVersion('catalogos');return ok(res,row);}));
-catalogsRouter.delete('/:catalog/:id',requirePermission('CATALOGO_ADMINISTRAR'),asyncHandler(async(req,res)=>{const name=nameSchema.parse(routeParam(req.params.catalog, 'catalog'));const def=definitions[name];const result=await pool.query(`UPDATE ${def.table} SET deleted_at=NOW(),activo=FALSE WHERE ${def.id}=$1 AND deleted_at IS NULL`,[routeParam(req.params.id, 'id')]);if(!result.rowCount)throw new NotFoundError();cache.forgetModuleVersion('catalogos');return noContent(res);}));
+catalogsRouter.post('/:catalog',requirePermission('CATALOGO_ADMINISTRAR'),asyncHandler(async(req,res)=>{const name=nameSchema.parse(routeParam(req.params.catalog, 'catalog'));const def=definitions[name];const data=pick(req.body,def.columns);if(!Object.keys(data).length)throw new ValidationError('No hay campos válidos.');const row=(await pool.query(buildInsert(def.table,data))).rows[0];return created(res,row);}));
+catalogsRouter.patch('/:catalog/:id',requirePermission('CATALOGO_ADMINISTRAR'),asyncHandler(async(req,res)=>{const name=nameSchema.parse(routeParam(req.params.catalog, 'catalog'));const def=definitions[name];const row=(await pool.query(buildUpdate(def.table,def.id,routeParam(req.params.id, 'id'),pick(req.body,def.columns)))).rows[0];if(!row)throw new NotFoundError();return ok(res,row);}));
+catalogsRouter.delete('/:catalog/:id',requirePermission('CATALOGO_ADMINISTRAR'),asyncHandler(async(req,res)=>{const name=nameSchema.parse(routeParam(req.params.catalog, 'catalog'));const def=definitions[name];const result=await pool.query(`UPDATE ${def.table} SET deleted_at=NOW(),activo=FALSE WHERE ${def.id}=$1 AND deleted_at IS NULL`,[routeParam(req.params.id, 'id')]);if(!result.rowCount)throw new NotFoundError();return noContent(res);}));

@@ -80,6 +80,16 @@ export function uploadAnimalImage(buffer: Buffer, animalId: string): Promise<Upl
   });
 }
 
+export function uploadAnimalMedia(buffer: Buffer, animalId: string): Promise<UploadApiResponse> {
+  return uploadBuffer(buffer, {
+    folder: `${configuredFolder}/${animalId}`,
+    resource_type: 'auto',
+    overwrite: false,
+    unique_filename: true,
+    use_filename: false,
+  });
+}
+
 export function uploadUserProfileImage(buffer: Buffer, userId: string): Promise<UploadApiResponse> {
   return uploadBuffer(buffer, {
     public_id: `${rootFolder}/usuarios/${userId}/perfil`,
@@ -100,6 +110,22 @@ export async function deleteCloudinaryImage(publicId: string) {
     throw new AppError(
       502,
       `No se pudo eliminar la imagen de Cloudinary: ${cloudinaryErrorMessage(error)}`,
+      'CLOUDINARY_DELETE_FAILED',
+    );
+  }
+}
+
+export async function deleteCloudinaryMedia(publicId: string, resourceType: 'image' | 'video' = 'image') {
+  if (!enabled || !publicId) return;
+  try {
+    await cloudinary.uploader.destroy(publicId, {
+      invalidate: true,
+      resource_type: resourceType,
+    });
+  } catch (error) {
+    throw new AppError(
+      502,
+      `No se pudo eliminar el archivo de Cloudinary: ${cloudinaryErrorMessage(error)}`,
       'CLOUDINARY_DELETE_FAILED',
     );
   }
