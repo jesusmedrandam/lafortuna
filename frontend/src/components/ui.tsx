@@ -1,5 +1,5 @@
-import { LoaderCircle, Search, X, type LucideIcon } from 'lucide-react';
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import { CalendarDays, LoaderCircle, Search, X, type LucideIcon } from 'lucide-react';
+import { useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 
 export function Button({ children, className = '', variant = 'primary', loading, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; loading?: boolean }) {
   return <button className={`button button-${variant} ${className}`} disabled={props.disabled || loading} {...props}>{loading ? <LoaderCircle className="spin" size={17} /> : null}{children}</button>;
@@ -17,7 +17,13 @@ export function Field({ label, hint, error, required, children }: { label: strin
   return <label className="field"><span className="field-label">{label}{required ? <b> *</b> : null}</span>{children}{hint ? <small>{hint}</small> : null}{error ? <small className="field-error">{error}</small> : null}</label>;
 }
 
-export function Input(props: InputHTMLAttributes<HTMLInputElement>) { return <input className="input" {...props} />; }
+export function Input({ className = '', type, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  if (type === 'date' || type === 'datetime-local') {
+    return <span className="date-input-wrap"><input ref={inputRef} className={`input ${className}`} type={type} {...props} /><button type="button" aria-label="Abrir calendario" title="Abrir calendario" onClick={(event) => { event.preventDefault(); inputRef.current?.showPicker?.(); }}><CalendarDays size={18} /></button></span>;
+  }
+  return <input className={`input ${className}`} type={type} {...props} />;
+}
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) { return <select className="input" {...props} />; }
 export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) { return <textarea className="input textarea" {...props} />; }
 

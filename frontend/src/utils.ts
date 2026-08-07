@@ -1,9 +1,16 @@
 export function formatDate(value?: string | null) {
   if (!value) return '—';
-  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00` : value;
+  const isCalendarDate = /^\d{4}-\d{2}-\d{2}(?:T00:00:00(?:\.000)?Z)?$/.test(value);
+  const normalized = isCalendarDate ? `${value.slice(0, 10)}T12:00:00` : value;
   const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat('es-EC', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date);
+}
+
+export function dateInputValue(value?: string | null) {
+  if (!value) return '';
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] ?? '';
 }
 
 export function formatDateTime(value?: string | null) {

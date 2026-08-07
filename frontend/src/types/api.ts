@@ -152,6 +152,20 @@ export interface AnimalImage {
   descripcion: string | null;
   orden: number | null;
   created_at?: string;
+  tipo_archivo?: 'IMAGEN' | 'VIDEO';
+  mime_type?: string | null;
+  nombre_original?: string | null;
+  animales?: Array<{
+    id_animal: string;
+    nombre: string;
+    codigo_arete: string | null;
+    sexo?: Animal['sexo'];
+    id_grupo?: string | null;
+    grupo?: string | null;
+    id_ubicacion?: string | null;
+    ubicacion?: string | null;
+  }>;
+  total?: number;
 }
 
 export interface Group {

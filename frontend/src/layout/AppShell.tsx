@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   ArrowLeftRight, Baby, Beef, Bell, BookOpen, ChevronRight, ClipboardList, Droplets,
-  HeartOff, Home, LayoutDashboard, LogOut, Menu, Milk, Moon, ShieldCheck, ShoppingCart, Sprout, Sun, Syringe,
+  HeartOff, Home, Images, LayoutDashboard, LogOut, Menu, Milk, Moon, ShieldCheck, ShoppingCart, Sprout, Sun, Syringe,
   UserCircle, UserCog, Users, Warehouse, Weight, X, type LucideIcon,
 } from 'lucide-react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
@@ -20,6 +20,7 @@ interface Destination {
 const destinations: Destination[] = [
   { to: '/', label: 'Panel', icon: LayoutDashboard, permissions: ['DASHBOARD_CONSULTAR'], section: 'principal' },
   { to: '/animales', label: 'Animales', icon: Beef, permissions: ['ANIMAL_CONSULTAR'], section: 'principal' },
+  { to: '/multimedia', label: 'Multimedia', icon: Images, permissions: ['IMAGEN_CONSULTAR'], section: 'principal' },
   { to: '/grupos', label: 'Grupos', icon: Users, permissions: ['GRUPO_CONSULTAR'], section: 'principal' },
   { to: '/potreros', label: 'Potreros', icon: Sprout, permissions: ['POTRERO_CONSULTAR'], section: 'principal' },
   { to: '/corrales', label: 'Corrales', icon: Warehouse, permissions: ['CORRAL_CONSULTAR'], section: 'principal' },
@@ -77,7 +78,7 @@ export function AppShell() {
           <div className="topbar-actions"><IconButton label={theme === 'dark' ? 'Usar tema claro' : 'Usar tema oscuro'} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</IconButton><IconButton label="Notificaciones"><Bell size={19} /></IconButton><NavLink to="/perfil" className="profile-link"><UserCircle size={21} /><span>Mi perfil</span></NavLink></div>
         </header>
         <main className="page-content"><Outlet /></main>
-        <footer className="app-footer"><Home size={14} /><span>M&M Ganadería · Servidor lafortuna</span></footer>
+        <footer className="app-footer"><Home size={14} /><span>M&M Ganadería · Gestión ganadera integral</span></footer>
       </div>
     </div>
   );

@@ -30,6 +30,7 @@ import { ProductionPage } from '../pages/production/ProductionPage';
 import { CatalogsPage } from '../pages/catalogs/CatalogsPage';
 import { AnimalRecordsPage } from '../pages/records/AnimalRecordsPage';
 import { SalesPage } from '../pages/sales/SalesPage';
+import { MultimediaPage } from '../pages/multimedia/MultimediaPage';
 
 function ProtectedRoot() {
   const { user, ready } = useAuth();
@@ -65,6 +66,7 @@ export function AppRouter() {
           <Route index element={<HomePage />} />
           <Route path="animales" element={<PermissionRoute permissions={['ANIMAL_CONSULTAR']}><AnimalsPage /></PermissionRoute>} />
           <Route path="animales/:id" element={<PermissionRoute permissions={['ANIMAL_CONSULTAR']}><AnimalDetailPage /></PermissionRoute>} />
+          <Route path="multimedia" element={<PermissionRoute permissions={['IMAGEN_CONSULTAR']}><MultimediaPage /></PermissionRoute>} />
           <Route path="grupos" element={<PermissionRoute permissions={['GRUPO_CONSULTAR']}><GroupsPage /></PermissionRoute>} />
           <Route path="potreros" element={<PermissionRoute permissions={['POTRERO_CONSULTAR']}><PasturesPage /></PermissionRoute>} />
           <Route path="corrales" element={<PermissionRoute permissions={['CORRAL_CONSULTAR']}><CorralsPage /></PermissionRoute>} />

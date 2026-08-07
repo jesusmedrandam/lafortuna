@@ -43,6 +43,7 @@ import {
 import type { Animal, AnimalImage } from '../../types/api';
 import { formatDate, formatNumber } from '../../utils';
 import { AnimalFormModal } from './AnimalFormModal';
+import { AnimalMultiPicker } from '../../components/AnimalMultiPicker';
 
 interface ViewerImage {
   key: string;
@@ -52,6 +53,7 @@ interface ViewerImage {
   createdAt?: string;
   imageId?: string;
   isProfile: boolean;
+  type: 'IMAGEN' | 'VIDEO';
 }
 
 interface UploadDraft {
@@ -79,6 +81,7 @@ export function AnimalDetailPage() {
   const [imageProfile, setImageProfile] = useState(false);
   const [uploadDraft, setUploadDraft] = useState<UploadDraft | null>(null);
   const [uploadDescription, setUploadDescription] = useState('');
+  const [relatedAnimalIds, setRelatedAnimalIds] = useState<string[]>([]);
   const [descriptionDraft, setDescriptionDraft] = useState<DescriptionDraft | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
@@ -100,15 +103,16 @@ export function AnimalDetailPage() {
   });
 
   const upload = useMutation({
-    mutationFn: async ({ file, profile, description }: { file: File; profile: boolean; description: string }) => {
+    mutationFn: async ({ file, profile, description, animalIds }: { file: File; profile: boolean; description: string; animalIds: string[] }) => {
       const data = new FormData();
-      data.set('imagen', file);
+      data.set('archivo', file);
       data.set('es_perfil', String(profile));
       data.set('descripcion', description.trim());
+      data.set('id_animales', JSON.stringify(animalIds));
       return apiRequest<AnimalImage>(`/animales/${id}/imagenes`, { method: 'POST', body: data });
     },
     onSuccess: () => {
-      toast.show('Imagen subida correctamente.');
+      toast.show('Archivo subido y relacionado correctamente.');
       setUploadDraft(null);
       setUploadDescription('');
       void client.invalidateQueries({ queryKey: ['animal', id] });
@@ -165,6 +169,7 @@ export function AnimalDetailPage() {
         createdAt: profileImage?.created_at,
         imageId: profileImage?.id_imagen,
         isProfile: true,
+        type: 'IMAGEN',
       });
     }
     for (const image of gallery) {
@@ -176,6 +181,7 @@ export function AnimalDetailPage() {
         createdAt: image.created_at,
         imageId: image.id_imagen,
         isProfile: false,
+        type: image.tipo_archivo ?? 'IMAGEN',
       });
     }
     return items;
@@ -268,12 +274,18 @@ export function AnimalDetailPage() {
     <input
       ref={fileRef}
       type="file"
-      accept="image/*"
+      accept="image/*,video/*"
       hidden
       onChange={(event) => {
         const file = event.target.files?.[0];
         if (file) {
+          if (imageProfile && !file.type.startsWith('image/')) {
+            toast.show('La foto de perfil debe ser una imagen.', 'error');
+            event.currentTarget.value = '';
+            return;
+          }
           setUploadDescription('');
+          setRelatedAnimalIds([id]);
           setUploadDraft({ file, profile: imageProfile, previewUrl: URL.createObjectURL(file) });
         }
         event.currentTarget.value = '';
@@ -321,8 +333,8 @@ export function AnimalDetailPage() {
 
     <section className="animal-gallery-compact-section">
       <div className="animal-gallery-compact-header">
-        <div><h2>Fotografías</h2><p>La más reciente aparece primero.</p></div>
-        {hasPermission('IMAGEN_ADMINISTRAR') ? <IconButton label="Agregar fotografía" onClick={() => chooseFile(false)}><ImagePlus size={20} /></IconButton> : null}
+        <div><h2>Fotos y videos</h2><p>Cada archivo puede relacionarse con uno o varios animales.</p></div>
+        {hasPermission('IMAGEN_ADMINISTRAR') ? <IconButton label="Agregar archivo" onClick={() => chooseFile(false)}><ImagePlus size={20} /></IconButton> : null}
       </div>
       {currentGallery ? <Card className="animal-carousel-card animal-carousel-compact-card">
         <div
@@ -337,7 +349,7 @@ export function AnimalDetailPage() {
           }}
         >
           <button className="carousel-image-button" type="button" onClick={() => openGalleryViewer(currentGallery)}>
-            <img src={currentGallery.secure_url} alt={currentGallery.descripcion || animal.nombre} />
+            {currentGallery.tipo_archivo==='VIDEO'?<video src={currentGallery.secure_url} muted preload="metadata"/>:<img src={currentGallery.secure_url} alt={currentGallery.descripcion || animal.nombre} />}
             <span><Expand size={18} /></span>
           </button>
           <span className="carousel-counter">{galleryIndex + 1} / {gallery.length}</span>
@@ -347,7 +359,7 @@ export function AnimalDetailPage() {
           </> : null}
         </div>
         <div className="carousel-dots">{gallery.map((image, index) => <button key={image.id_imagen} type="button" className={index === galleryIndex ? 'active' : ''} onClick={() => setGalleryIndex(index)} aria-label={`Ver fotografía ${index + 1}`} />)}</div>
-      </Card> : <EmptyState icon={ImagePlus} title="Sin fotografías adicionales" description="Agrega imágenes para conservar el historial visual del animal." action={hasPermission('IMAGEN_ADMINISTRAR') ? <IconButton label="Subir fotografía" onClick={() => chooseFile(false)}><ImagePlus size={22} /></IconButton> : undefined} />}
+      </Card> : <EmptyState icon={ImagePlus} title="Sin archivos adicionales" description="Agrega fotos o videos para conservar el historial visual del animal." action={hasPermission('IMAGEN_ADMINISTRAR') ? <IconButton label="Subir archivo" onClick={() => chooseFile(false)}><ImagePlus size={22} /></IconButton> : undefined} />}
     </section>
 
     {currentViewer ? <div
@@ -370,7 +382,7 @@ export function AnimalDetailPage() {
         <IconButton className="lightbox-arrow lightbox-arrow-right" label="Imagen siguiente" onClick={nextViewer}><ChevronRight size={34} /></IconButton>
       </> : null}
       <div className="image-lightbox-content">
-        <img src={currentViewer.url} alt={currentViewer.alt} />
+        {currentViewer.type==='VIDEO'?<video src={currentViewer.url} controls autoPlay/>:<img src={currentViewer.url} alt={currentViewer.alt} />}
         <div className="image-lightbox-details">
           <div>
             <strong>{currentViewer.description || 'Fotografía sin descripción'}</strong>
@@ -378,7 +390,7 @@ export function AnimalDetailPage() {
           </div>
           {hasPermission('IMAGEN_ADMINISTRAR') && currentViewer.imageId ? <div className="lightbox-actions">
             <IconButton label="Editar descripción" onClick={() => setDescriptionDraft({ imageId: currentViewer.imageId!, description: currentViewer.description ?? '' })}><Pencil size={18} /></IconButton>
-            {!currentViewer.isProfile ? <IconButton label="Usar como foto de perfil" onClick={() => imageAction.mutate({ imageId: currentViewer.imageId!, action: 'profile' })}><Star size={18} /></IconButton> : null}
+            {!currentViewer.isProfile&&currentViewer.type==='IMAGEN' ? <IconButton label="Usar como foto de perfil" onClick={() => imageAction.mutate({ imageId: currentViewer.imageId!, action: 'profile' })}><Star size={18} /></IconButton> : null}
             <IconButton className="detail-action-danger" label="Eliminar fotografía" onClick={() => imageAction.mutate({ imageId: currentViewer.imageId!, action: 'delete' })}><Trash2 size={18} /></IconButton>
           </div> : null}
         </div>
@@ -386,19 +398,20 @@ export function AnimalDetailPage() {
     </div> : null}
 
     {uploadDraft ? <Modal
-      title={uploadDraft.profile ? 'Cambiar foto de perfil' : 'Agregar fotografía'}
+      title={uploadDraft.profile ? 'Cambiar foto de perfil' : 'Agregar foto o video'}
       onClose={() => setUploadDraft(null)}
       footer={<>
         <Button variant="ghost" onClick={() => setUploadDraft(null)}>Cancelar</Button>
-        <Button loading={upload.isPending} onClick={() => upload.mutate({ file: uploadDraft.file, profile: uploadDraft.profile, description: uploadDescription })}>Subir imagen</Button>
+        <Button disabled={!uploadDraft.profile&&!relatedAnimalIds.length} loading={upload.isPending} onClick={() => upload.mutate({ file: uploadDraft.file, profile: uploadDraft.profile, description: uploadDescription, animalIds: uploadDraft.profile?[id]:relatedAnimalIds })}>Subir archivo</Button>
       </>}
     >
       <div className="animal-upload-dialog">
-        <img src={uploadDraft.previewUrl} alt="Vista previa de la fotografía" />
-        <Field label="Descripción" hint="Esta descripción se mostrará al abrir la fotografía en pantalla completa.">
+        {uploadDraft.file.type.startsWith('video/')?<video src={uploadDraft.previewUrl} controls/>:<img src={uploadDraft.previewUrl} alt="Vista previa del archivo" />}
+        <Field label="Descripción" hint="Esta descripción se mostrará al abrir el archivo.">
           <Textarea value={uploadDescription} onChange={(event) => setUploadDescription(event.target.value)} maxLength={300} rows={4} placeholder="Ej.: Herida en la pata derecha, condición corporal, día del parto…" />
         </Field>
       </div>
+      {!uploadDraft.profile?<Field label="Animales relacionados" required hint="El archivo aparecerá en la ficha de todos los animales marcados."><AnimalMultiPicker value={relatedAnimalIds} onChange={setRelatedAnimalIds}/></Field>:null}
     </Modal> : null}
 
     {descriptionDraft ? <Modal

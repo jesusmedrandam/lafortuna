@@ -6,7 +6,7 @@ import { useToast } from '../../components/ToastContext';
 import { Button, Field, Input, Modal, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
 import type { Animal, Corral, Group, OwnerOption, Pasture } from '../../types/api';
-import { nullIfEmpty, numberOrNull } from '../../utils';
+import { dateInputValue, nullIfEmpty, numberOrNull } from '../../utils';
 
 interface AnimalFormModalProps {
   animal?: Animal | null;
@@ -118,13 +118,13 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
       descripcion: animal.descripcion ?? '',
       id_especie: animal.id_especie,
       sexo: animal.sexo,
-      fecha_nacimiento: animal.fecha_nacimiento ?? '',
+      fecha_nacimiento: dateInputValue(animal.fecha_nacimiento),
       id_madre: animal.id_madre ?? '',
       id_padre: animal.id_padre ?? '',
       id_origen: animal.id_origen,
       id_grupo_actual: animal.id_grupo_actual ?? '',
       id_ubicacion_actual: animal.id_ubicacion_actual ?? '',
-      fecha_ingreso: animal.fecha_ingreso ?? '',
+      fecha_ingreso: dateInputValue(animal.fecha_ingreso),
       estado: animal.estado,
       colores: animal.colores?.map((item) => ({ id: item.id_color, principal: item.es_principal })) ?? [],
       razas: animal.razas?.map((item) => ({ id: item.id_raza, porcentaje: item.porcentaje?.toString() ?? '' })) ?? [],
