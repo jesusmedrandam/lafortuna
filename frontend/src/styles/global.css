@@ -151,6 +151,15 @@ h1, h2, h3, p { margin-top: 0; }
 .toolbar > .input { width: auto; min-width: 190px; }
 .toolbar-filters { display: flex; align-items: center; gap: 9px; }
 .toolbar-filters .input { width: auto; min-width: 155px; }
+.animal-search-toolbar { margin-bottom: 14px; }
+.filter-count { min-width: 21px; height: 21px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: 999px; background: var(--primary); color: white; font-size: .7rem; font-weight: 800; }
+.chevron-open { transform: rotate(180deg); }
+.advanced-filters { margin: 0 0 20px; padding: 18px; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: 0 8px 24px rgba(22,51,36,.05); }
+.advanced-filters-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 17px; }
+.advanced-filters-heading h2 { margin: 0 0 4px; font-size: 1rem; }
+.advanced-filters-heading p { margin: 0; color: var(--muted); font-size: .82rem; }
+.advanced-filters-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.advanced-filters-footer { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: .8rem; }
 .search-box { height: 46px; min-width: min(420px, 100%); display: flex; align-items: center; gap: 9px; padding: 0 13px; background: white; border: 1px solid var(--border); border-radius: 13px; color: var(--muted); }
 .search-box:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,131,79,.1); }
 .search-box input { border: 0; outline: 0; flex: 1; min-width: 0; background: transparent; }
@@ -291,6 +300,7 @@ h1, h2, h3, p { margin-top: 0; }
   .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .record-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .gallery-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .advanced-filters-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 900px) {
@@ -322,6 +332,8 @@ h1, h2, h3, p { margin-top: 0; }
   .search-box { min-width: 0; }
   .toolbar-filters { flex-wrap: wrap; }
   .toolbar-filters .input { flex: 1; min-width: 130px; }
+  .advanced-filters-grid { grid-template-columns: 1fr; }
+  .advanced-filters-heading, .advanced-filters-footer { align-items: stretch; flex-direction: column; }
   .form-grid { grid-template-columns: 1fr; }
   .form-row-between { align-items: flex-start; flex-direction: column; }
   .animal-card { min-height: unset; }

@@ -91,10 +91,19 @@ export const animalsRouter = Router();
 animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
   const p = paginationSchema.extend({
     sexo: z.enum(['MACHO', 'HEMBRA']).optional(),
-    estado: z.string().optional(),
+    estado: z.enum(['ACTIVO', 'MUERTO', 'VENDIDO', 'TRASLADADO', 'DESAPARECIDO', 'INACTIVO']).optional(),
     id_grupo: z.string().uuid().optional(),
     id_ubicacion: z.string().uuid().optional(),
     id_especie: z.string().uuid().optional(),
+    id_propietario: z.string().uuid().optional(),
+    id_raza: z.string().uuid().optional(),
+    id_color: z.string().uuid().optional(),
+    nacimiento_desde: z.string().date().optional(),
+    nacimiento_hasta: z.string().date().optional(),
+  }).superRefine((filters, ctx) => {
+    if (filters.nacimiento_desde && filters.nacimiento_hasta && filters.nacimiento_desde > filters.nacimiento_hasta) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'La fecha inicial de nacimiento no puede ser posterior a la fecha final.' });
+    }
   }).parse(req.query);
   const params: unknown[] = [];
   const where = ['a.deleted_at IS NULL'];
@@ -103,14 +112,29 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
     where.push(condition.replace('?', `$${params.length}`));
   };
   if (p.q) {
-    params.push(`%${p.q}%`, `%${p.q}%`);
-    where.push(`(a.nombre ILIKE $${params.length - 1} OR a.codigo_arete ILIKE $${params.length})`);
+    params.push(`%${p.q}%`);
+    where.push(`(a.nombre ILIKE $${params.length} OR a.codigo_arete ILIKE $${params.length} OR COALESCE(a.descripcion,'') ILIKE $${params.length})`);
   }
   if (p.sexo) add('a.sexo=?', p.sexo);
   if (p.estado) add('a.estado=?', p.estado);
   if (p.id_grupo) add('a.id_grupo_actual=?', p.id_grupo);
   if (p.id_ubicacion) add('a.id_ubicacion_actual=?', p.id_ubicacion);
   if (p.id_especie) add('a.id_especie=?', p.id_especie);
+  if (p.id_propietario) add(`EXISTS (
+    SELECT 1 FROM animal_propietario apf
+    WHERE apf.id_animal=a.id_animal AND apf.id_usuario=?
+      AND apf.fecha_hasta IS NULL AND apf.deleted_at IS NULL
+  )`, p.id_propietario);
+  if (p.id_raza) add(`EXISTS (
+    SELECT 1 FROM animal_raza arf
+    WHERE arf.id_animal=a.id_animal AND arf.id_raza=? AND arf.deleted_at IS NULL
+  )`, p.id_raza);
+  if (p.id_color) add(`EXISTS (
+    SELECT 1 FROM animal_color acf
+    WHERE acf.id_animal=a.id_animal AND acf.id_color=? AND acf.deleted_at IS NULL
+  )`, p.id_color);
+  if (p.nacimiento_desde) add('a.fecha_nacimiento>=?', p.nacimiento_desde);
+  if (p.nacimiento_hasta) add('a.fecha_nacimiento<=?', p.nacimiento_hasta);
   params.push(p.limit, offset(p.page, p.limit));
   const limitIndex = params.length - 1;
   const offsetIndex = params.length;
@@ -137,6 +161,29 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
     params,
   );
   return ok(res, result.rows, { page: p.page, limit: p.limit, total: result.rows[0]?.total ?? 0 });
+}));
+
+animalsRouter.get('/opciones/filtros', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (_req, res) => {
+  const [especies, grupos, ubicaciones, propietarios, razas, colores] = await Promise.all([
+    pool.query(`SELECT id_especie,nombre FROM especie WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
+    pool.query(`SELECT id_grupo,nombre FROM grupo WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
+    pool.query(`SELECT id_ubicacion,nombre,tipo FROM ubicacion WHERE deleted_at IS NULL AND activo=TRUE ORDER BY tipo,nombre`),
+    pool.query(`SELECT DISTINCT u.id_usuario,TRIM(CONCAT(u.nombres,' ',u.apellidos)) nombre
+      FROM animal_propietario ap
+      JOIN usuario u ON u.id_usuario=ap.id_usuario
+      WHERE ap.deleted_at IS NULL AND ap.fecha_hasta IS NULL AND u.deleted_at IS NULL
+      ORDER BY nombre`),
+    pool.query(`SELECT id_raza,nombre,id_especie FROM raza_animal WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
+    pool.query(`SELECT id_color,nombre FROM color_animal WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
+  ]);
+  return ok(res, {
+    especies: especies.rows,
+    grupos: grupos.rows,
+    ubicaciones: ubicaciones.rows,
+    propietarios: propietarios.rows,
+    razas: razas.rows,
+    colores: colores.rows,
+  });
 }));
 
 animalsRouter.get('/opciones/propietarios', requirePermission('ANIMAL_CONSULTAR', 'ANIMAL_CREAR', 'ANIMAL_MODIFICAR'), asyncHandler(async (_req, res) => {

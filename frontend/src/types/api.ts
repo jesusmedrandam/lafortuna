@@ -129,6 +129,15 @@ export interface OwnerOption {
   correo: string;
 }
 
+export interface AnimalFilterOptions {
+  especies: { id_especie: string; nombre: string }[];
+  grupos: { id_grupo: string; nombre: string }[];
+  ubicaciones: { id_ubicacion: string; nombre: string; tipo: Location['tipo'] }[];
+  propietarios: { id_usuario: string; nombre: string }[];
+  razas: { id_raza: string; nombre: string; id_especie: string | null }[];
+  colores: { id_color: string; nombre: string }[];
+}
+
 export interface AnimalImage {
   id_imagen: string;
   id_animal?: string;
@@ -364,6 +373,7 @@ export interface PastureCleaning {
   tipo_limpieza: string;
   fecha_inicio: string;
   fecha_finalizacion: string | null;
+  unidad_aplicacion: 'TANQUES' | 'BOMBADAS' | null;
   cantidad_tanques: number | string | null;
   capacidad_tanque_litros: number | string | null;
   area_intervenida: number | string | null;
