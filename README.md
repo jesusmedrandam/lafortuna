@@ -55,3 +55,4 @@ El archivo `render.yaml` crea el Web Service. Configura manualmente las variable
 - Para la versión 12 aplica `migrations/20260816_trazabilidad_condicion_y_costos_limpieza.sql` después de las migraciones anteriores.
 - Para la versión 13 aplica `migrations/20260817_grupos_politicas_operaciones.sql` después de la migración de la versión 12.
 - Para la versión 14 aplica `migrations/20260818_grupo_ubicacion_consistente.sql` después de la migración de la versión 13.
+- Para la versión 15 aplica `migrations/20260819_motivos_movimiento_y_consumo_limpieza.sql` después de la migración de la versión 14.
