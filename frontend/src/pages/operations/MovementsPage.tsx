@@ -16,6 +16,7 @@ type MovementKind = 'UBICACION' | 'GRUPO' | 'PROPIEDAD' | 'COMBINADO';
 
 interface MovementForm {
   kind: MovementKind;
+  id_propiedad_origen: string;
   selection: AnimalSelectionValue;
   id_ubicacion_destino: string;
   id_grupo_destino: string;
@@ -24,8 +25,11 @@ interface MovementForm {
   observaciones: string;
 }
 
+const MAIN_PROPERTY = 'PROPIEDAD_PRINCIPAL';
+
 const emptyForm = (): MovementForm => ({
   kind: 'UBICACION',
+  id_propiedad_origen: MAIN_PROPERTY,
   selection: { mode: 'GRUPO', groupId: '', animals: [] },
   id_ubicacion_destino: '',
   id_grupo_destino: '',
@@ -33,6 +37,16 @@ const emptyForm = (): MovementForm => ({
   id_motivo_movimiento: '',
   observaciones: '',
 });
+
+function locationPropertyId(location?: Location | null) {
+  if (!location) return '';
+  if (location.tipo === 'OTRO') return location.id_ubicacion;
+  return location.id_propiedad_padre ?? MAIN_PROPERTY;
+}
+
+function groupPropertyId(group?: Group | null) {
+  return group?.id_propiedad ?? MAIN_PROPERTY;
+}
 
 function movementTone(status: string): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
   if (status === 'COMPLETADO') return 'success';
@@ -56,6 +70,7 @@ export function MovementsPage() {
   const groups = useQuery({ queryKey: ['groups', 'movement'], queryFn: () => apiRequest<Group[]>('/grupos?limit=100') });
   const locations = useQuery({ queryKey: ['locations', 'movement'], queryFn: () => apiRequest<Location[]>('/ubicaciones') });
   const reasons = useCatalog('motivos-movimiento');
+  const externalProperties = locations.data?.filter((item) => item.tipo === 'OTRO' && item.activo) ?? [];
   const baseOperationCode = form.kind === 'UBICACION' ? 'MOVIMIENTO_UBICACION' : form.kind === 'GRUPO' ? 'MOVIMIENTO_GRUPO' : form.kind === 'PROPIEDAD' ? 'MOVIMIENTO_PROPIEDAD' : form.id_ubicacion_destino && locations.data?.find((item) => item.id_ubicacion === form.id_ubicacion_destino)?.tipo === 'OTRO' ? 'MOVIMIENTO_PROPIEDAD' : 'MOVIMIENTO_UBICACION';
   const operationCode = form.kind === 'GRUPO' ? baseOperationCode : [baseOperationCode, 'MOVIMIENTO_GRUPO'];
   const selectedCategoryIds = [...new Set(form.selection.animals.filter((item) => item.seleccionado).map((item) => item.id_categoria_animal).filter(Boolean))];
@@ -77,11 +92,13 @@ export function MovementsPage() {
     if (consumedInitialAnimal.current) return;
     const initialAnimal = (route.state as { initialAnimal?: SelectableAnimal } | null)?.initialAnimal;
     if (!initialAnimal) return;
+    if (!locations.data) return;
     consumedInitialAnimal.current = true;
-    setForm({ ...emptyForm(), kind: 'GRUPO', selection: { mode: 'SELECCION_MANUAL', groupId: '', animals: [{ ...initialAnimal, seleccionado: true }] } });
+    const initialLocation = locations.data?.find((item) => item.id_ubicacion === initialAnimal.id_ubicacion_actual);
+    setForm({ ...emptyForm(), kind: 'GRUPO', id_propiedad_origen: locationPropertyId(initialLocation) || MAIN_PROPERTY, selection: { mode: 'SELECCION_MANUAL', groupId: '', animals: [{ ...initialAnimal, seleccionado: true }] } });
     setCreating(true);
     navigate(route.pathname, { replace: true, state: null });
-  }, [navigate, route.pathname, route.state]);
+  }, [locations.data, navigate, route.pathname, route.state]);
 
   useEffect(() => {
     if (!form.id_grupo_destino || !targetGroups || targetGroups.some((item) => item.id_grupo === form.id_grupo_destino)) return;
@@ -96,6 +113,7 @@ export function MovementsPage() {
     mutationFn: async () => {
       const body = {
           tipo_movimiento: form.kind,
+          propiedad_origen: form.id_propiedad_origen || null,
           modo_seleccion: form.selection.mode,
           id_grupo_filtro: form.selection.mode === 'GRUPO' ? form.selection.groupId : null,
           id_ubicacion_destino: form.id_ubicacion_destino || null,
@@ -132,7 +150,9 @@ export function MovementsPage() {
     const destination = locations.data?.find((location) => location.id_ubicacion === item.id_ubicacion_destino);
     const kind: MovementKind = item.tipo_movimiento ?? (item.id_ubicacion_destino && item.id_grupo_destino ? 'COMBINADO' : item.id_grupo_destino ? 'GRUPO' : destination?.tipo === 'OTRO' ? 'PROPIEDAD' : 'UBICACION');
     const legacyGroupId = item.id_grupo_filtro ?? item.id_grupo_origen ?? item.id_grupo_destino ?? '';
-    setForm({ kind, selection: { mode: kind === 'UBICACION' ? 'GRUPO' : item.modo_seleccion, groupId: kind === 'UBICACION' ? legacyGroupId : item.id_grupo_filtro ?? '', animals: item.detalles.map((detail) => ({ id_animal: detail.id_animal, nombre: detail.nombre ?? detail.animal, codigo_arete: detail.codigo_arete ?? detail.arete, sexo: detail.sexo ?? 'HEMBRA', id_categoria_animal: detail.id_categoria_animal ?? '', categoria: detail.categoria ?? '', id_grupo_actual: detail.id_grupo_actual ?? null, grupo: detail.grupo ?? null, id_ubicacion_actual: detail.id_ubicacion_actual ?? null, ubicacion: detail.ubicacion ?? null, seleccionado: kind === 'UBICACION' ? true : detail.seleccionado, observaciones: detail.observaciones ?? null })) }, id_ubicacion_destino: item.id_ubicacion_destino ?? '', id_grupo_destino: kind === 'UBICACION' ? legacyGroupId : item.id_grupo_destino ?? '', id_motivo_movimiento: item.id_motivo_movimiento ?? '', fecha_movimiento: dateInputValue(item.fecha_movimiento), observaciones: item.observaciones ?? '' });
+    const legacySourceGroup = groups.data?.find((group) => group.id_grupo === legacyGroupId);
+    const legacySourceLocation = locations.data?.find((location) => location.id_ubicacion === item.id_ubicacion_origen);
+    setForm({ kind, id_propiedad_origen: legacySourceGroup ? groupPropertyId(legacySourceGroup) : locationPropertyId(legacySourceLocation) || MAIN_PROPERTY, selection: { mode: kind === 'UBICACION' ? 'GRUPO' : item.modo_seleccion, groupId: kind === 'UBICACION' ? legacyGroupId : item.id_grupo_filtro ?? '', animals: item.detalles.map((detail) => ({ id_animal: detail.id_animal, nombre: detail.nombre ?? detail.animal, codigo_arete: detail.codigo_arete ?? detail.arete, sexo: detail.sexo ?? 'HEMBRA', id_categoria_animal: detail.id_categoria_animal ?? '', categoria: detail.categoria ?? '', id_grupo_actual: detail.id_grupo_actual ?? null, grupo: detail.grupo ?? null, id_ubicacion_actual: detail.id_ubicacion_actual ?? null, ubicacion: detail.ubicacion ?? null, seleccionado: kind === 'UBICACION' ? true : detail.seleccionado, observaciones: detail.observaciones ?? null })) }, id_ubicacion_destino: item.id_ubicacion_destino ?? '', id_grupo_destino: kind === 'UBICACION' ? legacyGroupId : item.id_grupo_destino ?? '', id_motivo_movimiento: item.id_motivo_movimiento ?? '', fecha_movimiento: dateInputValue(item.fecha_movimiento), observaciones: item.observaciones ?? '' });
     setEditing(item); setSelected(null); setCreating(true);
   };
 
@@ -193,7 +213,34 @@ export function MovementsPage() {
           </Field>
         </div>
 
-        {editing && editing.estado !== 'BORRADOR' ? <div className="form-alert"><strong>Movimiento aplicado.</strong> Puedes corregir fecha, motivo y observaciones. El recorrido y los animales se mantienen para conservar el historial.</div> : <div className="form-section"><h3>{form.kind === 'UBICACION' ? '2. Grupo de origen' : '2. Animales o grupo de origen'}</h3><AnimalSelectionBuilder value={form.selection} operationCode={operationCode} excludeLocationId={form.kind === 'GRUPO' ? undefined : form.id_ubicacion_destino || undefined} allowedModes={form.kind === 'UBICACION' ? ['GRUPO'] : undefined} lockAnimalSelection={form.kind === 'UBICACION'} autoLoadGroup={form.kind === 'UBICACION'} onChange={updateSelection} /></div>}
+        {editing && editing.estado !== 'BORRADOR' ? <div className="form-alert"><strong>Movimiento aplicado.</strong> Puedes corregir fecha, motivo y observaciones. El recorrido y los animales se mantienen para conservar el historial.</div> : <div className="form-section">
+          <h3>{form.kind === 'UBICACION' ? '2. Propiedad y grupo de origen' : '2. Propiedad y animales de origen'}</h3>
+          <div className="form-grid">
+            <Field label="Propiedad de origen" hint="Los grupos y animales se filtrarán únicamente por esta propiedad." required>
+              <Select value={form.id_propiedad_origen} onChange={(event) => setForm((current) => ({
+                ...current,
+                id_propiedad_origen: event.target.value,
+                selection: { mode: current.kind === 'UBICACION' ? 'GRUPO' : current.selection.mode, groupId: '', animals: [] },
+                id_ubicacion_destino: '',
+                id_grupo_destino: '',
+              }))}>
+                <option value={MAIN_PROPERTY}>Propiedad principal</option>
+                {externalProperties.map((property) => <option key={property.id_ubicacion} value={property.id_ubicacion}>{property.nombre}</option>)}
+              </Select>
+            </Field>
+          </div>
+          <AnimalSelectionBuilder
+            value={form.selection}
+            operationCode={operationCode}
+            excludeLocationId={form.kind === 'GRUPO' ? undefined : form.id_ubicacion_destino || undefined}
+            ownershipScope={form.id_propiedad_origen === MAIN_PROPERTY ? 'EN_PROPIEDAD' : 'FUERA_PROPIEDAD'}
+            propertyScope={form.id_propiedad_origen}
+            allowedModes={form.kind === 'UBICACION' ? ['GRUPO'] : undefined}
+            lockAnimalSelection={form.kind === 'UBICACION'}
+            autoLoadGroup={form.kind === 'UBICACION'}
+            onChange={updateSelection}
+          />
+        </div>}
 
         <div className="form-section">
           <h3>{editing && editing.estado !== 'BORRADOR' ? 'Datos del movimiento' : '3. Destino y datos del movimiento'}</h3>
@@ -218,7 +265,18 @@ export function MovementsPage() {
                 };
               })}>
                 <option value="">Selecciona</option>
-                {locations.data?.filter((item) => item.activo && ((item.id_ubicacion !== sourceLocationId && !selectedLocationIds.includes(item.id_ubicacion)) || item.id_ubicacion === form.id_ubicacion_destino) && (item.id_ubicacion === form.id_ubicacion_destino || (form.kind === 'PROPIEDAD' ? item.categoria_codigo === 'FUERA_PROPIEDAD' : form.kind === 'UBICACION' ? item.tipo !== 'OTRO' : true))).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.propiedad ? `${item.propiedad} · ` : ''}{item.nombre} · {item.tipo === 'OTRO' ? 'Ubicación general' : humanizeCode(item.tipo)}</option>)}
+                {locations.data?.filter((item) => {
+                  if (!item.activo) return false;
+                  if (item.id_ubicacion !== form.id_ubicacion_destino && (item.id_ubicacion === sourceLocationId || selectedLocationIds.includes(item.id_ubicacion))) return false;
+                  if (item.id_ubicacion === form.id_ubicacion_destino) return true;
+                  if (form.kind === 'UBICACION') {
+                    return item.tipo !== 'OTRO' && locationPropertyId(item) === form.id_propiedad_origen;
+                  }
+                  if (form.kind === 'PROPIEDAD') {
+                    return item.categoria_codigo === 'FUERA_PROPIEDAD' && locationPropertyId(item) !== form.id_propiedad_origen;
+                  }
+                  return true;
+                }).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.propiedad ? `${item.propiedad} · ` : ''}{item.nombre} · {item.tipo === 'OTRO' ? 'Ubicación general' : humanizeCode(item.tipo)}</option>)}
               </Select>
             </Field> : null}
             {wholeGroupRelocation ? <Field label="Grupo que se trasladará" hint="El grupo se conserva; todos sus animales pasarán juntos al nuevo potrero o corral." required><Input value={sourceGroup?.nombre ?? ''} placeholder="Selecciona primero el grupo de origen" readOnly /></Field> : <Field label="Grupo de destino" hint={form.kind === 'GRUPO' ? 'Solo aparecen grupos de la misma situación y ubicación.' : 'El grupo y el destino siempre quedarán vinculados.'} required>

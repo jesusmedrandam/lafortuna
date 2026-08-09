@@ -23,6 +23,7 @@ interface Props {
   allowedModes?: SelectionMode[];
   lockAnimalSelection?: boolean;
   autoLoadGroup?: boolean;
+  propertyScope?: string;
 }
 
 const selectionModes = [
@@ -31,7 +32,7 @@ const selectionModes = [
   ['SELECCION_MANUAL', 'Selección manual', ListChecks],
 ] as const;
 
-export function AnimalSelectionBuilder({ value, onChange, allowDose = false, doseUnitId, operationCode, excludeLocationId, ownershipScope, allowedModes, lockAnimalSelection = false, autoLoadGroup = false }: Props) {
+export function AnimalSelectionBuilder({ value, onChange, allowDose = false, doseUnitId, operationCode, excludeLocationId, ownershipScope, allowedModes, lockAnimalSelection = false, autoLoadGroup = false, propertyScope }: Props) {
   const toast = useToast();
   const [search, setSearch] = useState('');
   const lastAutoLoadedGroup = useRef('');
@@ -50,6 +51,7 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
           filtros: {
             excluir_id_ubicacion: excludeLocationId || undefined,
             situacion_propiedad: ownershipScope,
+            propiedad_origen: propertyScope || undefined,
           },
           operaciones: operationCode ? (Array.isArray(operationCode) ? operationCode : [operationCode]) : [],
         },
@@ -112,6 +114,7 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
             <option value="">Selecciona un grupo</option>
             {groups.data?.filter((group) => {
               if (excludeLocationId && group.id_ubicacion_actual === excludeLocationId) return false;
+              if (propertyScope && (group.id_propiedad ?? 'PROPIEDAD_PRINCIPAL') !== propertyScope) return false;
               if (ownershipScope === 'EN_PROPIEDAD') return group.categoria_codigo === 'EN_PROPIEDAD';
               if (ownershipScope === 'FUERA_PROPIEDAD') return group.categoria_codigo !== 'EN_PROPIEDAD';
               return true;
