@@ -122,9 +122,9 @@ salesRouter.post('/', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async
       [[...uniqueIds]],
     )).rows;
     if (animals.length !== uniqueIds.size) throw new NotFoundError('Uno o más animales no existen.');
-    const unavailable = animals.filter((animal) => ['MUERTO', 'VENDIDO'].includes(animal.estado));
+    const unavailable = animals.filter((animal) => animal.estado !== 'ACTIVO');
     if (unavailable.length) {
-      throw new ConflictError(`No se pueden vender: ${unavailable.map((item) => item.nombre).join(', ')}.`);
+      throw new ConflictError(`Solo se pueden vender animales activos. Revisa: ${unavailable.map((item) => item.nombre).join(', ')}.`);
     }
 
     const { animales, ...header } = input;
