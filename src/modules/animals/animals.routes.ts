@@ -76,7 +76,7 @@ const animalUpdateSchema = schema.omit({
 
 const conditionActionSchema = z.object({
   accion: z.enum(['DESACTIVAR', 'REACTIVAR', 'REPORTAR_DESAPARICION', 'REGISTRAR_HALLAZGO']),
-  fecha_evento: z.string().datetime(),
+  fecha_evento: z.string().date(),
   id_grupo_actual: z.string().uuid().nullable().optional(),
   id_ubicacion_actual: z.string().uuid().nullable().optional(),
   observaciones: z.string().trim().max(1000).nullable().optional(),
@@ -385,6 +385,18 @@ async function assertCategoryLocation(client: PoolClient, categoryId: string, lo
   }
 }
 
+async function assertCategoryGroup(client: PoolClient, categoryId: string, speciesId: string, groupId?: string | null) {
+  if (!groupId) return;
+  const group = (await client.query(
+    `SELECT id_especie,id_categoria_animal FROM grupo
+     WHERE id_grupo=$1 AND deleted_at IS NULL AND activo=TRUE`,
+    [groupId],
+  )).rows[0] as { id_especie: string | null; id_categoria_animal: string } | undefined;
+  if (!group) throw new ValidationError('El grupo seleccionado no está disponible.');
+  if (group.id_especie && group.id_especie !== speciesId) throw new ValidationError('El grupo no corresponde a la especie del animal.');
+  if (group.id_categoria_animal !== categoryId) throw new ValidationError('El grupo no corresponde a la situación de propiedad del animal.');
+}
+
 async function assertAnimalCondition(client: PoolClient, code: string, allowInactive = false) {
   const condition = await client.query(
     `SELECT 1 FROM condicion_animal
@@ -473,6 +485,7 @@ animalsRouter.post(
           id_padre: animal.id_padre,
         });
         await assertCategoryLocation(client, animal.id_categoria_animal, animal.id_ubicacion_actual);
+        await assertCategoryGroup(client, animal.id_categoria_animal, animal.id_especie, animal.id_grupo_actual);
         await assertAnimalCondition(client, animal.estado ?? 'ACTIVO');
 
         const row = (await client.query(buildInsert('animal', {
@@ -492,7 +505,7 @@ animalsRouter.post(
         if (peso_inicial_kg !== null && peso_inicial_kg !== undefined) {
           initialWeight = (await client.query(buildInsert('pesaje', {
             id_animal: idAnimal,
-            fecha_pesaje: fecha_pesaje_inicial || new Date().toISOString(),
+            fecha_pesaje: fecha_pesaje_inicial || new Date().toISOString().slice(0, 10),
             peso_kg: peso_inicial_kg,
             metodo: metodo_pesaje_inicial || null,
             observaciones: observaciones_pesaje_inicial || 'Peso inicial registrado al crear el animal.',
@@ -594,14 +607,7 @@ animalsRouter.post('/:id/condicion', requirePermission('ANIMAL_MODIFICAR'), asyn
         if (!location) throw new ValidationError('La ubicación del hallazgo no está disponible.');
         nextCategory = location.id_categoria_animal;
       }
-      if (nextGroup) {
-        const group = (await client.query(
-          `SELECT id_especie FROM grupo WHERE id_grupo=$1 AND deleted_at IS NULL AND activo=TRUE`,
-          [nextGroup],
-        )).rows[0] as { id_especie: string | null } | undefined;
-        if (!group) throw new ValidationError('El grupo seleccionado no está disponible.');
-        if (group.id_especie && group.id_especie !== current.id_especie) throw new ValidationError('El grupo no corresponde a la especie del animal.');
-      }
+      await assertCategoryGroup(client, nextCategory, current.id_especie, nextGroup);
     }
 
     await client.query("SELECT set_config('app.fecha_movimiento', $1, true)", [input.fecha_evento]);

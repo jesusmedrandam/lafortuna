@@ -9,6 +9,7 @@ import { created, noContent, ok } from '../../core/http.js';
 import { NotFoundError, ValidationError } from '../../core/errors.js';
 import { requirePermission } from '../../middleware/permission.js';
 import { buildInsert, buildUpdate } from '../shared/sql.js';
+import { assertAnimalOperationAllowed, type AnimalOperationCode } from '../../services/animal-operation-policy.js';
 
 const GESTATION_DAYS = 283;
 
@@ -44,7 +45,7 @@ type AnimalRow = {
   estado: string;
 };
 
-async function eligibleAnimal(client: PoolClient, id: string, sex: 'HEMBRA' | 'MACHO', role: string) {
+async function eligibleAnimal(client: PoolClient, id: string, sex: 'HEMBRA' | 'MACHO', role: string, operation: AnimalOperationCode) {
   const animal = (await client.query(
     `SELECT id_animal,id_especie,nombre,sexo,fecha_nacimiento,estado
      FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR SHARE`,
@@ -53,6 +54,7 @@ async function eligibleAnimal(client: PoolClient, id: string, sex: 'HEMBRA' | 'M
   if (!animal || animal.sexo !== sex || animal.estado !== 'ACTIVO') {
     throw new ValidationError(`${role} debe ser un animal ${sex === 'HEMBRA' ? 'hembra' : 'macho'} activo.`);
   }
+  await assertAnimalOperationAllowed(client, id, operation);
   if (animal.fecha_nacimiento) {
     const result = await client.query(`SELECT $1::date <= CURRENT_DATE - INTERVAL '1 year' AS valido`, [animal.fecha_nacimiento]);
     if (!result.rows[0]?.valido) throw new ValidationError(`${role} debe tener al menos un año de edad.`);
@@ -83,9 +85,9 @@ async function pregnancyData(client: PoolClient, input: z.infer<typeof pregnancy
     if (input.fecha_confirmacion < startDate) throw new ValidationError('La confirmación no puede ser anterior al inicio del celo.');
   }
   if (!cowId) throw new ValidationError('Selecciona la vaca.');
-  const cow = await eligibleAnimal(client, cowId, 'HEMBRA', 'La vaca');
+  const cow = await eligibleAnimal(client, cowId, 'HEMBRA', 'La vaca', 'PRENEZ');
   if (fatherId) {
-    const father = await eligibleAnimal(client, fatherId, 'MACHO', 'El padre');
+    const father = await eligibleAnimal(client, fatherId, 'MACHO', 'El padre', 'PRENEZ');
     if (father.id_especie !== cow.id_especie) throw new ValidationError('El padre y la vaca deben pertenecer a la misma especie.');
   }
   let gestationDays = input.dias_gestacion_confirmacion ?? null;
@@ -135,9 +137,9 @@ reproductionRouter.get('/celos', requirePermission('PARTO_CONSULTAR'), asyncHand
 reproductionRouter.post('/celos', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(async (req, res) => {
   const input = heatSchema.parse(req.body);
   const row = await transaction(async (client) => {
-    const cow = await eligibleAnimal(client, input.id_vaca, 'HEMBRA', 'La vaca');
+    const cow = await eligibleAnimal(client, input.id_vaca, 'HEMBRA', 'La vaca', 'CELO');
     if (input.id_toro) {
-      const bull = await eligibleAnimal(client, input.id_toro, 'MACHO', 'El toro');
+      const bull = await eligibleAnimal(client, input.id_toro, 'MACHO', 'El toro', 'CELO');
       if (bull.id_especie !== cow.id_especie) throw new ValidationError('El toro y la vaca deben pertenecer a la misma especie.');
     }
     return (await client.query(buildInsert('celo', { ...input, registrado_por: req.user!.id }))).rows[0];
@@ -151,9 +153,9 @@ reproductionRouter.patch('/celos/:id', requirePermission('PARTO_ADMINISTRAR'), a
   const row = await transaction(async (client) => {
     const linked = await client.query('SELECT 1 FROM prenez WHERE id_celo=$1 AND deleted_at IS NULL LIMIT 1', [id]);
     if (linked.rowCount) throw new ValidationError('No se puede modificar un celo que ya tiene una preñez relacionada.');
-    const cow = await eligibleAnimal(client, input.id_vaca, 'HEMBRA', 'La vaca');
+    const cow = await eligibleAnimal(client, input.id_vaca, 'HEMBRA', 'La vaca', 'CELO');
     if (input.id_toro) {
-      const bull = await eligibleAnimal(client, input.id_toro, 'MACHO', 'El toro');
+      const bull = await eligibleAnimal(client, input.id_toro, 'MACHO', 'El toro', 'CELO');
       if (bull.id_especie !== cow.id_especie) throw new ValidationError('El toro y la vaca deben pertenecer a la misma especie.');
     }
     const updated = (await client.query(buildUpdate('celo', 'id_celo', id, input))).rows[0];
@@ -175,7 +177,7 @@ reproductionRouter.delete('/celos/:id', requirePermission('PARTO_ADMINISTRAR'), 
 }));
 
 reproductionRouter.get('/preneces', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(
-  `SELECT p.*,v.nombre vaca,v.codigo_arete,v.id_especie,pa.nombre padre,c.fecha_inicio celo_inicio,
+  `SELECT p.*,v.nombre vaca,v.codigo_arete,v.id_especie,v.id_categoria_animal,pa.nombre padre,c.fecha_inicio celo_inicio,
     pp.id_proximo_parto,pp.estado proximo_estado
    FROM prenez p JOIN animal v ON v.id_animal=p.id_vaca
    LEFT JOIN animal pa ON pa.id_animal=p.id_padre LEFT JOIN celo c ON c.id_celo=p.id_celo

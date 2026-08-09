@@ -27,6 +27,7 @@ import { auditRouter } from './modules/audit/audit.routes.js';
 import { salesRouter } from './modules/sales/sales.routes.js';
 import { marksRouter } from './modules/marks/marks.routes.js';
 import { reproductionRouter } from './modules/reproduction/reproduction.routes.js';
+import { settingsRouter } from './modules/settings/settings.routes.js';
 
 export const app=express();
 app.set('trust proxy',1);
@@ -66,6 +67,7 @@ api.use('/usuarios',usersRouter);
 api.use('/roles',rolesRouter);
 api.use('/auditoria',auditRouter);
 api.use('/ventas',salesRouter);
+api.use('/configuracion',settingsRouter);
 app.use(env.API_PREFIX,api);
 app.use(notFoundHandler);
 app.use(errorHandler);

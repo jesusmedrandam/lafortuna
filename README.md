@@ -31,6 +31,7 @@ Antes de ejecutar `bootstrap:admin`, configura la nueva `DATABASE_URL`, las dos 
 - Limpiezas `/api/limpiezas-potrero`
 - Reproducción `/api/reproduccion/{celos|preneces|proximos-partos}` y partos `/api/partos`
 - Registros simples `/api/registros/{abortos|lactancias|producciones|pesajes|muertes|tratamientos}`
+- Política configurable de operaciones por categoría `/api/configuracion/operaciones-animales`
 - Administración `/api/usuarios`, `/api/roles`, `/api/auditoria`
 
 ## Caché
@@ -52,3 +53,4 @@ El archivo `render.yaml` crea el Web Service. Configura manualmente las variable
 - Para la versión 8 consulta `ACTUALIZACION_MOVIL_Y_ASIGNACION_M7L_V8.md` y aplica las migraciones indicadas antes de desplegar.
 - Antes de producción conviene ejecutar pruebas de integración contra una copia de la base.
 - Para la versión 12 aplica `migrations/20260816_trazabilidad_condicion_y_costos_limpieza.sql` después de las migraciones anteriores.
+- Para la versión 13 aplica `migrations/20260817_grupos_politicas_operaciones.sql` después de la migración de la versión 12.

@@ -8,6 +8,7 @@ import { pool } from '../../database/pool.js';
 import { transaction } from '../../database/transaction.js';
 import { requirePermission } from '../../middleware/permission.js';
 import { cache } from '../../services/cache.service.js';
+import { assertAnimalOperationAllowed } from '../../services/animal-operation-policy.js';
 import { buildInsert } from '../shared/sql.js';
 
 const detailSchema = z.object({
@@ -17,7 +18,7 @@ const detailSchema = z.object({
 });
 
 const saleSchema = z.object({
-  fecha_venta: z.string().datetime(),
+  fecha_venta: z.string().date(),
   id_comprador: z.string().uuid(),
   destino: z.string().trim().max(220).nullable().optional(),
   precio_total: z.number().min(0).nullable().optional(),
@@ -34,7 +35,7 @@ const productDetailSchema = z.object({
 });
 
 const productSaleSchema = z.object({
-  fecha_venta: z.string().datetime(),
+  fecha_venta: z.string().date(),
   periodicidad: z.enum(['DIARIA', 'SEMANAL']),
   id_comprador: z.string().uuid(),
   destino: z.string().trim().max(220).nullable().optional(),
@@ -126,6 +127,7 @@ salesRouter.post('/', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async
     if (unavailable.length) {
       throw new ConflictError(`Solo se pueden vender animales activos. Revisa: ${unavailable.map((item) => item.nombre).join(', ')}.`);
     }
+    for (const animal of animals) await assertAnimalOperationAllowed(client, animal.id_animal, 'VENTA');
 
     const { animales, ...header } = input;
     const row = (await client.query(buildInsert('venta_animal', {

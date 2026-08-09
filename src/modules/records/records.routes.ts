@@ -11,6 +11,7 @@ import { NotFoundError, ValidationError } from '../../core/errors.js';
 import { assertPermission, requirePermission } from '../../middleware/permission.js';
 import { buildInsert, buildUpdate } from '../shared/sql.js';
 import { deleteCloudinaryImage, uploadAnimalImage } from '../../services/cloudinary.service.js';
+import { assertAnimalOperationAllowed, type AnimalOperationCode } from '../../services/animal-operation-policy.js';
 
 type Def = {
   table: string;
@@ -20,15 +21,16 @@ type Def = {
   write: string;
   columns: string[];
   order: string;
+  operation: AnimalOperationCode;
 };
 
 const defs: Record<string, Def> = {
-  abortos: { table: 'aborto', id: 'id_aborto', animalColumn: 'id_vaca', read: 'ABORTO_CONSULTAR', write: 'ABORTO_ADMINISTRAR', columns: ['id_vaca','fecha','causa','meses_gestacion','descripcion'], order: 'fecha DESC NULLS LAST' },
-  lactancias: { table: 'lactancia', id: 'id_lactancia', animalColumn: 'id_vaca', read: 'LACTANCIA_CONSULTAR', write: 'LACTANCIA_ADMINISTRAR', columns: ['id_vaca','id_parto','fecha_inicio','fecha_fin','activa','observaciones'], order: 'fecha_inicio DESC' },
-  producciones: { table: 'produccion_leche', id: 'id_produccion', animalColumn: 'id_vaca', read: 'PRODUCCION_CONSULTAR', write: 'PRODUCCION_ADMINISTRAR', columns: ['id_vaca','id_lactancia','fecha_produccion','turno','litros','observaciones'], order: 'fecha_produccion DESC' },
-  pesajes: { table: 'pesaje', id: 'id_pesaje', animalColumn: 'id_animal', read: 'PESAJE_CONSULTAR', write: 'PESAJE_ADMINISTRAR', columns: ['id_animal','fecha_pesaje','peso_kg','metodo','observaciones'], order: 'fecha_pesaje DESC' },
-  muertes: { table: 'muerte', id: 'id_muerte', animalColumn: 'id_animal', read: 'MUERTE_CONSULTAR', write: 'MUERTE_ADMINISTRAR', columns: ['id_animal','fecha','causa','descripcion'], order: 'fecha DESC' },
-  tratamientos: { table: 'tratamiento_animal', id: 'id_tratamiento', animalColumn: 'id_animal', read: 'SANIDAD_CONSULTAR', write: 'SANIDAD_ADMINISTRAR', columns: ['id_animal','id_tipo_tratamiento','id_medicamento','id_via_administracion','dosis','id_unidad_dosis','fecha_aplicacion','proxima_aplicacion','aplicado_por','descripcion','observaciones'], order: 'fecha_aplicacion DESC' }
+  abortos: { table: 'aborto', id: 'id_aborto', animalColumn: 'id_vaca', read: 'ABORTO_CONSULTAR', write: 'ABORTO_ADMINISTRAR', operation: 'ABORTO', columns: ['id_vaca','fecha','causa','meses_gestacion','descripcion'], order: 'fecha DESC NULLS LAST' },
+  lactancias: { table: 'lactancia', id: 'id_lactancia', animalColumn: 'id_vaca', read: 'LACTANCIA_CONSULTAR', write: 'LACTANCIA_ADMINISTRAR', operation: 'LACTANCIA', columns: ['id_vaca','id_parto','fecha_inicio','fecha_fin','activa','observaciones'], order: 'fecha_inicio DESC' },
+  producciones: { table: 'produccion_leche', id: 'id_produccion', animalColumn: 'id_vaca', read: 'PRODUCCION_CONSULTAR', write: 'PRODUCCION_ADMINISTRAR', operation: 'PRODUCCION_LECHE', columns: ['id_vaca','id_lactancia','fecha_produccion','turno','litros','observaciones'], order: 'fecha_produccion DESC' },
+  pesajes: { table: 'pesaje', id: 'id_pesaje', animalColumn: 'id_animal', read: 'PESAJE_CONSULTAR', write: 'PESAJE_ADMINISTRAR', operation: 'PESAJE', columns: ['id_animal','fecha_pesaje','peso_kg','metodo','observaciones'], order: 'fecha_pesaje DESC' },
+  muertes: { table: 'muerte', id: 'id_muerte', animalColumn: 'id_animal', read: 'MUERTE_CONSULTAR', write: 'MUERTE_ADMINISTRAR', operation: 'MUERTE', columns: ['id_animal','fecha','causa','descripcion'], order: 'fecha DESC' },
+  tratamientos: { table: 'tratamiento_animal', id: 'id_tratamiento', animalColumn: 'id_animal', read: 'SANIDAD_CONSULTAR', write: 'SANIDAD_ADMINISTRAR', operation: 'TRATAMIENTO', columns: ['id_animal','id_tipo_tratamiento','id_medicamento','id_via_administracion','dosis','id_unidad_dosis','fecha_aplicacion','proxima_aplicacion','aplicado_por','descripcion','observaciones'], order: 'fecha_aplicacion DESC' }
 };
 
 function definition(moduleName: string | undefined) {
@@ -61,14 +63,7 @@ recordsRouter.post('/:module', asyncHandler(async (req, res) => {
   const data = allowedBody(req.body as Record<string, unknown>, d.columns);
   const animalId = data[d.animalColumn];
   if (typeof animalId !== 'string') throw new ValidationError('Selecciona un animal.');
-  const animal = (await pool.query(
-    `SELECT nombre,estado FROM animal WHERE id_animal=$1 AND deleted_at IS NULL`,
-    [animalId],
-  )).rows[0] as { nombre: string; estado: string } | undefined;
-  if (!animal) throw new NotFoundError('Animal no encontrado.');
-  if (animal.estado !== 'ACTIVO') {
-    throw new ValidationError(`${animal.nombre} no está activo y no admite nuevas operaciones.`);
-  }
+  await assertAnimalOperationAllowed(pool, animalId, d.operation);
   const row = (await pool.query(buildInsert(d.table, { ...data, registrado_por: req.user!.id }))).rows[0];
   return created(res, row);
 }));
@@ -90,7 +85,7 @@ recordsRouter.delete('/:module/:id', asyncHandler(async (req, res) => {
 
 const partoSchema = z.object({
   id_prenez: z.string().uuid(),
-  fecha_parto: z.string().datetime(),
+  fecha_parto: z.string().date(),
   fecha_parto_local: z.string().date().optional(),
   tipo_parto: z.enum(['NORMAL','ASISTIDO','CESAREA','DESCONOCIDO']).default('NORMAL'),
   observaciones: z.string().nullable().optional(),
@@ -111,7 +106,7 @@ const partoSchema = z.object({
   })).min(1)
 });
 const partoUpdateSchema = z.object({
-  fecha_parto: z.string().datetime(),
+  fecha_parto: z.string().date(),
   tipo_parto: z.enum(['NORMAL','ASISTIDO','CESAREA','DESCONOCIDO']),
   observaciones: z.string().nullable().optional(),
 });
@@ -186,6 +181,7 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
       if (mother.estado !== 'ACTIVO') {
         throw new ValidationError('La madre debe estar activa para registrar el parto.');
       }
+      await assertAnimalOperationAllowed(client, motherId, 'PARTO');
 
       if (fatherId) {
         const father = (await client.query(
@@ -227,12 +223,15 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
 
         if (item.animal.id_grupo_actual) {
           const group = (await client.query(
-            `SELECT id_especie,activo FROM grupo WHERE id_grupo=$1 AND deleted_at IS NULL`,
+            `SELECT id_especie,id_categoria_animal,activo FROM grupo WHERE id_grupo=$1 AND deleted_at IS NULL`,
             [item.animal.id_grupo_actual],
-          )).rows[0] as { id_especie: string | null; activo: boolean } | undefined;
+          )).rows[0] as { id_especie: string | null; id_categoria_animal: string; activo: boolean } | undefined;
           if (!group || !group.activo) throw new ValidationError(`El grupo de la cría ${order} no está disponible.`);
           if (group.id_especie && group.id_especie !== mother.id_especie) {
             throw new ValidationError(`El grupo de la cría ${order} no corresponde a su especie.`);
+          }
+          if (group.id_categoria_animal !== mother.id_categoria_animal) {
+            throw new ValidationError(`El grupo de la cría ${order} no coincide con la situación de propiedad de la madre.`);
           }
         }
 
