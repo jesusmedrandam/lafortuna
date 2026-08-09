@@ -422,7 +422,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
         <div className="form-section">
           <h3>Clasificación y lugar actual</h3>
           <div className="form-grid">
-            <Field label="Categoría" required hint="Indica si el animal está dentro o fuera de la propiedad.">
+            <Field label="Situación de propiedad" required hint="Indica si el animal está dentro de la finca o en otra propiedad.">
               <Select value={form.id_categoria_animal} onChange={(event) => setForm((current) => ({ ...current, id_categoria_animal: event.target.value, id_ubicacion_actual: '' }))} required>
                 <option value="">Selecciona</option>
                 {categories.data?.filter((item) => item.activo !== false).map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}
@@ -443,7 +443,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
             <Field label="Fecha de ingreso">
               <Input type="date" value={form.fecha_ingreso} onChange={(event) => setForm((current) => ({ ...current, fecha_ingreso: event.target.value }))} />
             </Field>
-            <Field label="Estado">
+            <Field label="Condición del animal" hint="Inactivo significa que el registro no está operativo; no significa que el animal esté fuera de la propiedad.">
               <Select value={form.estado} onChange={(event) => setForm((current) => ({ ...current, estado: event.target.value as Animal['estado'] }))}>
                 {['ACTIVO', 'INACTIVO', 'VENDIDO', 'TRASLADADO', 'DESAPARECIDO', 'MUERTO'].map((item) => <option key={item}>{item}</option>)}
               </Select>

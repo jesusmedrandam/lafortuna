@@ -12,7 +12,7 @@ import { AnimalFormModal } from './AnimalFormModal';
 
 const pageSize = 20;
 const filterKeys = ['sexo', 'estado', 'id_categoria_animal', 'id_especie', 'id_grupo', 'id_ubicacion', 'id_propietario', 'id_raza', 'id_color', 'id_marquilla', 'nacimiento_desde', 'nacimiento_hasta'] as const;
-const advancedFilterKeys = ['id_ubicacion', 'id_especie', 'id_raza', 'id_color', 'id_marquilla', 'nacimiento_desde', 'nacimiento_hasta'] as const;
+const advancedFilterKeys = ['estado', 'id_grupo', 'id_ubicacion', 'id_especie', 'id_raza', 'id_color', 'id_marquilla', 'nacimiento_desde', 'nacimiento_hasta'] as const;
 
 export function AnimalsPage() {
   const { hasPermission } = useAuth();
@@ -74,10 +74,8 @@ export function AnimalsPage() {
       <SearchBox value={search} onChange={(value) => { setSearch(value); updateParam('q', value); }} placeholder="Buscar por nombre, arete o descripción…" />
       <div className="toolbar-filters">
         <Select aria-label="Filtrar por sexo" value={filters.sexo} onChange={(event) => updateParam('sexo', event.target.value)}><option value="">Todos los sexos</option><option value="HEMBRA">Hembras</option><option value="MACHO">Machos</option></Select>
-        <Select aria-label="Filtrar por estado" value={filters.estado} onChange={(event) => updateParam('estado', event.target.value)}><option value="">Todos los estados</option>{['ACTIVO', 'INACTIVO', 'VENDIDO', 'TRASLADADO', 'DESAPARECIDO', 'MUERTO'].map((item) => <option key={item} value={item}>{humanizeCode(item)}</option>)}</Select>
         <Select aria-label="Filtrar por propietario" value={filters.id_propietario} onChange={(event) => updateParam('id_propietario', event.target.value)}><option value="">Todos los propietarios</option>{options.data?.propietarios.map((item) => <option key={item.id_usuario} value={item.id_usuario}>{item.nombre}</option>)}</Select>
-        <Select aria-label="Filtrar por categoría" value={filters.id_categoria_animal} onChange={(event) => updateParam('id_categoria_animal', event.target.value)}><option value="">Todas las categorías</option>{options.data?.categorias.map((item) => <option key={item.id_categoria_animal} value={item.id_categoria_animal}>{item.nombre}</option>)}</Select>
-        <Select aria-label="Filtrar por grupo" value={filters.id_grupo} onChange={(event) => updateParam('id_grupo', event.target.value)}><option value="">Todos los grupos</option>{options.data?.grupos.map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre}</option>)}</Select>
+        <Select aria-label="Filtrar por situación de propiedad" value={filters.id_categoria_animal} onChange={(event) => updateParam('id_categoria_animal', event.target.value)}><option value="">Dentro y fuera de propiedad</option>{options.data?.categorias.map((item) => <option key={item.id_categoria_animal} value={item.id_categoria_animal}>{item.nombre}</option>)}</Select>
         <IconButton className="advanced-filter-trigger" label="Filtros avanzados" onClick={() => setAdvancedOpen((current) => !current)} aria-expanded={advancedOpen}><SlidersHorizontal size={20} />{activeFilterCount ? <span className="filter-count">{activeFilterCount}</span> : null}</IconButton>
       </div>
     </div>
@@ -86,6 +84,8 @@ export function AnimalsPage() {
       <div className="advanced-filters-heading"><div><h2>Búsqueda avanzada</h2><p>Combina varios criterios para encontrar animales específicos.</p></div><div className="advanced-filter-actions"><IconButton label="Limpiar filtros" disabled={!activeFilterCount} onClick={clearFilters}><Paintbrush size={17} /></IconButton><IconButton label="Cerrar filtros" onClick={() => setAdvancedOpen(false)}><X size={18} /></IconButton></div></div>
       {options.isError ? <p className="form-alert form-alert-error">No se pudieron cargar las opciones de los filtros.</p> : null}
       <div className="advanced-filters-grid">
+        <Field label="Condición del animal"><Select value={filters.estado} onChange={(event) => updateParam('estado', event.target.value)}><option value="">Todas las condiciones</option>{['ACTIVO', 'INACTIVO', 'VENDIDO', 'TRASLADADO', 'DESAPARECIDO', 'MUERTO'].map((item) => <option key={item} value={item}>{humanizeCode(item)}</option>)}</Select></Field>
+        <Field label="Grupo"><Select value={filters.id_grupo} onChange={(event) => updateParam('id_grupo', event.target.value)}><option value="">Todos los grupos</option>{options.data?.grupos.map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre}</option>)}</Select></Field>
         <Field label="Ubicación"><Select value={filters.id_ubicacion} onChange={(event) => updateParam('id_ubicacion', event.target.value)}><option value="">Todas las ubicaciones</option>{options.data?.ubicaciones.filter((item) => !filters.id_categoria_animal || item.id_categoria_animal === filters.id_categoria_animal).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.tipo === 'OTRO' ? 'Otra propiedad' : humanizeCode(item.tipo)}</option>)}</Select></Field>
         <Field label="Especie"><Select value={filters.id_especie} onChange={(event) => updateSpecies(event.target.value)}><option value="">Todas las especies</option>{options.data?.especies.map((item) => <option key={item.id_especie} value={item.id_especie}>{item.nombre}</option>)}</Select></Field>
         <Field label="Raza"><Select value={filters.id_raza} onChange={(event) => updateParam('id_raza', event.target.value)}><option value="">Todas las razas</option>{visibleRaces.map((item) => <option key={item.id_raza} value={item.id_raza}>{item.nombre}</option>)}</Select></Field>
