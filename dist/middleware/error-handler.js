@@ -20,6 +20,16 @@ export const errorHandler = (error, req, res, _next) => {
     if (pgError.code === '23514' || pgError.code === '22P02') {
         return res.status(400).json({ ok: false, error: { code: 'DATABASE_VALIDATION', message: pgError.message || 'Los datos no cumplen las reglas del sistema.' }, requestId: req.requestId });
     }
+    if (pgError.code === '23502') {
+        const field = pgError.column ? ` “${pgError.column}”` : '';
+        return res.status(400).json({ ok: false, error: { code: 'REQUIRED_DATABASE_FIELD', message: `Falta completar el campo obligatorio${field}.`, details: pgError.detail }, requestId: req.requestId });
+    }
+    if (pgError.code === 'P0001') {
+        return res.status(400).json({ ok: false, error: { code: 'DATABASE_RULE', message: pgError.message || 'La operación no cumple una regla del sistema.' }, requestId: req.requestId });
+    }
+    if (pgError.code === '42P01' || pgError.code === '42703' || pgError.code === '42883') {
+        return res.status(503).json({ ok: false, error: { code: 'DATABASE_MIGRATION_REQUIRED', message: 'La base de datos no tiene aplicada la última migración requerida para esta función.' }, requestId: req.requestId });
+    }
     console.error(`[${req.requestId}]`, error);
     return res.status(500).json({ ok: false, error: { code: 'INTERNAL_ERROR', message: 'Ocurrió un error interno.' }, requestId: req.requestId });
 };
