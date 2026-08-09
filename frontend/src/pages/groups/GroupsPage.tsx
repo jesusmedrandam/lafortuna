@@ -45,7 +45,7 @@ function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => v
       nombre: group.nombre,
       id_tipo_grupo: group.id_tipo_grupo,
       id_categoria_animal: group.id_categoria_animal,
-      id_propiedad: currentLocation?.tipo === 'OTRO' ? currentLocation.id_ubicacion : currentLocation?.id_propiedad_padre ?? MAIN_PROPERTY,
+      id_propiedad: group.propiedad_es_principal ? MAIN_PROPERTY : group.id_propiedad ?? currentLocation?.id_propiedad ?? '',
       id_ubicacion_actual: group.id_ubicacion_actual ?? '',
       id_especie: group.id_especie ?? '',
       descripcion: group.descripcion ?? '',
@@ -72,8 +72,8 @@ function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => v
     : '';
   const externalProperties = locations.data?.filter((item) => item.tipo === 'OTRO' && (item.activo || item.id_ubicacion === form.id_propiedad)) ?? [];
   const availableLocations = form.id_propiedad === MAIN_PROPERTY
-    ? locations.data?.filter((item) => (item.activo || item.id_ubicacion === form.id_ubicacion_actual) && item.tipo !== 'OTRO' && !item.id_propiedad_padre) ?? []
-    : locations.data?.filter((item) => (item.activo || item.id_ubicacion === form.id_ubicacion_actual) && (item.id_ubicacion === form.id_propiedad || item.id_propiedad_padre === form.id_propiedad)) ?? [];
+    ? locations.data?.filter((item) => (item.activo || item.id_ubicacion === form.id_ubicacion_actual) && item.tipo !== 'OTRO' && item.propiedad_es_principal) ?? []
+    : locations.data?.filter((item) => (item.activo || item.id_ubicacion === form.id_ubicacion_actual) && item.id_propiedad === form.id_propiedad) ?? [];
 
   const mutation = useMutation({
     mutationFn: () => apiRequest(group ? `/grupos/${group.id_grupo}` : '/grupos', {
@@ -123,7 +123,7 @@ function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => v
             id_ubicacion_actual: propertyId === MAIN_PROPERTY ? '' : propertyId,
           }));
         }} required><option value={MAIN_PROPERTY}>Propiedad principal</option>{externalProperties.map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre}</option>)}</Select></Field>
-        <Field label="Potrero o corral" hint={group?.total_animales ? 'La ubicación de un grupo ocupado se modifica desde Movimientos.' : form.id_propiedad === MAIN_PROPERTY ? 'Selecciona una ubicación de la propiedad principal.' : 'La ubicación histórica o general permite registrar el grupo aunque la propiedad todavía no tenga potreros ni corrales.'} required><Select disabled={Boolean(group?.total_animales)} value={form.id_ubicacion_actual} onChange={(event) => setForm((current) => ({ ...current, id_ubicacion_actual: event.target.value }))} required><option value="">Selecciona</option>{availableLocations.map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.id_ubicacion === form.id_propiedad ? `${item.nombre} · Ubicación histórica/general` : `${item.nombre} · ${item.tipo === 'POTRERO' ? 'Potrero' : 'Corral'}`}</option>)}</Select></Field>
+        <Field label="Potrero, corral o ubicación general" hint={group?.total_animales ? 'La ubicación de un grupo ocupado se modifica desde Movimientos.' : form.id_propiedad === MAIN_PROPERTY ? 'Selecciona una ubicación de la propiedad principal.' : 'La ubicación general se crea automáticamente con la propiedad y permite registrar el grupo aunque todavía no tenga potreros ni corrales.'} required><Select disabled={Boolean(group?.total_animales)} value={form.id_ubicacion_actual} onChange={(event) => setForm((current) => ({ ...current, id_ubicacion_actual: event.target.value }))} required><option value="">Selecciona</option>{availableLocations.map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.id_ubicacion === form.id_propiedad ? `${item.nombre} · Ubicación general` : `${item.nombre} · ${item.tipo === 'POTRERO' ? 'Potrero' : 'Corral'}`}</option>)}</Select></Field>
         <Field label="Especie"><Select value={form.id_especie} onChange={(event) => setForm((current) => ({ ...current, id_especie: event.target.value }))}><option value="">Cualquier especie</option>{species.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>
         <Field label="Capacidad"><Input type="number" min="1" value={form.capacidad} onChange={(event) => setForm((current) => ({ ...current, capacidad: event.target.value }))} /></Field>
         <Field label="Estado"><Select value={String(form.activo)} onChange={(event) => setForm((current) => ({ ...current, activo: event.target.value === 'true' }))}><option value="true">Activo</option><option value="false">Inactivo</option></Select></Field>

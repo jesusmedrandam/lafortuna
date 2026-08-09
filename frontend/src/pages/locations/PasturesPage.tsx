@@ -107,7 +107,7 @@ function PastureModal({
           ? {
               nombre: pasture.nombre,
               codigo: pasture.codigo ?? "",
-              id_propiedad_padre: pasture.id_propiedad_padre ?? MAIN_PROPERTY,
+              id_propiedad_padre: pasture.propiedad_es_principal ? MAIN_PROPERTY : pasture.id_propiedad,
               descripcion: pasture.descripcion ?? "",
               activo: pasture.activo,
               area: pasture.area?.toString() ?? "",

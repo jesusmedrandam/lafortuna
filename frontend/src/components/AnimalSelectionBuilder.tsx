@@ -114,7 +114,10 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
             <option value="">Selecciona un grupo</option>
             {groups.data?.filter((group) => {
               if (excludeLocationId && group.id_ubicacion_actual === excludeLocationId) return false;
-              if (propertyScope && (group.id_propiedad ?? 'PROPIEDAD_PRINCIPAL') !== propertyScope) return false;
+              if (propertyScope) {
+                const groupProperty = group.propiedad_es_principal ? 'PROPIEDAD_PRINCIPAL' : group.id_propiedad;
+                if (groupProperty !== propertyScope) return false;
+              }
               if (ownershipScope === 'EN_PROPIEDAD') return group.categoria_codigo === 'EN_PROPIEDAD';
               if (ownershipScope === 'FUERA_PROPIEDAD') return group.categoria_codigo !== 'EN_PROPIEDAD';
               return true;

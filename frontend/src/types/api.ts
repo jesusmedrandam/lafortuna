@@ -221,6 +221,7 @@ export interface Group {
   id_propiedad_padre: string | null;
   id_propiedad: string | null;
   propiedad: string | null;
+  propiedad_es_principal: boolean;
   id_especie: string | null;
   especie: string | null;
   descripcion: string | null;
@@ -236,8 +237,10 @@ export interface Location {
   nombre: string;
   tipo: 'POTRERO' | 'CORRAL' | 'OTRO';
   id_categoria_animal: string;
+  id_propiedad: string;
   id_propiedad_padre: string | null;
   propiedad: string | null;
+  propiedad_es_principal: boolean;
   categoria: string;
   categoria_codigo: string;
   descripcion: string | null;
@@ -262,8 +265,10 @@ export interface Pasture {
   id_potrero: string;
   id_ubicacion: string;
   id_categoria_animal: string;
+  id_propiedad: string;
   id_propiedad_padre: string | null;
   propiedad: string | null;
+  propiedad_es_principal: boolean;
   nombre: string;
   codigo: string | null;
   descripcion: string | null;
@@ -310,8 +315,10 @@ export interface Corral {
   id_corral: string;
   id_ubicacion: string;
   id_categoria_animal: string;
+  id_propiedad: string;
   id_propiedad_padre: string | null;
   propiedad: string | null;
+  propiedad_es_principal: boolean;
   nombre: string;
   codigo: string | null;
   descripcion: string | null;
@@ -422,11 +429,17 @@ export interface Movement {
   id_ubicacion_destino: string | null;
   id_grupo_origen: string | null;
   id_grupo_destino: string | null;
+  id_propiedad_origen: string | null;
+  id_propiedad_destino: string | null;
   id_motivo_movimiento: string;
   ubicacion_origen: string | null;
   ubicacion_destino: string | null;
   grupo_origen: string | null;
   grupo_destino: string | null;
+  propiedad_origen: string | null;
+  propiedad_destino: string | null;
+  propiedad_origen_es_principal: boolean | null;
+  propiedad_destino_es_principal: boolean | null;
   fecha_movimiento: string;
   motivo: string | null;
   motivo_catalogo: string | null;

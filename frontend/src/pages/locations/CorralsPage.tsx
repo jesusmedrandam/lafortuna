@@ -78,7 +78,7 @@ function CorralModal({
               nombre: corral.nombre,
               codigo: corral.codigo ?? "",
               id_propiedad_padre:
-                corral.id_propiedad_padre ?? MAIN_PROPERTY,
+                corral.propiedad_es_principal ? MAIN_PROPERTY : corral.id_propiedad,
               descripcion: corral.descripcion ?? "",
               activo: corral.activo,
               id_tipo_corral: corral.id_tipo_corral,

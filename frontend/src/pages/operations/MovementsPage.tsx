@@ -40,12 +40,12 @@ const emptyForm = (): MovementForm => ({
 
 function locationPropertyId(location?: Location | null) {
   if (!location) return '';
-  if (location.tipo === 'OTRO') return location.id_ubicacion;
-  return location.id_propiedad_padre ?? MAIN_PROPERTY;
+  return location.propiedad_es_principal ? MAIN_PROPERTY : location.id_propiedad;
 }
 
 function groupPropertyId(group?: Group | null) {
-  return group?.id_propiedad ?? MAIN_PROPERTY;
+  if(!group)return '';
+  return group.propiedad_es_principal ? MAIN_PROPERTY : group.id_propiedad ?? '';
 }
 
 function movementTone(status: string): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
@@ -73,17 +73,15 @@ export function MovementsPage() {
   const externalProperties = locations.data?.filter((item) => item.tipo === 'OTRO' && item.activo) ?? [];
   const baseOperationCode = form.kind === 'UBICACION' ? 'MOVIMIENTO_UBICACION' : form.kind === 'GRUPO' ? 'MOVIMIENTO_GRUPO' : form.kind === 'PROPIEDAD' ? 'MOVIMIENTO_PROPIEDAD' : form.id_ubicacion_destino && locations.data?.find((item) => item.id_ubicacion === form.id_ubicacion_destino)?.tipo === 'OTRO' ? 'MOVIMIENTO_PROPIEDAD' : 'MOVIMIENTO_UBICACION';
   const operationCode = form.kind === 'GRUPO' ? baseOperationCode : [baseOperationCode, 'MOVIMIENTO_GRUPO'];
-  const selectedCategoryIds = [...new Set(form.selection.animals.filter((item) => item.seleccionado).map((item) => item.id_categoria_animal).filter(Boolean))];
   const selectedLocationIds = [...new Set(form.selection.animals.filter((item) => item.seleccionado).map((item) => item.id_ubicacion_actual).filter(Boolean))];
   const sourceGroup = groups.data?.find((item) => item.id_grupo === form.selection.groupId);
-  const sourceCategoryId = sourceGroup?.id_categoria_animal || (selectedCategoryIds.length === 1 ? selectedCategoryIds[0] : null);
   const sourceLocationId = sourceGroup?.id_ubicacion_actual || (selectedLocationIds.length === 1 ? selectedLocationIds[0] : null);
   const hasSelectedOrigin = Boolean(sourceGroup) || form.selection.animals.some((item) => item.seleccionado);
   const targetGroups = groups.data?.filter((item) => {
     if (!item.activo) return false;
     if (form.kind === 'UBICACION' && item.id_grupo === form.selection.groupId) return true;
     if (!item.id_ubicacion_actual) return false;
-    if (form.kind === 'GRUPO') return (!sourceCategoryId || item.id_categoria_animal === sourceCategoryId) && (!sourceLocationId || item.id_ubicacion_actual === sourceLocationId);
+    if (form.kind === 'GRUPO') return item.id_grupo!==form.selection.groupId && groupPropertyId(item)===form.id_propiedad_origen;
     if (item.id_ubicacion_actual === form.id_ubicacion_destino) return true;
     return false;
   });
@@ -145,14 +143,17 @@ export function MovementsPage() {
     onError: (error) => toast.show(error instanceof ApiError ? error.message : (error as Error).message, 'error'),
   });
 
-  const list = useListControls({ items: movements.data ?? [], storageKey: 'movements', searchText: (item) => `${item.motivo_catalogo ?? item.motivo ?? ''} ${item.ubicacion_origen ?? ''} ${item.ubicacion_destino ?? ''} ${item.grupo_origen ?? ''} ${item.grupo_destino ?? ''} ${item.detalles.map((detail) => `${detail.animal} ${detail.arete ?? ''}`).join(' ')}`, dateValue: (item) => item.fecha_movimiento, nameValue: (item) => item.motivo_catalogo || item.motivo || item.ubicacion_destino || item.grupo_destino || '' });
+  const list = useListControls({ items: movements.data ?? [], storageKey: 'movements', searchText: (item) => `${item.motivo_catalogo ?? item.motivo ?? ''} ${item.propiedad_origen ?? ''} ${item.propiedad_destino ?? ''} ${item.ubicacion_origen ?? ''} ${item.ubicacion_destino ?? ''} ${item.grupo_origen ?? ''} ${item.grupo_destino ?? ''} ${item.detalles.map((detail) => `${detail.animal} ${detail.arete ?? ''}`).join(' ')}`, dateValue: (item) => item.fecha_movimiento, nameValue: (item) => item.motivo_catalogo || item.motivo || item.ubicacion_destino || item.grupo_destino || item.propiedad_destino || '' });
   const editMovement = (item: Movement) => {
     const destination = locations.data?.find((location) => location.id_ubicacion === item.id_ubicacion_destino);
     const kind: MovementKind = item.tipo_movimiento ?? (item.id_ubicacion_destino && item.id_grupo_destino ? 'COMBINADO' : item.id_grupo_destino ? 'GRUPO' : destination?.tipo === 'OTRO' ? 'PROPIEDAD' : 'UBICACION');
     const legacyGroupId = item.id_grupo_filtro ?? item.id_grupo_origen ?? item.id_grupo_destino ?? '';
     const legacySourceGroup = groups.data?.find((group) => group.id_grupo === legacyGroupId);
     const legacySourceLocation = locations.data?.find((location) => location.id_ubicacion === item.id_ubicacion_origen);
-    setForm({ kind, id_propiedad_origen: legacySourceGroup ? groupPropertyId(legacySourceGroup) : locationPropertyId(legacySourceLocation) || MAIN_PROPERTY, selection: { mode: kind === 'UBICACION' ? 'GRUPO' : item.modo_seleccion, groupId: kind === 'UBICACION' ? legacyGroupId : item.id_grupo_filtro ?? '', animals: item.detalles.map((detail) => ({ id_animal: detail.id_animal, nombre: detail.nombre ?? detail.animal, codigo_arete: detail.codigo_arete ?? detail.arete, sexo: detail.sexo ?? 'HEMBRA', id_categoria_animal: detail.id_categoria_animal ?? '', categoria: detail.categoria ?? '', id_grupo_actual: detail.id_grupo_actual ?? null, grupo: detail.grupo ?? null, id_ubicacion_actual: detail.id_ubicacion_actual ?? null, ubicacion: detail.ubicacion ?? null, seleccionado: kind === 'UBICACION' ? true : detail.seleccionado, observaciones: detail.observaciones ?? null })) }, id_ubicacion_destino: item.id_ubicacion_destino ?? '', id_grupo_destino: kind === 'UBICACION' ? legacyGroupId : item.id_grupo_destino ?? '', id_motivo_movimiento: item.id_motivo_movimiento ?? '', fecha_movimiento: dateInputValue(item.fecha_movimiento), observaciones: item.observaciones ?? '' });
+    const sourceProperty = item.propiedad_origen_es_principal
+      ? MAIN_PROPERTY
+      : item.id_propiedad_origen ?? (legacySourceGroup ? groupPropertyId(legacySourceGroup) : locationPropertyId(legacySourceLocation));
+    setForm({ kind, id_propiedad_origen: sourceProperty || MAIN_PROPERTY, selection: { mode: kind === 'UBICACION' ? 'GRUPO' : item.modo_seleccion, groupId: kind === 'UBICACION' ? legacyGroupId : item.id_grupo_filtro ?? '', animals: item.detalles.map((detail) => ({ id_animal: detail.id_animal, nombre: detail.nombre ?? detail.animal, codigo_arete: detail.codigo_arete ?? detail.arete, sexo: detail.sexo ?? 'HEMBRA', id_categoria_animal: detail.id_categoria_animal ?? '', categoria: detail.categoria ?? '', id_grupo_actual: detail.id_grupo_actual ?? null, grupo: detail.grupo ?? null, id_ubicacion_actual: detail.id_ubicacion_actual ?? null, ubicacion: detail.ubicacion ?? null, seleccionado: kind === 'UBICACION' ? true : detail.seleccionado, observaciones: detail.observaciones ?? null })) }, id_ubicacion_destino: item.id_ubicacion_destino ?? '', id_grupo_destino: kind === 'UBICACION' ? legacyGroupId : item.id_grupo_destino ?? '', id_motivo_movimiento: item.id_motivo_movimiento ?? '', fecha_movimiento: dateInputValue(item.fecha_movimiento), observaciones: item.observaciones ?? '' });
     setEditing(item); setSelected(null); setCreating(true);
   };
 
@@ -191,7 +192,7 @@ export function MovementsPage() {
 
     <ListToolbar search={list.search} onSearch={list.setSearch} order={list.order} onOrder={list.setOrder} placeholder="Buscar por motivo, origen, destino o animal…" count={list.visible.length} />
 
-    {movements.isLoading ? <LoadingState /> : movements.isError ? <ErrorState message={(movements.error as Error).message} onRetry={() => void movements.refetch()} /> : list.visible.length ? <Card className="record-list movements-record-list"><div className="record-list-head"><span>Movimiento</span><span>Fecha</span><span>Origen</span><span>Destino</span><span>Estado</span><span /></div>{list.visible.map((movement) => <button type="button" className="record-list-row" key={movement.id_movimiento} onClick={() => setSelected(movement)}><span><strong>{movement.motivo_catalogo || movement.motivo || 'Movimiento de animales'}</strong><small>{movement.total_seleccionados} de {movement.total_candidatos} animales</small></span><span><strong>{formatDate(movement.fecha_movimiento)}</strong></span><span><strong>{movement.ubicacion_origen || movement.grupo_origen || 'Varias ubicaciones'}</strong></span><span><strong>{movement.ubicacion_destino || movement.grupo_destino || 'Sin destino'}</strong></span><span><Badge tone={movementTone(movement.estado)}>{humanizeCode(movement.estado)}</Badge></span><span className="record-row-actions">{movement.estado !== 'CANCELADO' && hasPermission('MOVIMIENTO_CREAR') ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); editMovement(movement); }}><Edit3 size={16} />Editar</Button> : null}<ChevronRight size={18} /></span></button>)}</Card> : <EmptyState icon={ArrowLeftRight} title="Aún no hay movimientos" description="Registra un cambio de grupo, potrero, corral u otra ubicación." action={hasPermission('MOVIMIENTO_CREAR') ? <Button onClick={() => setCreating(true)}><Plus size={18} />Crear movimiento</Button> : undefined} />}
+    {movements.isLoading ? <LoadingState /> : movements.isError ? <ErrorState message={(movements.error as Error).message} onRetry={() => void movements.refetch()} /> : list.visible.length ? <Card className="record-list movements-record-list"><div className="record-list-head"><span>Movimiento</span><span>Fecha</span><span>Origen</span><span>Destino</span><span>Estado</span><span /></div>{list.visible.map((movement) => <button type="button" className="record-list-row" key={movement.id_movimiento} onClick={() => setSelected(movement)}><span><strong>{movement.motivo_catalogo || movement.motivo || 'Movimiento de animales'}</strong><small>{movement.total_seleccionados} de {movement.total_candidatos} animales</small></span><span><strong>{formatDate(movement.fecha_movimiento)}</strong></span><span><strong>{movement.ubicacion_origen || movement.grupo_origen || movement.propiedad_origen || 'Pendiente'}</strong></span><span><strong>{movement.ubicacion_destino || movement.grupo_destino || movement.propiedad_destino || 'Pendiente'}</strong></span><span><Badge tone={movementTone(movement.estado)}>{humanizeCode(movement.estado)}</Badge></span><span className="record-row-actions">{movement.estado !== 'CANCELADO' && hasPermission('MOVIMIENTO_CREAR') ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); editMovement(movement); }}><Edit3 size={16} />Editar</Button> : null}<ChevronRight size={18} /></span></button>)}</Card> : <EmptyState icon={ArrowLeftRight} title="Aún no hay movimientos" description="Registra un cambio de grupo, potrero, corral u otra ubicación." action={hasPermission('MOVIMIENTO_CREAR') ? <Button onClick={() => setCreating(true)}><Plus size={18} />Crear movimiento</Button> : undefined} />}
 
     {selected ? <MovementDetailModal item={selected} onClose={() => setSelected(null)} onEdit={selected.estado !== 'CANCELADO' && hasPermission('MOVIMIENTO_CREAR') ? () => editMovement(selected) : undefined} onApply={selected.estado === 'BORRADOR' && hasPermission('MOVIMIENTO_CREAR') ? () => action.mutate({ id: selected.id_movimiento, kind: 'apply' }) : undefined} onCancel={selected.estado === 'BORRADOR' && hasPermission('MOVIMIENTO_ANULAR') ? () => action.mutate({ id: selected.id_movimiento, kind: 'cancel' }) : undefined} loading={action.isPending} /> : null}
 
@@ -249,7 +250,7 @@ export function MovementsPage() {
               <Select disabled={Boolean(editing && editing.estado !== 'BORRADOR') || !hasSelectedOrigin} value={form.id_ubicacion_destino} onChange={(event) => setForm((current) => {
                 const destinationId = event.target.value;
                 const destination = locations.data?.find((item) => item.id_ubicacion === destinationId);
-                const destinationPropertyId = destination?.tipo === 'OTRO' ? destination.id_ubicacion : destination?.id_propiedad_padre;
+                const destinationPropertyId = locationPropertyId(destination);
                 const preservesGroup = current.kind === 'UBICACION' && Boolean(current.selection.groupId);
                 return {
                   ...current,
@@ -259,7 +260,7 @@ export function MovementsPage() {
                     if (animal.id_ubicacion_actual === destinationId) return false;
                     if (current.kind !== 'PROPIEDAD' || !destinationPropertyId) return true;
                     const origin = locations.data?.find((item) => item.id_ubicacion === animal.id_ubicacion_actual);
-                    const originPropertyId = origin?.tipo === 'OTRO' ? origin.id_ubicacion : origin?.id_propiedad_padre;
+                    const originPropertyId = locationPropertyId(origin);
                     return originPropertyId !== destinationPropertyId;
                   }) },
                 };
@@ -273,16 +274,23 @@ export function MovementsPage() {
                     return item.tipo !== 'OTRO' && locationPropertyId(item) === form.id_propiedad_origen;
                   }
                   if (form.kind === 'PROPIEDAD') {
-                    return item.categoria_codigo === 'FUERA_PROPIEDAD' && locationPropertyId(item) !== form.id_propiedad_origen;
+                    return locationPropertyId(item) !== form.id_propiedad_origen;
                   }
                   return true;
                 }).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.propiedad ? `${item.propiedad} · ` : ''}{item.nombre} · {item.tipo === 'OTRO' ? 'Ubicación general' : humanizeCode(item.tipo)}</option>)}
               </Select>
             </Field> : null}
-            {wholeGroupRelocation ? <Field label="Grupo que se trasladará" hint="El grupo se conserva; todos sus animales pasarán juntos al nuevo potrero o corral." required><Input value={sourceGroup?.nombre ?? ''} placeholder="Selecciona primero el grupo de origen" readOnly /></Field> : <Field label="Grupo de destino" hint={form.kind === 'GRUPO' ? 'Solo aparecen grupos de la misma situación y ubicación.' : 'El grupo y el destino siempre quedarán vinculados.'} required>
+            {wholeGroupRelocation ? <Field label="Grupo que se trasladará" hint="El grupo se conserva; todos sus animales pasarán juntos al nuevo potrero o corral." required><Input value={sourceGroup?.nombre ?? ''} placeholder="Selecciona primero el grupo de origen" readOnly /></Field> : <Field label="Grupo de destino" hint={form.kind === 'GRUPO' ? 'Solo aparecen otros grupos de la misma propiedad; el animal adoptará la ubicación fija del grupo elegido.' : 'El grupo y el destino siempre quedarán vinculados.'} required>
               <Select disabled={Boolean(editing && editing.estado !== 'BORRADOR') || (form.kind !== 'GRUPO' && !form.id_ubicacion_destino)} value={form.id_grupo_destino} onChange={(event) => {
                 const group = groups.data?.find((item) => item.id_grupo === event.target.value);
-                setForm((current) => ({ ...current, id_grupo_destino: event.target.value, id_ubicacion_destino: current.kind === 'GRUPO' ? group?.id_ubicacion_actual ?? '' : current.id_ubicacion_destino }));
+                setForm((current) => ({
+                  ...current,
+                  id_grupo_destino: event.target.value,
+                  id_ubicacion_destino: current.kind === 'GRUPO' ? group?.id_ubicacion_actual ?? '' : current.id_ubicacion_destino,
+                  selection: current.kind === 'GRUPO'
+                    ? { ...current.selection, animals: current.selection.animals.filter((animal) => animal.id_grupo_actual !== event.target.value) }
+                    : current.selection,
+                }));
               }}>
                 <option value="">Selecciona</option>
                 {targetGroups?.map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre} · {item.categoria} · {item.ubicacion}</option>)}
@@ -300,5 +308,5 @@ export function MovementsPage() {
 }
 
 function MovementDetailModal({ item, onClose, onEdit, onApply, onCancel, loading }: { item: Movement; onClose: () => void; onEdit?: () => void; onApply?: () => void; onCancel?: () => void; loading: boolean }) {
-  return <Modal title="Detalle del movimiento" wide onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cerrar</Button>{onCancel ? <Button variant="ghost" onClick={onCancel} loading={loading}><Ban size={17} />Cancelar movimiento</Button> : null}{onEdit ? <Button variant="secondary" onClick={onEdit}><Edit3 size={17} />Editar</Button> : null}{onApply ? <Button onClick={onApply} loading={loading}><CheckCircle2 size={17} />Aplicar</Button> : null}</>}><div className="record-detail"><div className="record-detail-heading"><div className="record-icon"><ArrowLeftRight size={22} /></div><div><h2>{item.motivo_catalogo || item.motivo || 'Movimiento de animales'}</h2><p>{formatDate(item.fecha_movimiento)}</p></div><Badge tone={movementTone(item.estado)}>{humanizeCode(item.estado)}</Badge></div><div className="detail-grid"><div><small>Origen</small><strong>{item.ubicacion_origen || item.grupo_origen || 'Varias ubicaciones'}</strong></div><div><small>Destino</small><strong>{item.ubicacion_destino || item.grupo_destino || 'Sin destino'}</strong></div><div><small>Seleccionados</small><strong>{item.total_seleccionados}</strong></div><div><small>Candidatos</small><strong>{item.total_candidatos}</strong></div></div><section><h3>Animales</h3><div className="detail-lines compact">{item.detalles.map((detail) => <div key={detail.id_detalle} className={!detail.seleccionado ? 'excluded' : ''}><span><strong>{detail.animal}</strong><small>{detail.arete ? `Arete ${detail.arete}` : 'Sin arete'}</small></span><Badge tone={detail.seleccionado ? 'success' : 'neutral'}>{detail.seleccionado ? humanizeCode(detail.estado) : 'Excluido'}</Badge></div>)}</div></section>{item.observaciones ? <section><h3>Observaciones</h3><p>{item.observaciones}</p></section> : null}</div></Modal>;
+  return <Modal title="Detalle del movimiento" wide onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cerrar</Button>{onCancel ? <Button variant="ghost" onClick={onCancel} loading={loading}><Ban size={17} />Cancelar movimiento</Button> : null}{onEdit ? <Button variant="secondary" onClick={onEdit}><Edit3 size={17} />Editar</Button> : null}{onApply ? <Button onClick={onApply} loading={loading}><CheckCircle2 size={17} />Aplicar</Button> : null}</>}><div className="record-detail"><div className="record-detail-heading"><div className="record-icon"><ArrowLeftRight size={22} /></div><div><h2>{item.motivo_catalogo || item.motivo || 'Movimiento de animales'}</h2><p>{formatDate(item.fecha_movimiento)}</p></div><Badge tone={movementTone(item.estado)}>{humanizeCode(item.estado)}</Badge></div><div className="detail-grid"><div><small>Origen</small><strong>{item.ubicacion_origen || item.grupo_origen || item.propiedad_origen || 'Pendiente'}</strong></div><div><small>Destino</small><strong>{item.ubicacion_destino || item.grupo_destino || item.propiedad_destino || 'Pendiente'}</strong></div><div><small>Seleccionados</small><strong>{item.total_seleccionados}</strong></div><div><small>Candidatos</small><strong>{item.total_candidatos}</strong></div></div><section><h3>Animales</h3><div className="detail-lines compact">{item.detalles.map((detail) => <div key={detail.id_detalle} className={!detail.seleccionado ? 'excluded' : ''}><span><strong>{detail.animal}</strong><small>{detail.arete ? `Arete ${detail.arete}` : 'Sin arete'}</small></span><Badge tone={detail.seleccionado ? 'success' : 'neutral'}>{detail.seleccionado ? humanizeCode(detail.estado) : 'Excluido'}</Badge></div>)}</div></section>{item.observaciones ? <section><h3>Observaciones</h3><p>{item.observaciones}</p></section> : null}</div></Modal>;
 }
