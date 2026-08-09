@@ -116,7 +116,6 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
     estado: animalConditionSchema.optional(),
     id_grupo: z.string().uuid().optional(),
     id_ubicacion: z.string().uuid().optional(),
-    id_propiedad: z.string().uuid().optional(),
     id_especie: z.string().uuid().optional(),
     id_categoria_animal: z.string().uuid().optional(),
     id_propietario: z.string().uuid().optional(),
@@ -144,7 +143,6 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
   if (p.estado) add('a.estado=?', p.estado);
   if (p.id_grupo) add('a.id_grupo_actual=?', p.id_grupo);
   if (p.id_ubicacion) add('a.id_ubicacion_actual=?', p.id_ubicacion);
-  if (p.id_propiedad) add('COALESCE(g.id_propiedad,u.id_propiedad)=?', p.id_propiedad);
   if (p.id_especie) add('a.id_especie=?', p.id_especie);
   if (p.id_categoria_animal) add('a.id_categoria_animal=?', p.id_categoria_animal);
   if (p.id_propietario) add(`EXISTS (
@@ -167,9 +165,7 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
   const limitIndex = params.length - 1;
   const offsetIndex = params.length;
   const result = await pool.query(
-    `SELECT a.*,e.nombre especie,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,
-      COALESCE(g.id_propiedad,u.id_propiedad) id_propiedad,COALESCE(pg.nombre,pu.nombre) propiedad,
-      COALESCE(pg.es_principal,pu.es_principal,FALSE) propiedad_principal,im.secure_url foto_perfil,
+    `SELECT a.*,e.nombre especie,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,im.secure_url foto_perfil,
       mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
       COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)
        FROM marquilla_usuario mu JOIN usuario mu_u ON mu_u.id_usuario=mu.id_usuario AND mu_u.deleted_at IS NULL
@@ -189,9 +185,7 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
      JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
      LEFT JOIN condicion_animal coa ON coa.codigo=a.estado
      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
-     LEFT JOIN propiedad_ganadera pg ON pg.id_propiedad=g.id_propiedad
      LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
-     LEFT JOIN propiedad_ganadera pu ON pu.id_propiedad=u.id_propiedad
      LEFT JOIN marquilla mq ON mq.id_marquilla=a.id_marquilla AND mq.deleted_at IS NULL
      LEFT JOIN animal_imagen im ON im.id_animal=a.id_animal AND im.es_perfil AND im.deleted_at IS NULL
      WHERE ${where.join(' AND ')}
@@ -203,13 +197,12 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
 }));
 
 animalsRouter.get('/opciones/filtros', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (_req, res) => {
-  const [especies, categorias, condiciones, propiedades, grupos, ubicaciones, propietarios, razas, colores, marquillas] = await Promise.all([
+  const [especies, categorias, condiciones, grupos, ubicaciones, propietarios, razas, colores, marquillas] = await Promise.all([
     pool.query(`SELECT id_especie,nombre FROM especie WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
     pool.query(`SELECT id_categoria_animal,codigo,nombre FROM categoria_animal WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
     pool.query(`SELECT id_condicion_animal,codigo,nombre,activo FROM condicion_animal WHERE deleted_at IS NULL ORDER BY activo DESC,nombre`),
-    pool.query(`SELECT id_propiedad,nombre,es_principal FROM propiedad_ganadera WHERE deleted_at IS NULL AND activa=TRUE ORDER BY es_principal DESC,nombre`),
-    pool.query(`SELECT id_grupo,nombre,id_propiedad FROM grupo WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
-    pool.query(`SELECT id_ubicacion,nombre,tipo,id_categoria_animal,id_propiedad FROM ubicacion WHERE deleted_at IS NULL AND activo=TRUE ORDER BY tipo,nombre`),
+    pool.query(`SELECT id_grupo,nombre FROM grupo WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
+    pool.query(`SELECT id_ubicacion,nombre,tipo,id_categoria_animal FROM ubicacion WHERE deleted_at IS NULL AND activo=TRUE ORDER BY tipo,nombre`),
     pool.query(`SELECT DISTINCT u.id_usuario,TRIM(CONCAT(u.nombres,' ',u.apellidos)) nombre
       FROM animal_propietario ap
       JOIN usuario u ON u.id_usuario=ap.id_usuario
@@ -223,7 +216,6 @@ animalsRouter.get('/opciones/filtros', requirePermission('ANIMAL_CONSULTAR'), as
     especies: especies.rows,
     categorias: categorias.rows,
     condiciones: condiciones.rows,
-    propiedades: propiedades.rows,
     grupos: grupos.rows,
     ubicaciones: ubicaciones.rows,
     propietarios: propietarios.rows,
@@ -245,9 +237,7 @@ animalsRouter.get('/opciones/propietarios', requirePermission('ANIMAL_CONSULTAR'
 
 animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
   const result = await pool.query(
-    `SELECT a.*,e.nombre especie,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,
-      COALESCE(g.id_propiedad,u.id_propiedad) id_propiedad,COALESCE(pg.nombre,pu.nombre) propiedad,
-      COALESCE(pg.es_principal,pu.es_principal,FALSE) propiedad_principal,m.nombre madre,p.nombre padre,
+    `SELECT a.*,e.nombre especie,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
       mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
       COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)
        FROM marquilla_usuario mu JOIN usuario mu_u ON mu_u.id_usuario=mu.id_usuario AND mu_u.deleted_at IS NULL
@@ -334,9 +324,7 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
      JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
      LEFT JOIN condicion_animal coa ON coa.codigo=a.estado
      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
-     LEFT JOIN propiedad_ganadera pg ON pg.id_propiedad=g.id_propiedad
      LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
-     LEFT JOIN propiedad_ganadera pu ON pu.id_propiedad=u.id_propiedad
      LEFT JOIN animal m ON m.id_animal=a.id_madre
      LEFT JOIN animal p ON p.id_animal=a.id_padre
      LEFT JOIN marquilla mq ON mq.id_marquilla=a.id_marquilla AND mq.deleted_at IS NULL

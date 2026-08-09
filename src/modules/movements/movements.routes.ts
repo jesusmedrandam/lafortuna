@@ -21,18 +21,16 @@ const movementAnimal = z.object({
 const movement = z.object({
   tipo_movimiento: movementKind,
   modo_seleccion: z.enum(['TODOS', 'GRUPO', 'SELECCION_MANUAL']),
-  id_propiedad_origen: z.string().uuid(),
-  id_propiedad_destino: z.string().uuid(),
   id_grupo_filtro: z.string().uuid().nullable().optional(),
   id_ubicacion_origen: z.string().uuid().nullable().optional(),
   id_ubicacion_destino: z.string().uuid().nullable().optional(),
   id_grupo_origen: z.string().uuid().nullable().optional(),
   id_grupo_destino: z.string().uuid().nullable().optional(),
-  id_motivo_movimiento: z.string().uuid(),
+  id_motivo_movimiento: z.string().uuid().nullable().optional(),
   fecha_movimiento: z.string().date(),
   motivo: z.string().max(300).nullable().optional(),
   observaciones: z.string().nullable().optional(),
-  animales: z.array(movementAnimal).min(1),
+  animales: z.array(movementAnimal).default([]),
 });
 
 type MovementInput = z.infer<typeof movement>;
@@ -42,11 +40,20 @@ type MovementValidation = {
   relocateGroupId: string | null;
 };
 
-async function movementReason(database: Queryable, id: string) {
+function defaultReasonCode(kind: z.infer<typeof movementKind>) {
+  if (kind === 'UBICACION') return 'ROTACION_POTRERO';
+  if (kind === 'GRUPO') return 'CAMBIO_GRUPO';
+  if (kind === 'PROPIEDAD') return 'TRASLADO_PROPIEDAD';
+  return 'REORGANIZACION';
+}
+
+async function movementReason(database: Queryable, id: string | null | undefined, kind?: z.infer<typeof movementKind>) {
+  const value = id ?? (kind ? defaultReasonCode(kind) : null);
+  if (!value) throw new ValidationError('Seleccione el motivo del movimiento.');
   const reason = (await database.query(
     `SELECT id_motivo_movimiento,nombre FROM motivo_movimiento
-     WHERE id_motivo_movimiento=$1 AND deleted_at IS NULL`,
-    [id],
+     WHERE ${id ? 'id_motivo_movimiento=$1' : 'codigo=$1'} AND deleted_at IS NULL`,
+    [value],
   )).rows[0] as { id_motivo_movimiento: string; nombre: string } | undefined;
   if (!reason) throw new ValidationError('El motivo de movimiento seleccionado no está disponible.');
   return reason;
@@ -56,133 +63,88 @@ async function validateMovementSelection(database: Queryable, input: MovementInp
   const selected = input.animales.filter((item) => item.seleccionado);
   if (!selected.length) throw new ValidationError('Seleccione al menos un animal.');
 
-  const properties = (await database.query(
-    `SELECT id_propiedad FROM propiedad_ganadera
-     WHERE id_propiedad=ANY($1::uuid[]) AND deleted_at IS NULL AND activa=TRUE`,
-    [[input.id_propiedad_origen, input.id_propiedad_destino]],
-  )).rows as Array<{ id_propiedad: string }>;
-  if (!properties.some((item) => item.id_propiedad === input.id_propiedad_origen)) {
-    throw new ValidationError('La propiedad de origen no está disponible.');
-  }
-  if (!properties.some((item) => item.id_propiedad === input.id_propiedad_destino)) {
-    throw new ValidationError('La propiedad de destino no está disponible.');
-  }
-
   if (!input.id_grupo_destino) throw new ValidationError('Seleccione el grupo de destino.');
-  const destinationGroup = (await database.query(
-    `SELECT id_grupo,id_categoria_animal,id_propiedad,id_ubicacion_actual
+  const group = (await database.query(
+    `SELECT id_grupo,id_categoria_animal,id_ubicacion_actual
      FROM grupo WHERE id_grupo=$1 AND deleted_at IS NULL AND activo=TRUE`,
     [input.id_grupo_destino],
-  )).rows[0] as {
-    id_grupo: string;
-    id_categoria_animal: string;
-    id_propiedad: string;
-    id_ubicacion_actual: string | null;
-  } | undefined;
-  if (!destinationGroup) throw new ValidationError('El grupo de destino no está disponible.');
-  if (destinationGroup.id_propiedad !== input.id_propiedad_destino) {
-    throw new ValidationError('El grupo de destino no pertenece a la propiedad de destino.');
-  }
+  )).rows[0] as { id_grupo: string; id_categoria_animal: string; id_ubicacion_actual: string | null } | undefined;
+  if (!group) throw new ValidationError('El grupo de destino no está disponible.');
 
-  const effectiveLocationId = input.id_ubicacion_destino ?? destinationGroup.id_ubicacion_actual;
-  if (!effectiveLocationId) throw new ValidationError('El grupo de destino todavía no tiene un potrero o corral asignado.');
-  const destinationLocation = (await database.query(
-    `SELECT tipo,id_propiedad FROM ubicacion
-     WHERE id_ubicacion=$1 AND deleted_at IS NULL AND activo=TRUE`,
+  const effectiveLocationId = input.id_ubicacion_destino ?? group.id_ubicacion_actual;
+  if (!effectiveLocationId) throw new ValidationError('Seleccione la ubicación de destino del grupo.');
+  const location = (await database.query(
+    `SELECT u.tipo,u.id_categoria_animal,u.id_propiedad_padre,ca.codigo categoria_codigo
+     FROM ubicacion u JOIN categoria_animal ca ON ca.id_categoria_animal=u.id_categoria_animal
+     WHERE u.id_ubicacion=$1 AND u.deleted_at IS NULL AND u.activo=TRUE`,
     [effectiveLocationId],
-  )).rows[0] as { tipo: string; id_propiedad: string } | undefined;
-  if (!destinationLocation) throw new ValidationError('El potrero o corral de destino no está disponible.');
-  if (!['POTRERO', 'CORRAL'].includes(destinationLocation.tipo)) {
-    throw new ValidationError('El destino debe ser un potrero o corral registrado en la propiedad.');
+  )).rows[0] as { tipo: string; id_categoria_animal: string; id_propiedad_padre: string | null; categoria_codigo: string } | undefined;
+  if (!location) throw new ValidationError('La ubicación de destino no está disponible.');
+  if (location.id_categoria_animal !== group.id_categoria_animal) {
+    throw new ValidationError('El grupo de destino debe pertenecer a la misma situación de propiedad que la ubicación.');
   }
-  if (destinationLocation.id_propiedad !== input.id_propiedad_destino) {
-    throw new ValidationError('El potrero o corral no pertenece a la propiedad de destino.');
+  if (input.tipo_movimiento === 'UBICACION' && location.tipo === 'OTRO') {
+    throw new ValidationError('Para una propiedad externa utilice el traslado entre propiedades.');
   }
 
   const animalIds = selected.map((item) => item.id_animal);
   const currentAnimals = (await database.query(
-    `SELECT a.id_animal,a.id_grupo_actual,a.id_ubicacion_actual,
-      COALESCE(g.id_propiedad,u.id_propiedad) id_propiedad
-     FROM animal a
-     LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
-     LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
-     WHERE a.id_animal=ANY($1::uuid[]) AND a.deleted_at IS NULL AND a.estado='ACTIVO'
-     FOR SHARE OF a`,
+    `SELECT a.id_animal,a.id_categoria_animal,a.id_grupo_actual,a.id_ubicacion_actual,
+       u.tipo ubicacion_tipo,u.id_propiedad_padre
+     FROM animal a LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
+     WHERE a.id_animal=ANY($1::uuid[]) AND a.deleted_at IS NULL AND a.estado='ACTIVO' FOR SHARE OF a`,
     [animalIds],
-  )).rows as Array<{
-    id_animal: string;
-    id_grupo_actual: string | null;
-    id_ubicacion_actual: string | null;
-    id_propiedad: string | null;
-  }>;
-  if (currentAnimals.length !== animalIds.length) {
-    throw new ValidationError('Uno o más animales ya no están activos o disponibles.');
-  }
-  if (currentAnimals.some((item) => item.id_propiedad !== input.id_propiedad_origen)) {
-    throw new ValidationError('Todos los animales seleccionados deben pertenecer a la propiedad de origen.');
-  }
+  )).rows as Array<{ id_animal: string; id_categoria_animal: string; id_grupo_actual: string | null; id_ubicacion_actual: string | null; ubicacion_tipo: string | null; id_propiedad_padre: string | null }>;
+  if (currentAnimals.length !== animalIds.length) throw new ValidationError('Uno o más animales ya no están activos o disponibles.');
 
   let relocateGroupId: string | null = null;
-  if (input.tipo_movimiento === 'UBICACION') {
-    if (input.id_propiedad_origen !== input.id_propiedad_destino) {
-      throw new ValidationError('El cambio de potrero o corral debe realizarse dentro de la misma propiedad.');
-    }
-    if (input.modo_seleccion !== 'GRUPO' || !input.id_grupo_filtro) {
-      throw new ValidationError('Para cambiar de potrero o corral debe seleccionar un grupo completo.');
-    }
-    if (input.id_grupo_destino !== input.id_grupo_filtro) {
-      throw new ValidationError('El grupo debe conservarse durante el cambio de potrero o corral.');
-    }
-    const sourceGroup = (await database.query(
-      `SELECT id_grupo,id_propiedad,id_ubicacion_actual FROM grupo
-       WHERE id_grupo=$1 AND deleted_at IS NULL AND activo=TRUE`,
-      [input.id_grupo_filtro],
-    )).rows[0] as { id_grupo: string; id_propiedad: string; id_ubicacion_actual: string | null } | undefined;
-    if (!sourceGroup || sourceGroup.id_propiedad !== input.id_propiedad_origen) {
-      throw new ValidationError('El grupo de origen no pertenece a la propiedad seleccionada.');
-    }
-    if (sourceGroup.id_ubicacion_actual === effectiveLocationId) {
-      throw new ValidationError('El potrero o corral de destino debe ser diferente al actual.');
-    }
+  const movesTheSelectedGroup = input.modo_seleccion === 'GRUPO'
+    && Boolean(input.id_grupo_filtro)
+    && input.id_grupo_filtro === input.id_grupo_destino
+    && group.id_ubicacion_actual !== effectiveLocationId;
+  if (movesTheSelectedGroup) {
     const groupMembers = (await database.query(
       `SELECT id_animal FROM animal
        WHERE id_grupo_actual=$1 AND estado='ACTIVO' AND deleted_at IS NULL FOR SHARE`,
-      [sourceGroup.id_grupo],
+      [input.id_grupo_destino],
     )).rows as Array<{ id_animal: string }>;
     const selectedIds = new Set(animalIds);
     if (groupMembers.length !== selectedIds.size || groupMembers.some((item) => !selectedIds.has(item.id_animal))) {
-      throw new ValidationError('El cambio de potrero o corral debe incluir todos los animales activos del grupo.');
+      throw new ValidationError('Para cambiar la ubicación fija del grupo debe incluir todos sus animales activos.');
     }
-    relocateGroupId = sourceGroup.id_grupo;
-  } else if (input.tipo_movimiento === 'GRUPO') {
-    if (input.id_propiedad_origen !== input.id_propiedad_destino) {
-      throw new ValidationError('El cambio de grupo debe realizarse dentro de la misma propiedad.');
-    }
-    if (destinationGroup.id_ubicacion_actual !== effectiveLocationId) {
-      throw new ValidationError('La ubicación del animal debe ser la ubicación actual del grupo de destino.');
-    }
-    if (currentAnimals.some((item) => item.id_grupo_actual === destinationGroup.id_grupo)) {
-      throw new ValidationError('Uno o más animales ya pertenecen al grupo de destino.');
-    }
-  } else if (input.tipo_movimiento === 'PROPIEDAD') {
-    if (input.id_propiedad_origen === input.id_propiedad_destino) {
-      throw new ValidationError('La propiedad de destino debe ser diferente a la propiedad de origen.');
-    }
-    if (destinationGroup.id_ubicacion_actual !== effectiveLocationId) {
-      throw new ValidationError('La ubicación de destino debe ser la ubicación actual del grupo seleccionado.');
-    }
+    relocateGroupId = group.id_grupo;
+  } else if (group.id_ubicacion_actual !== effectiveLocationId) {
+    throw new ValidationError('El grupo de destino pertenece a otra ubicación. Seleccione un grupo de la ubicación elegida.');
   }
 
   const operations: AnimalOperationCode[] = input.tipo_movimiento === 'UBICACION'
-    ? ['MOVIMIENTO_UBICACION']
+    ? ['MOVIMIENTO_UBICACION', 'MOVIMIENTO_GRUPO']
     : input.tipo_movimiento === 'GRUPO'
       ? ['MOVIMIENTO_GRUPO']
       : input.tipo_movimiento === 'PROPIEDAD'
         ? ['MOVIMIENTO_PROPIEDAD', 'MOVIMIENTO_GRUPO']
-        : [input.id_propiedad_origen === input.id_propiedad_destino ? 'MOVIMIENTO_UBICACION' : 'MOVIMIENTO_PROPIEDAD', 'MOVIMIENTO_GRUPO'];
+        : [location?.tipo === 'OTRO' ? 'MOVIMIENTO_PROPIEDAD' : 'MOVIMIENTO_UBICACION', 'MOVIMIENTO_GRUPO'];
 
   for (const animal of selected) {
     for (const operation of operations) await assertAnimalOperationAllowed(database, animal.id_animal, operation);
+    const current = currentAnimals.find((item) => item.id_animal === animal.id_animal)!;
+    if (current.id_categoria_animal !== group.id_categoria_animal && input.tipo_movimiento !== 'PROPIEDAD') {
+      throw new ValidationError('El grupo de destino debe tener la misma situación de propiedad que el animal.');
+    }
+    if (current.id_categoria_animal !== group.id_categoria_animal && location.categoria_codigo === 'EN_PROPIEDAD') {
+      throw new ValidationError('Un animal de fuera de la propiedad no puede trasladarse a un grupo interno.');
+    }
+    if (input.tipo_movimiento === 'GRUPO' && current.id_ubicacion_actual !== effectiveLocationId) {
+      throw new ValidationError('El cambio de grupo solo puede hacerse entre grupos de la misma ubicación.');
+    }
+    if (input.tipo_movimiento === 'PROPIEDAD') {
+      const destinationPropertyId = location.tipo === 'OTRO' ? effectiveLocationId : location.id_propiedad_padre;
+      const currentPropertyId = current.ubicacion_tipo === 'OTRO' ? current.id_ubicacion_actual : current.id_propiedad_padre;
+      if (!destinationPropertyId) throw new ValidationError('Seleccione una ubicación perteneciente a otra propiedad.');
+      if (currentPropertyId === destinationPropertyId) {
+        throw new ValidationError('No puede trasladar un animal desde y hacia la misma propiedad.');
+      }
+    }
   }
 
   return { effectiveLocationId, relocateGroupId };
@@ -203,15 +165,13 @@ export const movementsRouter = Router();
 
 movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(
   `SELECT m.*,COALESCE(mm.nombre,m.motivo) motivo_catalogo,
-    po.nombre propiedad_origen,pd.nombre propiedad_destino,
     u1.nombre ubicacion_origen,u2.nombre ubicacion_destino,g1.nombre grupo_origen,g2.nombre grupo_destino,
     COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id_detalle',d.id_movimiento_detalle,'id_animal',a.id_animal,'animal',a.nombre,'nombre',a.nombre,
       'arete',a.codigo_arete,'codigo_arete',a.codigo_arete,'sexo',a.sexo,
       'id_categoria_animal',a.id_categoria_animal,'categoria',ca.nombre,
       'id_grupo_actual',a.id_grupo_actual,'grupo',ga.nombre,'id_ubicacion_actual',a.id_ubicacion_actual,'ubicacion',ua.nombre,
-      'id_propiedad',COALESCE(ga.id_propiedad,ua.id_propiedad),'seleccionado',d.seleccionado,
-      'estado',d.estado,'mensaje_error',d.mensaje_error,'observaciones',d.observaciones))
+      'seleccionado',d.seleccionado,'estado',d.estado,'mensaje_error',d.mensaje_error,'observaciones',d.observaciones))
       FROM movimiento_animal_detalle d
       JOIN animal a ON a.id_animal=d.id_animal
       JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
@@ -219,8 +179,6 @@ movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler
       LEFT JOIN ubicacion ua ON ua.id_ubicacion=a.id_ubicacion_actual
       WHERE d.id_movimiento=m.id_movimiento AND d.deleted_at IS NULL),'[]') detalles
    FROM movimiento_animal m
-   JOIN propiedad_ganadera po ON po.id_propiedad=m.id_propiedad_origen
-   JOIN propiedad_ganadera pd ON pd.id_propiedad=m.id_propiedad_destino
    LEFT JOIN ubicacion u1 ON u1.id_ubicacion=m.id_ubicacion_origen
    LEFT JOIN ubicacion u2 ON u2.id_ubicacion=m.id_ubicacion_destino
    LEFT JOIN grupo g1 ON g1.id_grupo=m.id_grupo_origen
@@ -232,12 +190,11 @@ movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler
 movementsRouter.post('/', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(async (req, res) => {
   const input = movement.parse(req.body);
   const result = await transaction(async (client) => {
-    const validation = await validateMovementSelection(client, input);
     const reason = await movementReason(client, input.id_motivo_movimiento);
     const { animales, ...head } = input;
     const row = (await client.query(buildInsert('movimiento_animal', {
       ...head,
-      id_ubicacion_destino: validation.effectiveLocationId,
+      id_motivo_movimiento: reason.id_motivo_movimiento,
       motivo: reason.nombre,
       estado: 'BORRADOR',
       total_candidatos: animales.length,
@@ -246,8 +203,8 @@ movementsRouter.post('/', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(as
     }))).rows[0];
     for (const animal of animales) await client.query(buildInsert('movimiento_animal_detalle', {
       ...animal,
-      id_ubicacion_destino: validation.effectiveLocationId,
-      id_grupo_destino: input.id_grupo_destino,
+      id_ubicacion_destino: input.id_ubicacion_destino ?? null,
+      id_grupo_destino: input.id_grupo_destino ?? null,
       id_movimiento: row.id_movimiento,
     }));
     return row;
@@ -266,13 +223,11 @@ movementsRouter.patch('/:id', requirePermission('MOVIMIENTO_CREAR'), asyncHandle
     const reason = await movementReason(client, nextReasonId);
     if (found.estado === 'BORRADOR') {
       return (await client.query(
-        `UPDATE movimiento_animal SET tipo_movimiento=$2,modo_seleccion=$3,id_propiedad_origen=$4,
-          id_propiedad_destino=$5,id_grupo_filtro=$6,id_ubicacion_origen=$7,id_ubicacion_destino=$8,
-          id_grupo_origen=$9,id_grupo_destino=$10,fecha_movimiento=$11,id_motivo_movimiento=$12,
-          motivo=$13,observaciones=$14,updated_at=NOW()
+        `UPDATE movimiento_animal SET tipo_movimiento=$2,modo_seleccion=$3,id_grupo_filtro=$4,id_ubicacion_origen=$5,
+          id_ubicacion_destino=$6,id_grupo_origen=$7,id_grupo_destino=$8,fecha_movimiento=$9,
+          id_motivo_movimiento=$10,motivo=$11,observaciones=$12,updated_at=NOW()
          WHERE id_movimiento=$1 RETURNING *`,
         [id, input.tipo_movimiento ?? found.tipo_movimiento, input.modo_seleccion ?? found.modo_seleccion,
-          input.id_propiedad_origen ?? found.id_propiedad_origen,input.id_propiedad_destino ?? found.id_propiedad_destino,
           input.id_grupo_filtro === undefined ? found.id_grupo_filtro : input.id_grupo_filtro,
           input.id_ubicacion_origen === undefined ? found.id_ubicacion_origen : input.id_ubicacion_origen,
           input.id_ubicacion_destino === undefined ? found.id_ubicacion_destino : input.id_ubicacion_destino,
@@ -299,19 +254,14 @@ movementsRouter.put('/:id/seleccion', requirePermission('MOVIMIENTO_CREAR'), asy
     const found = (await client.query('SELECT * FROM movimiento_animal WHERE id_movimiento=$1 AND deleted_at IS NULL FOR UPDATE', [id])).rows[0];
     if (!found) throw new NotFoundError();
     if (found.estado !== 'BORRADOR') throw new ConflictError('Solo puede editarse un movimiento en borrador.');
-    const validation = await validateMovementSelection(client, movement.parse({ ...found, fecha_movimiento: String(found.fecha_movimiento).slice(0, 10), animales: items }));
     await client.query('DELETE FROM movimiento_animal_detalle WHERE id_movimiento=$1', [id]);
     for (const animal of items) await client.query(buildInsert('movimiento_animal_detalle', {
       ...animal,
-      id_ubicacion_destino: validation.effectiveLocationId,
-      id_grupo_destino: found.id_grupo_destino,
+      id_ubicacion_destino: found.id_ubicacion_destino ?? null,
+      id_grupo_destino: found.id_grupo_destino ?? null,
       id_movimiento: id,
     }));
-    await client.query(
-      `UPDATE movimiento_animal SET id_ubicacion_destino=$2,total_candidatos=$3,total_seleccionados=$4,updated_at=NOW()
-       WHERE id_movimiento=$1`,
-      [id,validation.effectiveLocationId,items.length,items.filter((item) => item.seleccionado).length],
-    );
+    await client.query('UPDATE movimiento_animal SET total_candidatos=$2,total_seleccionados=$3 WHERE id_movimiento=$1', [id, items.length, items.filter((item) => item.seleccionado).length]);
   }, req.user!.id);
   return ok(res, { message: 'Selección actualizada.' });
 }));
@@ -321,18 +271,6 @@ movementsRouter.post('/:id/aplicar', requirePermission('MOVIMIENTO_CREAR'), asyn
   const row = await transaction(async (client) => {
     const validation = await validateMovementSelection(client, await loadMovementForValidation(client, id));
     const result = (await client.query('SELECT aplicar_movimiento_animales($1,$2) cantidad', [id, req.user!.id])).rows[0];
-    await client.query(
-      `UPDATE animal a
-       SET id_grupo_actual=d.id_grupo_destino,
-           id_ubicacion_actual=d.id_ubicacion_destino,
-           id_categoria_animal=g.id_categoria_animal,
-           updated_at=NOW()
-       FROM movimiento_animal_detalle d
-       JOIN grupo g ON g.id_grupo=d.id_grupo_destino
-       WHERE d.id_movimiento=$1 AND d.id_animal=a.id_animal
-         AND d.seleccionado=TRUE AND d.deleted_at IS NULL`,
-      [id],
-    );
     if (validation.relocateGroupId) {
       await client.query(
         'UPDATE grupo SET id_ubicacion_actual=$2,updated_at=NOW() WHERE id_grupo=$1',

@@ -117,19 +117,13 @@ export const reproductionRouter = Router();
 reproductionRouter.get('/opciones', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => {
   const [females, males] = await Promise.all([
     pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,a.fecha_nacimiento,a.id_especie,
-      a.id_categoria_animal,ca.codigo categoria_codigo,ca.nombre categoria,
-      COALESCE(g.id_propiedad,u.id_propiedad) id_propiedad
+      a.id_categoria_animal,ca.codigo categoria_codigo,ca.nombre categoria
       FROM animal a JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
-      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
-      LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
       WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='HEMBRA'
         AND (a.fecha_nacimiento IS NULL OR a.fecha_nacimiento<=CURRENT_DATE-INTERVAL '1 year') ORDER BY a.nombre`),
     pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,a.fecha_nacimiento,a.id_especie,
-      a.id_categoria_animal,ca.codigo categoria_codigo,ca.nombre categoria,
-      COALESCE(g.id_propiedad,u.id_propiedad) id_propiedad
+      a.id_categoria_animal,ca.codigo categoria_codigo,ca.nombre categoria
       FROM animal a JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
-      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
-      LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
       WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='MACHO'
         AND (a.fecha_nacimiento IS NULL OR a.fecha_nacimiento<=CURRENT_DATE-INTERVAL '1 year') ORDER BY a.nombre`),
   ]);
@@ -189,14 +183,11 @@ reproductionRouter.delete('/celos/:id', requirePermission('PARTO_ADMINISTRAR'), 
 }));
 
 reproductionRouter.get('/preneces', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(
-  `SELECT p.*,v.nombre vaca,v.codigo_arete,v.id_especie,v.id_categoria_animal,
-    COALESCE(g.id_propiedad,u.id_propiedad) id_propiedad,pa.nombre padre,c.fecha_inicio celo_inicio,
+  `SELECT p.*,v.nombre vaca,v.codigo_arete,v.id_especie,v.id_categoria_animal,pa.nombre padre,c.fecha_inicio celo_inicio,
     ca.codigo categoria_codigo,ca.nombre categoria,
     pp.id_proximo_parto,pp.estado proximo_estado
    FROM prenez p JOIN animal v ON v.id_animal=p.id_vaca
    JOIN categoria_animal ca ON ca.id_categoria_animal=v.id_categoria_animal
-   LEFT JOIN grupo g ON g.id_grupo=v.id_grupo_actual
-   LEFT JOIN ubicacion u ON u.id_ubicacion=v.id_ubicacion_actual
    LEFT JOIN animal pa ON pa.id_animal=p.id_padre LEFT JOIN celo c ON c.id_celo=p.id_celo
    LEFT JOIN proximo_parto pp ON pp.id_prenez=p.id_prenez AND pp.deleted_at IS NULL
    WHERE p.deleted_at IS NULL ORDER BY p.estado='CONFIRMADA' DESC,p.fecha_confirmacion DESC`,

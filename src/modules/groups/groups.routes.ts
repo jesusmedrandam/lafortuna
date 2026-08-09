@@ -13,7 +13,7 @@ const schema = z.object({
   codigo: z.string().max(50).nullable().optional(),
   nombre: z.string().trim().min(2).max(120),
   id_tipo_grupo: z.string().uuid(),
-  id_propiedad: z.string().uuid(),
+  id_categoria_animal: z.string().uuid(),
   id_ubicacion_actual: z.string().uuid().nullable().optional(),
   id_especie: z.string().uuid().nullable().optional(),
   descripcion: z.string().max(300).nullable().optional(),
@@ -21,21 +21,18 @@ const schema = z.object({
   activo: z.boolean().optional(),
 });
 
-const columns = ['codigo', 'nombre', 'id_tipo_grupo', 'id_propiedad', 'id_ubicacion_actual', 'id_especie', 'descripcion', 'capacidad', 'activo'] as const;
+const columns = ['codigo', 'nombre', 'id_tipo_grupo', 'id_categoria_animal', 'id_ubicacion_actual', 'id_especie', 'descripcion', 'capacidad', 'activo'] as const;
 
-async function validateGroupLocation(propertyId: string, locationId?: string | null, allowLegacy = false) {
+async function validateGroupLocation(categoryId: string, locationId?: string | null) {
   if (!locationId) throw new ValidationError('Seleccione el potrero, corral o propiedad donde permanece el grupo.');
   const location = (await pool.query(
-    `SELECT id_propiedad,tipo FROM ubicacion
+    `SELECT id_categoria_animal FROM ubicacion
      WHERE id_ubicacion=$1 AND deleted_at IS NULL AND activo=TRUE`,
     [locationId],
-  )).rows[0] as { id_propiedad: string; tipo: string } | undefined;
+  )).rows[0] as { id_categoria_animal: string } | undefined;
   if (!location) throw new ValidationError('La ubicación seleccionada no está disponible.');
-  if (location.id_propiedad !== propertyId) {
-    throw new ValidationError('El potrero o corral del grupo debe pertenecer a la propiedad seleccionada.');
-  }
-  if (!allowLegacy && !['POTRERO', 'CORRAL'].includes(location.tipo)) {
-    throw new ValidationError('Seleccione un potrero o corral de la propiedad.');
+  if (location.id_categoria_animal !== categoryId) {
+    throw new ValidationError('La ubicación del grupo debe pertenecer a su misma situación de propiedad.');
   }
 }
 
@@ -43,7 +40,7 @@ export const groupsRouter = Router();
 
 groupsRouter.get('/', requirePermission('GRUPO_CONSULTAR'), asyncHandler(async (req, res) => {
   const pagination = paginationSchema.parse(req.query);
-  const propertyId = typeof req.query.id_propiedad === 'string' ? req.query.id_propiedad : null;
+  const categoryId = typeof req.query.id_categoria_animal === 'string' ? req.query.id_categoria_animal : null;
   const params: unknown[] = [pagination.limit, offset(pagination.page, pagination.limit)];
   const filters = ['g.deleted_at IS NULL'];
 
@@ -51,26 +48,27 @@ groupsRouter.get('/', requirePermission('GRUPO_CONSULTAR'), asyncHandler(async (
     params.push(`%${pagination.q}%`);
     filters.push(`(g.nombre ILIKE $${params.length} OR g.codigo ILIKE $${params.length})`);
   }
-  if (propertyId) {
-    params.push(propertyId);
-    filters.push(`g.id_propiedad=$${params.length}`);
+  if (categoryId) {
+    params.push(categoryId);
+    filters.push(`g.id_categoria_animal=$${params.length}`);
   }
 
   const result = await pool.query(
     `SELECT g.*,tg.nombre tipo_grupo,e.nombre especie,ca.nombre categoria,ca.codigo categoria_codigo,
-       pg.nombre propiedad,pg.es_principal propiedad_principal,
-       u.nombre ubicacion,u.tipo ubicacion_tipo,
+       u.nombre ubicacion,u.tipo ubicacion_tipo,u.id_propiedad_padre,
+       CASE WHEN u.tipo='OTRO' THEN u.id_ubicacion ELSE propiedad.id_ubicacion END id_propiedad,
+       CASE WHEN u.tipo='OTRO' THEN u.nombre ELSE propiedad.nombre END propiedad,
        (SELECT COUNT(*)::int FROM animal a
         WHERE a.id_grupo_actual=g.id_grupo AND a.deleted_at IS NULL AND a.estado='ACTIVO') total_animales,
        COUNT(*) OVER()::int total
      FROM grupo g
      JOIN tipo_grupo tg ON tg.id_tipo_grupo=g.id_tipo_grupo
      JOIN categoria_animal ca ON ca.id_categoria_animal=g.id_categoria_animal
-     JOIN propiedad_ganadera pg ON pg.id_propiedad=g.id_propiedad
      LEFT JOIN ubicacion u ON u.id_ubicacion=g.id_ubicacion_actual
+     LEFT JOIN ubicacion propiedad ON propiedad.id_ubicacion=u.id_propiedad_padre AND propiedad.deleted_at IS NULL
      LEFT JOIN especie e ON e.id_especie=g.id_especie
      WHERE ${filters.join(' AND ')}
-     ORDER BY g.activo DESC,pg.es_principal DESC,pg.nombre,g.nombre
+     ORDER BY g.activo DESC,ca.nombre,g.nombre
      LIMIT $1 OFFSET $2`,
     params,
   );
@@ -79,7 +77,7 @@ groupsRouter.get('/', requirePermission('GRUPO_CONSULTAR'), asyncHandler(async (
 
 groupsRouter.post('/', requirePermission('GRUPO_ADMINISTRAR'), asyncHandler(async (req, res) => {
   const data = schema.parse(req.body);
-  await validateGroupLocation(data.id_propiedad, data.id_ubicacion_actual);
+  await validateGroupLocation(data.id_categoria_animal, data.id_ubicacion_actual);
   return created(res, (await pool.query(buildInsert('grupo', data))).rows[0]);
 }));
 
@@ -87,20 +85,31 @@ groupsRouter.patch('/:id', requirePermission('GRUPO_ADMINISTRAR'), asyncHandler(
   const id = routeParam(req.params.id, 'id');
   const data = schema.partial().parse(req.body);
   const current = (await pool.query(
-    `SELECT id_propiedad,id_ubicacion_actual FROM grupo
+    `SELECT id_categoria_animal,id_ubicacion_actual FROM grupo
      WHERE id_grupo=$1 AND deleted_at IS NULL`,
     [id],
-  )).rows[0] as { id_propiedad: string; id_ubicacion_actual: string | null } | undefined;
+  )).rows[0] as { id_categoria_animal: string; id_ubicacion_actual: string | null } | undefined;
   if (!current) throw new NotFoundError();
-  const nextProperty = data.id_propiedad ?? current.id_propiedad;
+  const nextCategory = data.id_categoria_animal ?? current.id_categoria_animal;
   const nextLocation = data.id_ubicacion_actual === undefined ? current.id_ubicacion_actual : data.id_ubicacion_actual;
-  await validateGroupLocation(nextProperty, nextLocation, nextLocation === current.id_ubicacion_actual);
-  if (nextLocation !== current.id_ubicacion_actual || nextProperty !== current.id_propiedad) {
+  await validateGroupLocation(nextCategory, nextLocation);
+  if (nextLocation !== current.id_ubicacion_actual) {
     const members = await pool.query(
       `SELECT 1 FROM animal WHERE id_grupo_actual=$1 AND estado='ACTIVO' AND deleted_at IS NULL LIMIT 1`,
       [id],
     );
-    if (members.rowCount) throw new ConflictError('Un grupo con animales solo puede cambiar de potrero o corral mediante un movimiento del grupo completo.');
+    if (members.rowCount) throw new ConflictError('Un grupo con animales debe cambiar de potrero, corral o propiedad mediante un movimiento de grupo completo.');
+  }
+  if (data.id_categoria_animal) {
+    const incompatible = await pool.query(
+      `SELECT 1 FROM animal
+       WHERE id_grupo_actual=$1 AND id_categoria_animal<>$2 AND deleted_at IS NULL
+       LIMIT 1`,
+      [id, data.id_categoria_animal],
+    );
+    if (incompatible.rowCount) {
+      throw new ConflictError('No puede cambiar la situación del grupo mientras contenga animales de otra categoría. Trasládelos primero.');
+    }
   }
   const row = (await pool.query(buildUpdate('grupo', 'id_grupo', id, pick(data, columns)))).rows[0];
   if (!row) throw new NotFoundError();

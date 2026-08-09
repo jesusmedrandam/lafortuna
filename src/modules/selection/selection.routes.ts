@@ -18,7 +18,6 @@ const schema = z.object({
   operaciones: z.array(operation).default([]),
   filtros: z.object({
     id_especie: z.string().uuid().optional(),
-    id_propiedad: z.string().uuid().optional(),
     sexo: z.enum(['MACHO', 'HEMBRA']).optional(),
     id_ubicacion: z.string().uuid().optional(),
     excluir_id_ubicacion: z.string().uuid().optional(),
@@ -47,7 +46,6 @@ selectionRouter.post('/animales/preview', requirePermission('ANIMAL_CONSULTAR'),
     where.push(`a.id_animal=ANY($${params.length}::uuid[])`);
   }
   if (input.filtros.id_especie) add('a.id_especie', input.filtros.id_especie);
-  if (input.filtros.id_propiedad) add('COALESCE(g.id_propiedad,u.id_propiedad)', input.filtros.id_propiedad);
   if (input.filtros.sexo) add('a.sexo', input.filtros.sexo);
   if (input.filtros.id_ubicacion) add('a.id_ubicacion_actual', input.filtros.id_ubicacion);
   if (input.filtros.excluir_id_ubicacion) {
@@ -72,7 +70,6 @@ selectionRouter.post('/animales/preview', requirePermission('ANIMAL_CONSULTAR'),
   const rows = (await pool.query(
     `SELECT a.id_animal,a.codigo_arete,a.nombre,a.sexo,a.id_categoria_animal,
       ca.nombre categoria,ca.codigo categoria_codigo,a.id_grupo_actual,g.nombre grupo,
-      COALESCE(g.id_propiedad,u.id_propiedad) id_propiedad,
       a.id_ubicacion_actual,u.nombre ubicacion,TRUE seleccionado
      FROM animal a
      JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
