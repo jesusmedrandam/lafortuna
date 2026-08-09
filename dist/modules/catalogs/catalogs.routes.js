@@ -11,6 +11,7 @@ const definitions = {
     unidades: { table: 'unidad_medida', id: 'id_unidad', columns: ['codigo', 'nombre', 'simbolo', 'magnitud', 'activo'], order: 'nombre' },
     especies: { table: 'especie', id: 'id_especie', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
     origenes: { table: 'origen_animal', id: 'id_origen', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
+    'condiciones-animales': { table: 'condicion_animal', id: 'id_condicion_animal', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
     'categorias-animales': { table: 'categoria_animal', id: 'id_categoria_animal', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
     colores: { table: 'color_animal', id: 'id_color', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
     razas: { table: 'raza_animal', id: 'id_raza', columns: ['id_especie', 'codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
@@ -28,7 +29,20 @@ const definitions = {
     compradores: { table: 'comprador', id: 'id_comprador', columns: ['codigo', 'nombre', 'contacto', 'destino', 'descripcion', 'activo'], order: 'nombre' }
 };
 const nameSchema = z.enum(Object.keys(definitions));
+const protectedAnimalConditions = new Set(['ACTIVO', 'INACTIVO', 'VENDIDO', 'TRASLADADO', 'DESAPARECIDO', 'MUERTO']);
 export const catalogsRouter = Router();
+function normalizeCatalogData(name, body) {
+    const def = definitions[name];
+    const data = pick(body, def.columns);
+    if (name === 'condiciones-animales' && typeof data.codigo === 'string') {
+        const code = data.codigo.trim().toUpperCase().replace(/\s+/g, '_');
+        data.codigo = code;
+        if (!/^[A-Z0-9_]+$/.test(code)) {
+            throw new ValidationError('El código solo puede contener letras, números y guion bajo.');
+        }
+    }
+    return data;
+}
 catalogsRouter.get('/:catalog', requirePermission('CATALOGO_CONSULTAR'), asyncHandler(async (req, res) => {
     const name = nameSchema.parse(routeParam(req.params.catalog, 'catalog'));
     const def = definitions[name];
@@ -36,10 +50,42 @@ catalogsRouter.get('/:catalog', requirePermission('CATALOGO_CONSULTAR'), asyncHa
     res.set('Cache-Control', 'no-store');
     return ok(res, rows);
 }));
-catalogsRouter.post('/:catalog', requirePermission('CATALOGO_ADMINISTRAR'), asyncHandler(async (req, res) => { const name = nameSchema.parse(routeParam(req.params.catalog, 'catalog')); const def = definitions[name]; const data = pick(req.body, def.columns); if (!Object.keys(data).length)
+catalogsRouter.post('/:catalog', requirePermission('CATALOGO_ADMINISTRAR'), asyncHandler(async (req, res) => { const name = nameSchema.parse(routeParam(req.params.catalog, 'catalog')); const def = definitions[name]; const data = normalizeCatalogData(name, req.body); if (!Object.keys(data).length)
     throw new ValidationError('No hay campos válidos.'); const row = (await pool.query(buildInsert(def.table, data))).rows[0]; return created(res, row); }));
-catalogsRouter.patch('/:catalog/:id', requirePermission('CATALOGO_ADMINISTRAR'), asyncHandler(async (req, res) => { const name = nameSchema.parse(routeParam(req.params.catalog, 'catalog')); const def = definitions[name]; const row = (await pool.query(buildUpdate(def.table, def.id, routeParam(req.params.id, 'id'), pick(req.body, def.columns)))).rows[0]; if (!row)
-    throw new NotFoundError(); return ok(res, row); }));
-catalogsRouter.delete('/:catalog/:id', requirePermission('CATALOGO_ADMINISTRAR'), asyncHandler(async (req, res) => { const name = nameSchema.parse(routeParam(req.params.catalog, 'catalog')); const def = definitions[name]; const result = await pool.query(`UPDATE ${def.table} SET deleted_at=NOW(),activo=FALSE WHERE ${def.id}=$1 AND deleted_at IS NULL`, [routeParam(req.params.id, 'id')]); if (!result.rowCount)
-    throw new NotFoundError(); return noContent(res); }));
+catalogsRouter.patch('/:catalog/:id', requirePermission('CATALOGO_ADMINISTRAR'), asyncHandler(async (req, res) => {
+    const name = nameSchema.parse(routeParam(req.params.catalog, 'catalog'));
+    const def = definitions[name];
+    const id = routeParam(req.params.id, 'id');
+    const data = normalizeCatalogData(name, req.body);
+    if (name === 'condiciones-animales') {
+        const current = (await pool.query('SELECT codigo FROM condicion_animal WHERE id_condicion_animal=$1 AND deleted_at IS NULL', [id])).rows[0];
+        if (!current)
+            throw new NotFoundError();
+        if (protectedAnimalConditions.has(current.codigo) && ((typeof data.codigo === 'string' && data.codigo !== current.codigo) || data.activo === false)) {
+            throw new ValidationError('Las condiciones principales del sistema pueden cambiar de nombre o descripción, pero no su código ni desactivarse.');
+        }
+    }
+    const row = (await pool.query(buildUpdate(def.table, def.id, id, data))).rows[0];
+    if (!row)
+        throw new NotFoundError();
+    return ok(res, row);
+}));
+catalogsRouter.delete('/:catalog/:id', requirePermission('CATALOGO_ADMINISTRAR'), asyncHandler(async (req, res) => {
+    const name = nameSchema.parse(routeParam(req.params.catalog, 'catalog'));
+    const def = definitions[name];
+    const id = routeParam(req.params.id, 'id');
+    if (name === 'condiciones-animales') {
+        const current = (await pool.query('SELECT codigo FROM condicion_animal WHERE id_condicion_animal=$1 AND deleted_at IS NULL', [id])).rows[0];
+        if (!current)
+            throw new NotFoundError();
+        if (protectedAnimalConditions.has(current.codigo))
+            throw new ValidationError('Esta condición es necesaria para el funcionamiento del sistema y no puede desactivarse.');
+        await pool.query('UPDATE condicion_animal SET activo=FALSE,updated_at=NOW() WHERE id_condicion_animal=$1', [id]);
+        return noContent(res);
+    }
+    const result = await pool.query(`UPDATE ${def.table} SET deleted_at=NOW(),activo=FALSE WHERE ${def.id}=$1 AND deleted_at IS NULL`, [id]);
+    if (!result.rowCount)
+        throw new NotFoundError();
+    return noContent(res);
+}));
 //# sourceMappingURL=catalogs.routes.js.map
