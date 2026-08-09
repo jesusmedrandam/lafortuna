@@ -40,7 +40,7 @@ import {
   PageHeader,
 } from '../../components/ui';
 import type { Animal, AnimalImage } from '../../types/api';
-import { formatAge, formatDate, formatNumber } from '../../utils';
+import { formatAge, formatDate, formatNumber, humanizeCode } from '../../utils';
 import { AnimalFormModal } from './AnimalFormModal';
 import { AnimalMultiPicker } from '../../components/AnimalMultiPicker';
 
@@ -298,7 +298,7 @@ export function AnimalDetailPage() {
               <h2>{animal.nombre}</h2>
               <p>{animal.descripcion || 'Sin descripción registrada.'}</p>
             </div>
-            <Badge tone={animal.estado === 'ACTIVO' ? 'success' : animal.estado === 'MUERTO' ? 'danger' : 'warning'}>{animal.estado}</Badge>
+            <Badge tone={animal.estado === 'ACTIVO' ? 'success' : animal.estado === 'MUERTO' ? 'danger' : 'warning'}>{animal.condicion || humanizeCode(animal.estado)}</Badge>
           </div>
 
           <div className="animal-compact-info-grid">

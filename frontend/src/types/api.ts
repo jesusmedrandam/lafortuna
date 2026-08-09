@@ -64,6 +64,7 @@ export interface CatalogItem {
   nombre?: string;
   descripcion?: string | null;
   activo?: boolean;
+  es_sistema?: boolean;
 }
 
 export interface Animal {
@@ -93,7 +94,8 @@ export interface Animal {
   id_ubicacion_actual: string | null;
   ubicacion: string | null;
   fecha_ingreso: string | null;
-  estado: 'ACTIVO' | 'MUERTO' | 'VENDIDO' | 'TRASLADADO' | 'DESAPARECIDO' | 'INACTIVO';
+  estado: string;
+  condicion?: string;
   foto_perfil: string | null;
   propietario_principal?: string | null;
   propietarios?: AnimalOwner[];
@@ -157,6 +159,7 @@ export interface OwnerOption {
 export interface AnimalFilterOptions {
   especies: { id_especie: string; nombre: string }[];
   categorias: { id_categoria_animal: string; codigo: string; nombre: string }[];
+  condiciones: { id_condicion_animal: string; codigo: string; nombre: string; activo: boolean }[];
   grupos: { id_grupo: string; nombre: string }[];
   ubicaciones: { id_ubicacion: string; nombre: string; tipo: Location['tipo']; id_categoria_animal: string }[];
   propietarios: { id_usuario: string; nombre: string }[];

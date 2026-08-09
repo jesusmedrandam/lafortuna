@@ -81,6 +81,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
   const species = useCatalog('especies');
   const origins = useCatalog('origenes');
   const categories = useCatalog('categorias-animales');
+  const conditions = useCatalog('condiciones-animales');
   const colors = useCatalog('colores');
   const breeds = useCatalog('razas');
   const marks = useQuery({ queryKey: ['marks'], queryFn: () => apiRequest<Mark[]>('/marquillas') });
@@ -445,7 +446,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
             </Field>
             <Field label="Condición del animal" hint="Inactivo significa que el registro no está operativo; no significa que el animal esté fuera de la propiedad.">
               <Select value={form.estado} onChange={(event) => setForm((current) => ({ ...current, estado: event.target.value as Animal['estado'] }))}>
-                {['ACTIVO', 'INACTIVO', 'VENDIDO', 'TRASLADADO', 'DESAPARECIDO', 'MUERTO'].map((item) => <option key={item}>{item}</option>)}
+                {conditions.data?.filter((item) => item.activo !== false || item.codigo === form.estado).map((item) => <option key={String(item.codigo)} value={String(item.codigo)}>{itemLabel(item)}</option>)}
               </Select>
             </Field>
           </div>
