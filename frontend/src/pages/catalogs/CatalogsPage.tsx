@@ -13,7 +13,7 @@ const catalogDefinitions = [
   ['compradores', 'Compradores'], ['productos-venta', 'Productos de venta'], ['unidades', 'Unidades de medida'],
   ['categorias-animales', 'Categorías de animales'], ['condiciones-animales', 'Condiciones del animal'], ['especies', 'Especies'], ['origenes', 'Orígenes'], ['colores', 'Colores'], ['razas', 'Razas'],
   ['tipos-grupo', 'Tipos de grupo'], ['pastos', 'Tipos de pasto'], ['usos-potrero', 'Usos de potrero'], ['tipos-corral', 'Tipos de corral'],
-  ['tipos-limpieza', 'Tipos de limpieza'], ['categorias-agroquimicos', 'Categorías agroquímicas'], ['agroquimicos', 'Productos agroquímicos'],
+  ['motivos-movimiento', 'Motivos de movimiento'], ['tipos-limpieza', 'Tipos de limpieza'], ['categorias-agroquimicos', 'Categorías agroquímicas'], ['agroquimicos', 'Productos agroquímicos'],
   ['tipos-tratamiento', 'Tipos de tratamiento'], ['vias', 'Vías de administración'], ['medicamentos', 'Medicamentos'],
 ] as const;
 type CatalogName = typeof catalogDefinitions[number][0];

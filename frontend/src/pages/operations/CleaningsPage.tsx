@@ -10,18 +10,17 @@ import { useListControls } from '../../hooks/useListControls';
 import type { Operator, Pasture, PastureCleaning } from '../../types/api';
 import { currentDateInput, dateInputValue, formatDate, formatNumber, humanizeCode, nullIfEmpty, numberOrNull } from '../../utils';
 
-interface ProductLine { id_producto: string; cantidad_total: string; id_unidad: string; cantidad_por_tanque: string; valor_unitario: string; observaciones: string; }
-interface OperatorLine { id_operador: string; funcion: string; horas_trabajadas: string; observaciones: string; }
+interface ProductLine { id_producto: string; id_unidad: string; cantidad_por_tanque: string; observaciones: string; }
+interface OperatorLine { id_operador: string; funcion: string; observaciones: string; }
 type ApplicationUnit = 'TANQUES' | 'BOMBADAS';
 interface CleaningForm {
   id_potrero: string; id_tipo_limpieza: string; fecha_inicio: string; fecha_finalizacion: string; unidad_aplicacion: ApplicationUnit; cantidad_tanques: string;
-  capacidad_tanque_litros: string; area_intervenida: string; id_unidad_area: string; estado: string; observaciones: string;
+  capacidad_tanque_litros: string; tipo_area_intervenida: 'TOTAL' | 'PARCIAL'; estado: string; observaciones: string;
   productos: ProductLine[]; operadores: OperatorLine[];
 }
-const emptyCleaning = (): CleaningForm => ({ id_potrero: '', id_tipo_limpieza: '', fecha_inicio: currentDateInput(), fecha_finalizacion: '', unidad_aplicacion: 'TANQUES', cantidad_tanques: '', capacidad_tanque_litros: '', area_intervenida: '', id_unidad_area: '', estado: 'COMPLETADO', observaciones: '', productos: [], operadores: [] });
+const emptyCleaning = (): CleaningForm => ({ id_potrero: '', id_tipo_limpieza: '', fecha_inicio: currentDateInput(), fecha_finalizacion: '', unidad_aplicacion: 'TANQUES', cantidad_tanques: '', capacidad_tanque_litros: '', tipo_area_intervenida: 'TOTAL', estado: 'COMPLETADO', observaciones: '', productos: [], operadores: [] });
 interface OperatorForm { id_operador?: string; nombres: string; apellidos: string; telefono: string; especialidad: string; activo: boolean; }
 const emptyOperator = (): OperatorForm => ({ nombres: '', apellidos: '', telefono: '', especialidad: '', activo: true });
-const money = (value: number | string | null | undefined) => new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD' }).format(Number(value ?? 0));
 
 export function CleaningsPage() {
   const { hasPermission } = useAuth();
@@ -45,7 +44,8 @@ export function CleaningsPage() {
   const save = useMutation({
     mutationFn: () => {
       if (!form.id_potrero || !form.id_tipo_limpieza || !form.fecha_inicio) throw new Error('Selecciona potrero, tipo de limpieza y fecha.');
-      if (form.productos.some((item) => !item.id_producto || !item.cantidad_total || !item.id_unidad || !item.valor_unitario)) throw new Error('Completa producto, cantidad, unidad y valor unitario en cada producto aplicado.');
+      if (form.productos.length && !form.cantidad_tanques) throw new Error('Ingresa la cantidad de tanques o bombadas para calcular el consumo total.');
+      if (form.productos.some((item) => !item.id_producto || !item.cantidad_por_tanque || !item.id_unidad)) throw new Error('Completa producto, cantidad por tanque o bombada y unidad.');
       return apiRequest(editing ? `/limpiezas-potrero/${editing.id_limpieza}` : '/limpiezas-potrero', {
         method: editing ? 'PATCH' : 'POST',
         body: {
@@ -56,12 +56,11 @@ export function CleaningsPage() {
           unidad_aplicacion: form.unidad_aplicacion,
           cantidad_tanques: numberOrNull(form.cantidad_tanques),
           capacidad_tanque_litros: numberOrNull(form.capacidad_tanque_litros),
-          area_intervenida: numberOrNull(form.area_intervenida),
-          id_unidad_area: form.id_unidad_area || null,
+          tipo_area_intervenida: form.tipo_area_intervenida,
           estado: form.estado,
           observaciones: nullIfEmpty(form.observaciones),
-          productos: form.productos.map((item) => ({ id_producto: item.id_producto, cantidad_total: Number(item.cantidad_total), id_unidad: item.id_unidad, cantidad_por_tanque: numberOrNull(item.cantidad_por_tanque), valor_unitario: Number(item.valor_unitario), observaciones: nullIfEmpty(item.observaciones) })),
-          operadores: form.operadores.filter((item) => item.id_operador).map((item) => ({ id_operador: item.id_operador, funcion: nullIfEmpty(item.funcion), horas_trabajadas: numberOrNull(item.horas_trabajadas), observaciones: nullIfEmpty(item.observaciones) })),
+          productos: form.productos.map((item) => ({ id_producto: item.id_producto, id_unidad: item.id_unidad, cantidad_por_tanque: Number(item.cantidad_por_tanque), observaciones: nullIfEmpty(item.observaciones) })),
+          operadores: form.operadores.filter((item) => item.id_operador).map((item) => ({ id_operador: item.id_operador, funcion: nullIfEmpty(item.funcion), observaciones: nullIfEmpty(item.observaciones) })),
         },
       });
     },
@@ -86,11 +85,12 @@ export function CleaningsPage() {
     onError: (error) => toast.show((error as ApiError).message, 'error'),
   });
 
-  const addProduct = () => setForm((current) => ({ ...current, productos: [...current.productos, { id_producto: '', cantidad_total: '', id_unidad: '', cantidad_por_tanque: '', valor_unitario: '', observaciones: '' }] }));
-  const addOperator = () => setForm((current) => ({ ...current, operadores: [...current.operadores, { id_operador: '', funcion: '', horas_trabajadas: '', observaciones: '' }] }));
+  const addProduct = () => setForm((current) => ({ ...current, productos: [...current.productos, { id_producto: '', id_unidad: '', cantidad_por_tanque: '', observaciones: '' }] }));
+  const addOperator = () => setForm((current) => ({ ...current, operadores: [...current.operadores, { id_operador: '', funcion: '', observaciones: '' }] }));
   const list = useListControls({ items: cleanings.data ?? [], storageKey: 'cleanings', searchText: (item) => `${item.tipo_limpieza} ${item.potrero} ${item.estado} ${item.productos.map((product) => product.producto).join(' ')} ${item.operadores.map((operator) => operator.nombre).join(' ')}`, dateValue: (item) => item.fecha_inicio, nameValue: (item) => `${item.potrero} ${item.tipo_limpieza}` });
   const editCleaning = (item: PastureCleaning) => {
-    setForm({ id_potrero: item.id_potrero, id_tipo_limpieza: item.id_tipo_limpieza, fecha_inicio: dateInputValue(item.fecha_inicio), fecha_finalizacion: dateInputValue(item.fecha_finalizacion), unidad_aplicacion: item.unidad_aplicacion ?? 'TANQUES', cantidad_tanques: item.cantidad_tanques == null ? '' : String(item.cantidad_tanques), capacidad_tanque_litros: item.capacidad_tanque_litros == null ? '' : String(item.capacidad_tanque_litros), area_intervenida: item.area_intervenida == null ? '' : String(item.area_intervenida), id_unidad_area: item.id_unidad_area ?? '', estado: item.estado, observaciones: item.observaciones ?? '', productos: item.productos.map((product) => ({ id_producto: product.id_producto, cantidad_total: String(product.cantidad_total), id_unidad: product.id_unidad, cantidad_por_tanque: product.cantidad_por_tanque == null ? '' : String(product.cantidad_por_tanque), valor_unitario: product.valor_unitario == null ? '' : String(product.valor_unitario), observaciones: product.observaciones ?? '' })), operadores: item.operadores.map((operator) => ({ id_operador: operator.id_operador, funcion: operator.funcion ?? '', horas_trabajadas: operator.horas_trabajadas == null ? '' : String(operator.horas_trabajadas), observaciones: operator.observaciones ?? '' })) });
+    const applications = Number(item.cantidad_tanques ?? 0);
+    setForm({ id_potrero: item.id_potrero, id_tipo_limpieza: item.id_tipo_limpieza, fecha_inicio: dateInputValue(item.fecha_inicio), fecha_finalizacion: dateInputValue(item.fecha_finalizacion), unidad_aplicacion: item.unidad_aplicacion ?? 'TANQUES', cantidad_tanques: item.cantidad_tanques == null ? '' : String(item.cantidad_tanques), capacidad_tanque_litros: item.capacidad_tanque_litros == null ? '' : String(item.capacidad_tanque_litros), tipo_area_intervenida: item.tipo_area_intervenida ?? (item.area_intervenida == null ? 'TOTAL' : 'PARCIAL'), estado: item.estado, observaciones: item.observaciones ?? '', productos: item.productos.map((product) => ({ id_producto: product.id_producto, id_unidad: product.id_unidad, cantidad_por_tanque: product.cantidad_por_tanque == null && applications > 0 ? String(Number(product.cantidad_total) / applications) : String(product.cantidad_por_tanque ?? ''), observaciones: product.observaciones ?? '' })), operadores: item.operadores.map((operator) => ({ id_operador: operator.id_operador, funcion: operator.funcion ?? '', observaciones: operator.observaciones ?? '' })) });
     setEditing(item); setSelected(null); setCreating(true);
   };
 
@@ -110,24 +110,20 @@ export function CleaningsPage() {
         <Field label="Contabilizar aplicación por"><Select value={form.unidad_aplicacion} onChange={(event) => setForm((current) => ({ ...current, unidad_aplicacion: event.target.value as ApplicationUnit }))}><option value="TANQUES">Tanques</option><option value="BOMBADAS">Bombadas</option></Select></Field>
         <Field label={`Cantidad de ${form.unidad_aplicacion === 'BOMBADAS' ? 'bombadas' : 'tanques'}`}><Input type="number" min="0" step="0.01" value={form.cantidad_tanques} onChange={(event) => setForm((current) => ({ ...current, cantidad_tanques: event.target.value }))} /></Field>
         <Field label={`Capacidad de cada ${form.unidad_aplicacion === 'BOMBADAS' ? 'bombada' : 'tanque'} (L)`}><Input type="number" min="0.01" step="0.01" value={form.capacidad_tanque_litros} onChange={(event) => setForm((current) => ({ ...current, capacidad_tanque_litros: event.target.value }))} /></Field>
-        <Field label="Área intervenida"><Input type="number" min="0.01" step="0.001" value={form.area_intervenida} onChange={(event) => setForm((current) => ({ ...current, area_intervenida: event.target.value }))} /></Field>
-        <Field label="Unidad del área"><Select value={form.id_unidad_area} onChange={(event) => setForm((current) => ({ ...current, id_unidad_area: event.target.value }))}><option value="">Sin unidad</option>{units.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)} {item.simbolo ? `(${item.simbolo})` : ''}</option>)}</Select></Field>
+        <Field label="Área intervenida" required><Select value={form.tipo_area_intervenida} onChange={(event) => setForm((current) => ({ ...current, tipo_area_intervenida: event.target.value as CleaningForm['tipo_area_intervenida'] }))}><option value="TOTAL">Total</option><option value="PARCIAL">Parcial</option></Select></Field>
         <Field label="Estado"><Select value={form.estado} onChange={(event) => setForm((current) => ({ ...current, estado: event.target.value }))}>{['BORRADOR','PENDIENTE','EN_PROCESO','COMPLETADO','CANCELADO'].map((status) => <option key={status} value={status}>{humanizeCode(status)}</option>)}</Select></Field>
       </div><Field label="Observaciones"><Textarea value={form.observaciones} onChange={(event) => setForm((current) => ({ ...current, observaciones: event.target.value }))} /></Field></div>
 
       <div className="form-section"><div className="section-heading-inline"><h3>Productos aplicados</h3><Button type="button" variant="secondary" onClick={addProduct}><Plus size={16} />Agregar producto</Button></div>{form.productos.length ? <div className="nested-list">{form.productos.map((line, index) => <div className="nested-card" key={`product-${index}`}><div className="nested-card-header"><strong>Producto {index + 1}</strong><Button type="button" variant="ghost" onClick={() => setForm((current) => ({ ...current, productos: current.productos.filter((_, itemIndex) => itemIndex !== index) }))}><Trash2 size={16} /></Button></div><div className="form-grid">
         <Field label="Producto" required><Select value={line.id_producto} onChange={(event) => setForm((current) => ({ ...current, productos: current.productos.map((item, itemIndex) => itemIndex === index ? { ...item, id_producto: event.target.value } : item) }))}><option value="">Selecciona</option>{products.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>
-        <Field label="Cantidad total" required><Input type="number" min="0.0001" step="0.0001" value={line.cantidad_total} onChange={(event) => setForm((current) => ({ ...current, productos: current.productos.map((item, itemIndex) => itemIndex === index ? { ...item, cantidad_total: event.target.value } : item) }))} /></Field>
         <Field label="Unidad" required><Select value={line.id_unidad} onChange={(event) => setForm((current) => ({ ...current, productos: current.productos.map((item, itemIndex) => itemIndex === index ? { ...item, id_unidad: event.target.value } : item) }))}><option value="">Selecciona</option>{units.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)} {item.simbolo ? `(${item.simbolo})` : ''}</option>)}</Select></Field>
-        <Field label={`Cantidad por ${form.unidad_aplicacion === 'BOMBADAS' ? 'bombada' : 'tanque'}`}><Input type="number" min="0.0001" step="0.0001" value={line.cantidad_por_tanque} onChange={(event) => setForm((current) => ({ ...current, productos: current.productos.map((item, itemIndex) => itemIndex === index ? { ...item, cantidad_por_tanque: event.target.value } : item) }))} /></Field>
-        <Field label="Valor unitario (USD)" required><Input type="number" min="0" step="0.01" value={line.valor_unitario} onChange={(event) => setForm((current) => ({ ...current, productos: current.productos.map((item, itemIndex) => itemIndex === index ? { ...item, valor_unitario: event.target.value } : item) }))} /></Field>
-        <Field label="Valor total"><Input value={money(Number(line.cantidad_total || 0) * Number(line.valor_unitario || 0))} readOnly tabIndex={-1} /></Field>
+        <Field label={`Cantidad por ${form.unidad_aplicacion === 'BOMBADAS' ? 'bombada' : 'tanque'}`} required><Input type="number" min="0.0001" step="0.0001" value={line.cantidad_por_tanque} onChange={(event) => setForm((current) => ({ ...current, productos: current.productos.map((item, itemIndex) => itemIndex === index ? { ...item, cantidad_por_tanque: event.target.value } : item) }))} /></Field>
+        <Field label="Cantidad total utilizada" hint="Se calcula automáticamente."><Input value={form.cantidad_tanques && line.cantidad_por_tanque ? formatNumber(Number(form.cantidad_tanques) * Number(line.cantidad_por_tanque), 4) : ''} placeholder="Cantidad × tanques o bombadas" readOnly tabIndex={-1} /></Field>
       </div><Field label="Observaciones"><Input value={line.observaciones} onChange={(event) => setForm((current) => ({ ...current, productos: current.productos.map((item, itemIndex) => itemIndex === index ? { ...item, observaciones: event.target.value } : item) }))} /></Field></div>)}</div> : <p className="muted">Agrega productos cuando corresponda, por ejemplo en una fumigación.</p>}</div>
 
       <div className="form-section"><div className="section-heading-inline"><h3>Operadores responsables</h3><Button type="button" variant="secondary" onClick={addOperator}><Plus size={16} />Agregar operador</Button></div>{form.operadores.length ? <div className="nested-list">{form.operadores.map((line, index) => <div className="nested-card" key={`operator-${index}`}><div className="nested-card-header"><strong>Operador {index + 1}</strong><Button type="button" variant="ghost" onClick={() => setForm((current) => ({ ...current, operadores: current.operadores.filter((_, itemIndex) => itemIndex !== index) }))}><Trash2 size={16} /></Button></div><div className="form-grid">
         <Field label="Operador" required><Select value={line.id_operador} onChange={(event) => setForm((current) => ({ ...current, operadores: current.operadores.map((item, itemIndex) => itemIndex === index ? { ...item, id_operador: event.target.value } : item) }))}><option value="">Selecciona</option>{operators.data?.filter((item) => item.activo).map((item) => <option key={item.id_operador} value={item.id_operador}>{item.nombres} {item.apellidos ?? ''}</option>)}</Select></Field>
         <Field label="Función"><Input value={line.funcion} onChange={(event) => setForm((current) => ({ ...current, operadores: current.operadores.map((item, itemIndex) => itemIndex === index ? { ...item, funcion: event.target.value } : item) }))} /></Field>
-        <Field label="Horas trabajadas"><Input type="number" min="0" step="0.25" value={line.horas_trabajadas} onChange={(event) => setForm((current) => ({ ...current, operadores: current.operadores.map((item, itemIndex) => itemIndex === index ? { ...item, horas_trabajadas: event.target.value } : item) }))} /></Field>
         <Field label="Observaciones"><Input value={line.observaciones} onChange={(event) => setForm((current) => ({ ...current, operadores: current.operadores.map((item, itemIndex) => itemIndex === index ? { ...item, observaciones: event.target.value } : item) }))} /></Field>
       </div></div>)}</div> : <p className="muted">Puedes registrar uno o varios fumigadores u operadores.</p>}</div>
     </div></Modal> : null}
@@ -140,5 +136,20 @@ export function CleaningsPage() {
 function CleaningDetail({item,onClose,onEdit}:{item:PastureCleaning;onClose:()=>void;onEdit?:()=>void}){
   const application=item.unidad_aplicacion==='BOMBADAS'?'bombadas':'tanques';
   const singular=item.unidad_aplicacion==='BOMBADAS'?'bombada':'tanque';
-  return <Modal title="Detalle de la limpieza" wide onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cerrar</Button>{onEdit?<Button onClick={onEdit}><Edit3 size={17}/>Editar limpieza</Button>:null}</>}><div className="cleaning-detail"><div className="cleaning-detail-heading"><div className="operation-icon"><Droplets size={24}/></div><div><h2>{item.tipo_limpieza}</h2><p>{item.potrero}</p></div><Badge tone={item.estado==='COMPLETADO'?'success':item.estado==='CANCELADO'?'danger':'warning'}>{humanizeCode(item.estado)}</Badge></div><div className="cleaning-detail-grid"><div><small>Fecha de inicio</small><strong>{formatDate(item.fecha_inicio)}</strong></div><div><small>Fecha de finalización</small><strong>{formatDate(item.fecha_finalizacion)}</strong></div><div><small>Unidad de aplicación</small><strong>{humanizeCode(item.unidad_aplicacion||'TANQUES')}</strong></div><div><small>Cantidad de {application}</small><strong>{item.cantidad_tanques==null?'—':formatNumber(item.cantidad_tanques)}</strong></div><div><small>Capacidad por {singular}</small><strong>{item.capacidad_tanque_litros==null?'—':`${formatNumber(item.capacidad_tanque_litros)} L`}</strong></div><div><small>Área intervenida</small><strong>{item.area_intervenida==null?'—':`${formatNumber(item.area_intervenida)} ${item.unidad_area||''}`.trim()}</strong></div></div><section><h3>Productos aplicados</h3>{item.productos.length?<div className="cleaning-detail-lines">{item.productos.map((product,index)=><div key={`${item.id_limpieza}-product-${index}`}><strong>{product.producto}</strong><span>{formatNumber(product.cantidad_total,4)} {product.unidad}{product.cantidad_por_tanque?` · ${formatNumber(product.cantidad_por_tanque,4)} por ${singular}`:''}</span><span>{product.valor_unitario == null ? 'Sin valor registrado' : `${money(product.valor_unitario)} × ${formatNumber(product.cantidad_total,4)} = ${money(product.valor_total)}`}</span>{product.observaciones?<small>{product.observaciones}</small>:null}</div>)}</div>:<p className="muted">No se registraron productos.</p>}</section><section><h3>Operadores responsables</h3>{item.operadores.length?<div className="cleaning-detail-lines">{item.operadores.map((operator)=><div key={`${item.id_limpieza}-${operator.id_operador}`}><strong>{operator.nombre}</strong><span>{[operator.funcion,operator.horas_trabajadas?`${formatNumber(operator.horas_trabajadas)} horas`:null].filter(Boolean).join(' · ')||'Sin función registrada'}</span>{operator.observaciones?<small>{operator.observaciones}</small>:null}</div>)}</div>:<p className="muted">No se registraron operadores.</p>}</section><section><h3>Observaciones generales</h3><p>{item.observaciones||'Sin observaciones.'}</p></section></div></Modal>;
+  return <Modal title="Detalle de la limpieza" wide onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cerrar</Button>{onEdit?<Button onClick={onEdit}><Edit3 size={17}/>Editar limpieza</Button>:null}</>}>
+    <div className="cleaning-detail">
+      <div className="cleaning-detail-heading"><div className="operation-icon"><Droplets size={24}/></div><div><h2>{item.tipo_limpieza}</h2><p>{item.potrero}</p></div><Badge tone={item.estado==='COMPLETADO'?'success':item.estado==='CANCELADO'?'danger':'warning'}>{humanizeCode(item.estado)}</Badge></div>
+      <div className="cleaning-detail-grid">
+        <div><small>Fecha de inicio</small><strong>{formatDate(item.fecha_inicio)}</strong></div>
+        <div><small>Fecha de finalización</small><strong>{formatDate(item.fecha_finalizacion)}</strong></div>
+        <div><small>Unidad de aplicación</small><strong>{humanizeCode(item.unidad_aplicacion||'TANQUES')}</strong></div>
+        <div><small>Cantidad de {application}</small><strong>{item.cantidad_tanques==null?'—':formatNumber(item.cantidad_tanques)}</strong></div>
+        <div><small>Capacidad por {singular}</small><strong>{item.capacidad_tanque_litros==null?'—':`${formatNumber(item.capacidad_tanque_litros)} L`}</strong></div>
+        <div><small>Área intervenida</small><strong>{item.tipo_area_intervenida === 'PARCIAL' ? 'Parcial' : 'Total'}</strong></div>
+      </div>
+      <section><h3>Productos aplicados</h3>{item.productos.length?<div className="cleaning-detail-lines">{item.productos.map((product,index)=><div key={`${item.id_limpieza}-product-${index}`}><strong>{product.producto}</strong><span>{formatNumber(product.cantidad_por_tanque,4)} {product.unidad} por {singular}</span><span><strong>Total utilizado: {formatNumber(product.cantidad_total,4)} {product.unidad}</strong></span>{product.observaciones?<small>{product.observaciones}</small>:null}</div>)}</div>:<p className="muted">No se registraron productos.</p>}</section>
+      <section><h3>Operadores responsables</h3>{item.operadores.length?<div className="cleaning-detail-lines">{item.operadores.map((operator)=><div key={`${item.id_limpieza}-${operator.id_operador}`}><strong>{operator.nombre}</strong><span>{operator.funcion || 'Sin función registrada'}</span>{operator.observaciones?<small>{operator.observaciones}</small>:null}</div>)}</div>:<p className="muted">No se registraron operadores.</p>}</section>
+      <section><h3>Observaciones generales</h3><p>{item.observaciones||'Sin observaciones.'}</p></section>
+    </div>
+  </Modal>;
 }

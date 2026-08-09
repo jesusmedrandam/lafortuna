@@ -410,12 +410,14 @@ export interface Movement {
   id_ubicacion_destino: string | null;
   id_grupo_origen: string | null;
   id_grupo_destino: string | null;
+  id_motivo_movimiento: string;
   ubicacion_origen: string | null;
   ubicacion_destino: string | null;
   grupo_origen: string | null;
   grupo_destino: string | null;
   fecha_movimiento: string;
   motivo: string | null;
+  motivo_catalogo: string | null;
   observaciones: string | null;
   estado: string;
   total_candidatos: number;
@@ -475,8 +477,6 @@ export interface CleaningProduct {
   id_unidad: string;
   unidad: string;
   cantidad_por_tanque: number | string | null;
-  valor_unitario: number | string | null;
-  valor_total: number | string | null;
   observaciones: string | null;
 }
 
@@ -484,7 +484,6 @@ export interface CleaningOperator {
   id_operador: string;
   nombre: string;
   funcion: string | null;
-  horas_trabajadas: number | string | null;
   observaciones: string | null;
 }
 
@@ -499,6 +498,7 @@ export interface PastureCleaning {
   unidad_aplicacion: 'TANQUES' | 'BOMBADAS' | null;
   cantidad_tanques: number | string | null;
   capacidad_tanque_litros: number | string | null;
+  tipo_area_intervenida: 'TOTAL' | 'PARCIAL';
   area_intervenida: number | string | null;
   id_unidad_area: string | null;
   unidad_area: string | null;
