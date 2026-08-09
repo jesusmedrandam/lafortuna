@@ -66,7 +66,7 @@ export function MovementsPage() {
   const hasSelectedOrigin = Boolean(sourceGroup) || form.selection.animals.some((item) => item.seleccionado);
   const targetGroups = groups.data?.filter((item) => {
     if (!item.activo) return false;
-    if (form.kind === 'UBICACION' && form.selection.mode === 'GRUPO' && item.id_grupo === form.selection.groupId) return true;
+    if (form.kind === 'UBICACION' && item.id_grupo === form.selection.groupId) return true;
     if (!item.id_ubicacion_actual) return false;
     if (form.kind === 'GRUPO') return (!sourceCategoryId || item.id_categoria_animal === sourceCategoryId) && (!sourceLocationId || item.id_ubicacion_actual === sourceLocationId);
     if (item.id_ubicacion_actual === form.id_ubicacion_destino) return true;
@@ -78,7 +78,7 @@ export function MovementsPage() {
     const initialAnimal = (route.state as { initialAnimal?: SelectableAnimal } | null)?.initialAnimal;
     if (!initialAnimal) return;
     consumedInitialAnimal.current = true;
-    setForm({ ...emptyForm(), selection: { mode: 'SELECCION_MANUAL', groupId: '', animals: [{ ...initialAnimal, seleccionado: true }] } });
+    setForm({ ...emptyForm(), kind: 'GRUPO', selection: { mode: 'SELECCION_MANUAL', groupId: '', animals: [{ ...initialAnimal, seleccionado: true }] } });
     setCreating(true);
     navigate(route.pathname, { replace: true, state: null });
   }, [navigate, route.pathname, route.state]);
@@ -131,7 +131,8 @@ export function MovementsPage() {
   const editMovement = (item: Movement) => {
     const destination = locations.data?.find((location) => location.id_ubicacion === item.id_ubicacion_destino);
     const kind: MovementKind = item.tipo_movimiento ?? (item.id_ubicacion_destino && item.id_grupo_destino ? 'COMBINADO' : item.id_grupo_destino ? 'GRUPO' : destination?.tipo === 'OTRO' ? 'PROPIEDAD' : 'UBICACION');
-    setForm({ kind, selection: { mode: item.modo_seleccion, groupId: item.id_grupo_filtro ?? '', animals: item.detalles.map((detail) => ({ id_animal: detail.id_animal, nombre: detail.nombre ?? detail.animal, codigo_arete: detail.codigo_arete ?? detail.arete, sexo: detail.sexo ?? 'HEMBRA', id_categoria_animal: detail.id_categoria_animal ?? '', categoria: detail.categoria ?? '', id_grupo_actual: detail.id_grupo_actual ?? null, grupo: detail.grupo ?? null, id_ubicacion_actual: detail.id_ubicacion_actual ?? null, ubicacion: detail.ubicacion ?? null, seleccionado: detail.seleccionado, observaciones: detail.observaciones ?? null })) }, id_ubicacion_destino: item.id_ubicacion_destino ?? '', id_grupo_destino: item.id_grupo_destino ?? '', id_motivo_movimiento: item.id_motivo_movimiento ?? '', fecha_movimiento: dateInputValue(item.fecha_movimiento), observaciones: item.observaciones ?? '' });
+    const legacyGroupId = item.id_grupo_filtro ?? item.id_grupo_origen ?? item.id_grupo_destino ?? '';
+    setForm({ kind, selection: { mode: kind === 'UBICACION' ? 'GRUPO' : item.modo_seleccion, groupId: kind === 'UBICACION' ? legacyGroupId : item.id_grupo_filtro ?? '', animals: item.detalles.map((detail) => ({ id_animal: detail.id_animal, nombre: detail.nombre ?? detail.animal, codigo_arete: detail.codigo_arete ?? detail.arete, sexo: detail.sexo ?? 'HEMBRA', id_categoria_animal: detail.id_categoria_animal ?? '', categoria: detail.categoria ?? '', id_grupo_actual: detail.id_grupo_actual ?? null, grupo: detail.grupo ?? null, id_ubicacion_actual: detail.id_ubicacion_actual ?? null, ubicacion: detail.ubicacion ?? null, seleccionado: kind === 'UBICACION' ? true : detail.seleccionado, observaciones: detail.observaciones ?? null })) }, id_ubicacion_destino: item.id_ubicacion_destino ?? '', id_grupo_destino: kind === 'UBICACION' ? legacyGroupId : item.id_grupo_destino ?? '', id_motivo_movimiento: item.id_motivo_movimiento ?? '', fecha_movimiento: dateInputValue(item.fecha_movimiento), observaciones: item.observaciones ?? '' });
     setEditing(item); setSelected(null); setCreating(true);
   };
 
@@ -145,15 +146,18 @@ export function MovementsPage() {
     onError: (error) => toast.show((error as ApiError).message, 'error'),
   });
 
-  const wholeGroupRelocation = form.kind === 'UBICACION' && form.selection.mode === 'GRUPO';
+  const wholeGroupRelocation = form.kind === 'UBICACION';
   const updateSelection = (selection: AnimalSelectionValue) => setForm((current) => {
-    const nextSource = groups.data?.find((item) => item.id_grupo === selection.groupId);
-    const preservesGroup = current.kind === 'UBICACION' && selection.mode === 'GRUPO' && Boolean(selection.groupId);
+    const normalizedSelection = current.kind === 'UBICACION'
+      ? { ...selection, mode: 'GRUPO' as const, animals: selection.animals.map((animal) => ({ ...animal, seleccionado: true })) }
+      : selection;
+    const nextSource = groups.data?.find((item) => item.id_grupo === normalizedSelection.groupId);
+    const preservesGroup = current.kind === 'UBICACION' && Boolean(normalizedSelection.groupId);
     const previousSourceWasDestination = current.id_grupo_destino === current.selection.groupId;
     return {
       ...current,
-      selection,
-      id_grupo_destino: preservesGroup ? selection.groupId : previousSourceWasDestination ? '' : current.id_grupo_destino,
+      selection: normalizedSelection,
+      id_grupo_destino: preservesGroup ? normalizedSelection.groupId : previousSourceWasDestination ? '' : current.id_grupo_destino,
       id_ubicacion_destino: nextSource?.id_ubicacion_actual === current.id_ubicacion_destino ? '' : current.id_ubicacion_destino,
     };
   });
@@ -178,7 +182,8 @@ export function MovementsPage() {
           <Field label="Tipo de movimiento" required hint="La propiedad se gestiona mediante las ubicaciones externas registradas en Catálogos.">
             <Select disabled={Boolean(editing && editing.estado !== 'BORRADOR')} value={form.kind} onChange={(event) => setForm((current) => {
               const kind = event.target.value as MovementKind;
-              return { ...current, kind, selection: { ...current.selection, animals: [] }, id_ubicacion_destino: '', id_grupo_destino: kind === 'UBICACION' && current.selection.mode === 'GRUPO' ? current.selection.groupId : '' };
+              const groupId = kind === 'UBICACION' && current.selection.mode === 'GRUPO' ? current.selection.groupId : '';
+              return { ...current, kind, selection: { ...current.selection, mode: kind === 'UBICACION' ? 'GRUPO' : current.selection.mode, groupId: kind === 'UBICACION' ? groupId : current.selection.groupId, animals: [] }, id_ubicacion_destino: '', id_grupo_destino: kind === 'UBICACION' ? groupId : '' };
             })}>
               <option value="UBICACION">Cambiar ubicación (potrero o corral)</option>
               <option value="GRUPO">Cambiar de grupo</option>
@@ -188,7 +193,7 @@ export function MovementsPage() {
           </Field>
         </div>
 
-        {editing && editing.estado !== 'BORRADOR' ? <div className="form-alert"><strong>Movimiento aplicado.</strong> Puedes corregir fecha, motivo y observaciones. El recorrido y los animales se mantienen para conservar el historial.</div> : <div className="form-section"><h3>2. Animales o grupo de origen</h3><AnimalSelectionBuilder value={form.selection} operationCode={operationCode} excludeLocationId={form.kind === 'GRUPO' ? undefined : form.id_ubicacion_destino || undefined} onChange={updateSelection} /></div>}
+        {editing && editing.estado !== 'BORRADOR' ? <div className="form-alert"><strong>Movimiento aplicado.</strong> Puedes corregir fecha, motivo y observaciones. El recorrido y los animales se mantienen para conservar el historial.</div> : <div className="form-section"><h3>{form.kind === 'UBICACION' ? '2. Grupo de origen' : '2. Animales o grupo de origen'}</h3><AnimalSelectionBuilder value={form.selection} operationCode={operationCode} excludeLocationId={form.kind === 'GRUPO' ? undefined : form.id_ubicacion_destino || undefined} allowedModes={form.kind === 'UBICACION' ? ['GRUPO'] : undefined} lockAnimalSelection={form.kind === 'UBICACION'} autoLoadGroup={form.kind === 'UBICACION'} onChange={updateSelection} /></div>}
 
         <div className="form-section">
           <h3>{editing && editing.estado !== 'BORRADOR' ? 'Datos del movimiento' : '3. Destino y datos del movimiento'}</h3>
@@ -198,7 +203,7 @@ export function MovementsPage() {
                 const destinationId = event.target.value;
                 const destination = locations.data?.find((item) => item.id_ubicacion === destinationId);
                 const destinationPropertyId = destination?.tipo === 'OTRO' ? destination.id_ubicacion : destination?.id_propiedad_padre;
-                const preservesGroup = current.kind === 'UBICACION' && current.selection.mode === 'GRUPO' && Boolean(current.selection.groupId);
+                const preservesGroup = current.kind === 'UBICACION' && Boolean(current.selection.groupId);
                 return {
                   ...current,
                   id_ubicacion_destino: destinationId,

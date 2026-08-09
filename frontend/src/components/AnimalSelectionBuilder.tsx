@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { CheckCheck, ListChecks, RefreshCw, Search, Users } from 'lucide-react';
 import { apiRequest, ApiError } from '../api/client';
@@ -20,11 +20,21 @@ interface Props {
   operationCode?: string | string[];
   excludeLocationId?: string;
   ownershipScope?: 'EN_PROPIEDAD' | 'FUERA_PROPIEDAD';
+  allowedModes?: SelectionMode[];
+  lockAnimalSelection?: boolean;
+  autoLoadGroup?: boolean;
 }
 
-export function AnimalSelectionBuilder({ value, onChange, allowDose = false, doseUnitId, operationCode, excludeLocationId, ownershipScope }: Props) {
+const selectionModes = [
+  ['TODOS', 'Todos los animales', CheckCheck],
+  ['GRUPO', 'Un grupo completo', Users],
+  ['SELECCION_MANUAL', 'Selección manual', ListChecks],
+] as const;
+
+export function AnimalSelectionBuilder({ value, onChange, allowDose = false, doseUnitId, operationCode, excludeLocationId, ownershipScope, allowedModes, lockAnimalSelection = false, autoLoadGroup = false }: Props) {
   const toast = useToast();
   const [search, setSearch] = useState('');
+  const lastAutoLoadedGroup = useRef('');
   const groups = useQuery({
     queryKey: ['groups', 'selection'],
     queryFn: () => apiRequest<Group[]>('/grupos?limit=100'),
@@ -56,6 +66,16 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
     onError: (error) => toast.show((error as ApiError).message, 'error'),
   });
 
+  useEffect(() => {
+    if (!autoLoadGroup || value.mode !== 'GRUPO' || !value.groupId) {
+      if (!value.groupId) lastAutoLoadedGroup.current = '';
+      return;
+    }
+    if (lastAutoLoadedGroup.current === value.groupId) return;
+    lastAutoLoadedGroup.current = value.groupId;
+    preview.mutate();
+  }, [autoLoadGroup, value.groupId, value.mode]);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return value.animals;
@@ -64,6 +84,7 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
 
   const selectedCount = value.animals.filter((item) => item.seleccionado).length;
   const updateAnimal = (id: string, changes: Partial<SelectableAnimal>) => {
+    if (lockAnimalSelection && Object.prototype.hasOwnProperty.call(changes, 'seleccionado')) return;
     onChange({ ...value, animals: value.animals.map((item) => item.id_animal === id ? { ...item, ...changes } : item) });
   };
   const setAll = (selected: boolean) => {
@@ -72,12 +93,8 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
 
   return <div className="selection-builder">
     <Card className="selection-config-card">
-      <div className="selection-mode-grid">
-        {([
-          ['TODOS', 'Todos los animales', CheckCheck],
-          ['GRUPO', 'Un grupo completo', Users],
-          ['SELECCION_MANUAL', 'Selección manual', ListChecks],
-        ] as const).map(([mode, label, Icon]) => (
+      {allowedModes?.length === 1 ? <div className="selection-mode-note">Se trasladará obligatoriamente el grupo completo.</div> : <div className="selection-mode-grid">
+        {selectionModes.filter(([mode]) => !allowedModes || allowedModes.includes(mode)).map(([mode, label, Icon]) => (
           <button
             type="button"
             key={mode}
@@ -88,7 +105,7 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
             <span>{label}</span>
           </button>
         ))}
-      </div>
+      </div>}
       <div className="selection-config-row">
         {value.mode === 'GRUPO' ? <Field label="Grupo" required>
           <Select value={value.groupId} onChange={(event) => onChange({ ...value, groupId: event.target.value, animals: [] })}>
@@ -105,14 +122,14 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
             ? 'Se cargarán todos los animales activos. Luego podrás desmarcar excepciones.'
             : 'Se cargará el listado completo sin marcar para que elijas uno o varios animales.'}
         </div>}
-        <Button
+        {!autoLoadGroup ? <Button
           type="button"
           onClick={() => preview.mutate()}
           loading={preview.isPending}
           disabled={value.mode === 'GRUPO' && !value.groupId}
         >
           <RefreshCw size={17} />Cargar animales
-        </Button>
+        </Button> : null}
       </div>
     </Card>
 
@@ -122,15 +139,14 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
         <div className="search-box selection-search"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nombre, arete, grupo o ubicación" /></div>
         <div className="selection-actions">
           <Badge tone={selectedCount ? 'success' : 'warning'}>{selectedCount} de {value.animals.length} seleccionados</Badge>
-          <Button type="button" variant="ghost" onClick={() => setAll(true)}>Marcar todos</Button>
-          <Button type="button" variant="ghost" onClick={() => setAll(false)}>Desmarcar todos</Button>
+          {!lockAnimalSelection ? <><Button type="button" variant="ghost" onClick={() => setAll(true)}>Marcar todos</Button><Button type="button" variant="ghost" onClick={() => setAll(false)}>Desmarcar todos</Button></> : <Badge tone="info">Grupo completo obligatorio</Badge>}
         </div>
       </div>
       <div className="selection-table-wrap">
         <table className="data-table selection-table">
           <thead><tr><th>Incluir</th><th>Animal</th><th>Sexo</th><th>Grupo</th><th>Ubicación</th>{allowDose ? <th>Dosis individual</th> : null}</tr></thead>
           <tbody>{filtered.map((animal) => <tr key={animal.id_animal} className={animal.seleccionado ? 'selected-row' : ''}>
-            <td><input type="checkbox" checked={animal.seleccionado} onChange={(event) => updateAnimal(animal.id_animal, { seleccionado: event.target.checked })} /></td>
+            <td><input type="checkbox" checked={animal.seleccionado} disabled={lockAnimalSelection} onChange={(event) => updateAnimal(animal.id_animal, { seleccionado: event.target.checked })} /></td>
             <td><strong>{animal.nombre}</strong><small>{animal.codigo_arete ? `Arete ${animal.codigo_arete}` : 'Sin arete'}</small></td>
             <td>{animal.sexo === 'HEMBRA' ? 'Hembra' : 'Macho'}</td>
             <td>{animal.grupo || 'Sin grupo'}</td>
