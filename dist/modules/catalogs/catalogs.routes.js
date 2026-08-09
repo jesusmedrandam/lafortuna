@@ -20,6 +20,7 @@ const definitions = {
     'usos-potrero': { table: 'tipo_uso_potrero', id: 'id_tipo_uso_potrero', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
     'tipos-corral': { table: 'tipo_corral', id: 'id_tipo_corral', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
     'tipos-limpieza': { table: 'tipo_limpieza_potrero', id: 'id_tipo_limpieza', columns: ['codigo', 'nombre', 'requiere_productos', 'descripcion', 'activo'], order: 'nombre' },
+    'motivos-movimiento': { table: 'motivo_movimiento', id: 'id_motivo_movimiento', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
     'categorias-agroquimicos': { table: 'categoria_producto_agroquimico', id: 'id_categoria_producto', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
     agroquimicos: { table: 'producto_agroquimico', id: 'id_producto', columns: ['id_categoria_producto', 'nombre_comercial', 'principio_activo', 'fabricante', 'id_unidad_predeterminada', 'instrucciones', 'activo'], order: 'nombre_comercial' },
     'tipos-tratamiento': { table: 'tipo_tratamiento', id: 'id_tipo_tratamiento', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },

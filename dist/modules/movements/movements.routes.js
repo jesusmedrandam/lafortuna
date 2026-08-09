@@ -25,11 +25,19 @@ const movement = z.object({
     id_ubicacion_destino: z.string().uuid().nullable().optional(),
     id_grupo_origen: z.string().uuid().nullable().optional(),
     id_grupo_destino: z.string().uuid().nullable().optional(),
+    id_motivo_movimiento: z.string().uuid(),
     fecha_movimiento: z.string().date(),
     motivo: z.string().max(300).nullable().optional(),
     observaciones: z.string().nullable().optional(),
     animales: z.array(movementAnimal).min(1),
 });
+async function movementReason(database, id) {
+    const reason = (await database.query(`SELECT id_motivo_movimiento,nombre FROM motivo_movimiento
+     WHERE id_motivo_movimiento=$1 AND deleted_at IS NULL`, [id])).rows[0];
+    if (!reason)
+        throw new ValidationError('El motivo de movimiento seleccionado no está disponible.');
+    return reason;
+}
 async function validateMovementSelection(database, input) {
     const selected = input.animales.filter((item) => item.seleccionado);
     if (!selected.length)
@@ -111,7 +119,8 @@ async function loadMovementForValidation(database, id) {
     return movement.parse({ ...head, fecha_movimiento: String(head.fecha_movimiento).slice(0, 10), animales: animals });
 }
 export const movementsRouter = Router();
-movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(`SELECT m.*,u1.nombre ubicacion_origen,u2.nombre ubicacion_destino,g1.nombre grupo_origen,g2.nombre grupo_destino,
+movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(`SELECT m.*,COALESCE(mm.nombre,m.motivo) motivo_catalogo,
+    u1.nombre ubicacion_origen,u2.nombre ubicacion_destino,g1.nombre grupo_origen,g2.nombre grupo_destino,
     COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id_detalle',d.id_movimiento_detalle,'id_animal',a.id_animal,'animal',a.nombre,'nombre',a.nombre,
       'arete',a.codigo_arete,'codigo_arete',a.codigo_arete,'sexo',a.sexo,
@@ -129,15 +138,18 @@ movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler
    LEFT JOIN ubicacion u2 ON u2.id_ubicacion=m.id_ubicacion_destino
    LEFT JOIN grupo g1 ON g1.id_grupo=m.id_grupo_origen
    LEFT JOIN grupo g2 ON g2.id_grupo=m.id_grupo_destino
+   LEFT JOIN motivo_movimiento mm ON mm.id_motivo_movimiento=m.id_motivo_movimiento
    WHERE m.deleted_at IS NULL ORDER BY m.fecha_movimiento DESC`)).rows)));
 movementsRouter.post('/', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(async (req, res) => {
     const input = movement.parse(req.body);
     const result = await transaction(async (client) => {
         const validation = await validateMovementSelection(client, input);
+        const reason = await movementReason(client, input.id_motivo_movimiento);
         const { animales, ...head } = input;
         const row = (await client.query(buildInsert('movimiento_animal', {
             ...head,
             id_ubicacion_destino: validation.effectiveLocationId,
+            motivo: reason.nombre,
             estado: 'BORRADOR',
             total_candidatos: animales.length,
             total_seleccionados: animales.filter((animal) => animal.seleccionado).length,
@@ -163,20 +175,24 @@ movementsRouter.patch('/:id', requirePermission('MOVIMIENTO_CREAR'), asyncHandle
             throw new NotFoundError('Movimiento no encontrado.');
         if (found.estado === 'CANCELADO')
             throw new ConflictError('Un movimiento cancelado no puede modificarse.');
+        const nextReasonId = input.id_motivo_movimiento ?? found.id_motivo_movimiento;
+        const reason = await movementReason(client, nextReasonId);
         if (found.estado === 'BORRADOR') {
             return (await client.query(`UPDATE movimiento_animal SET tipo_movimiento=$2,modo_seleccion=$3,id_grupo_filtro=$4,id_ubicacion_origen=$5,
-          id_ubicacion_destino=$6,id_grupo_origen=$7,id_grupo_destino=$8,fecha_movimiento=$9,motivo=$10,observaciones=$11,updated_at=NOW()
+          id_ubicacion_destino=$6,id_grupo_origen=$7,id_grupo_destino=$8,fecha_movimiento=$9,
+          id_motivo_movimiento=$10,motivo=$11,observaciones=$12,updated_at=NOW()
          WHERE id_movimiento=$1 RETURNING *`, [id, input.tipo_movimiento ?? found.tipo_movimiento, input.modo_seleccion ?? found.modo_seleccion,
                 input.id_grupo_filtro === undefined ? found.id_grupo_filtro : input.id_grupo_filtro,
                 input.id_ubicacion_origen === undefined ? found.id_ubicacion_origen : input.id_ubicacion_origen,
                 input.id_ubicacion_destino === undefined ? found.id_ubicacion_destino : input.id_ubicacion_destino,
                 input.id_grupo_origen === undefined ? found.id_grupo_origen : input.id_grupo_origen,
                 input.id_grupo_destino === undefined ? found.id_grupo_destino : input.id_grupo_destino,
-                input.fecha_movimiento ?? found.fecha_movimiento, input.motivo === undefined ? found.motivo : input.motivo,
+                input.fecha_movimiento ?? found.fecha_movimiento, nextReasonId, reason.nombre,
                 input.observaciones === undefined ? found.observaciones : input.observaciones])).rows[0];
         }
-        return (await client.query(`UPDATE movimiento_animal SET fecha_movimiento=$2,motivo=$3,observaciones=$4,updated_at=NOW()
-       WHERE id_movimiento=$1 RETURNING *`, [id, input.fecha_movimiento ?? found.fecha_movimiento, input.motivo === undefined ? found.motivo : input.motivo, input.observaciones === undefined ? found.observaciones : input.observaciones])).rows[0];
+        return (await client.query(`UPDATE movimiento_animal SET fecha_movimiento=$2,id_motivo_movimiento=$3,motivo=$4,observaciones=$5,updated_at=NOW()
+       WHERE id_movimiento=$1 RETURNING *`, [id, input.fecha_movimiento ?? found.fecha_movimiento, nextReasonId, reason.nombre,
+            input.observaciones === undefined ? found.observaciones : input.observaciones])).rows[0];
     }, req.user.id);
     return ok(res, row);
 }));
