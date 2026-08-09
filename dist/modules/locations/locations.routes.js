@@ -28,23 +28,57 @@ locationsRouter.delete('/:id', requirePermission('UBICACION_ADMINISTRAR'), async
     throw new NotFoundError(); return noContent(res); }));
 export const pasturesRouter = Router();
 pasturesRouter.get('/', requirePermission('POTRERO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(`
-  SELECT p.*,u.nombre,u.codigo,u.descripcion,u.activo,tu.nombre tipo_uso,um.simbolo unidad_area,
-    (SELECT COUNT(*)::int FROM animal a
-      WHERE a.id_ubicacion_actual=u.id_ubicacion AND a.deleted_at IS NULL AND a.estado='ACTIVO') total_animales,
-    COALESCE(jsonb_agg(jsonb_build_object(
-      'id_potrero_pasto',pp.id_potrero_pasto,'id_tipo_pasto',tp.id_tipo_pasto,'pasto',tp.nombre,
-      'porcentaje_estimado',pp.porcentaje_estimado,'area_estimada',pp.area_estimada,
-      'id_unidad_area',pp.id_unidad_area,'fecha_siembra',pp.fecha_siembra,'observaciones',pp.observaciones
-    )) FILTER(WHERE pp.id_potrero_pasto IS NOT NULL),'[]') pastos
-  FROM potrero p
-  JOIN ubicacion u ON u.id_ubicacion=p.id_ubicacion
-  JOIN tipo_uso_potrero tu ON tu.id_tipo_uso_potrero=p.id_tipo_uso_potrero
-  LEFT JOIN unidad_medida um ON um.id_unidad=p.id_unidad_area
-  LEFT JOIN potrero_pasto pp ON pp.id_potrero=p.id_potrero AND pp.deleted_at IS NULL
-  LEFT JOIN tipo_pasto tp ON tp.id_tipo_pasto=pp.id_tipo_pasto
-  WHERE p.deleted_at IS NULL AND u.deleted_at IS NULL
-  GROUP BY p.id_potrero,u.id_ubicacion,tu.nombre,um.simbolo
-  ORDER BY u.nombre
+  WITH base AS (
+    SELECT p.*,u.nombre,u.codigo,u.descripcion,u.activo,tu.nombre tipo_uso,um.simbolo unidad_area,
+      (SELECT COUNT(*)::int FROM animal a
+        WHERE a.id_ubicacion_actual=u.id_ubicacion AND a.deleted_at IS NULL AND a.estado='ACTIVO') total_animales,
+      COALESCE(jsonb_agg(jsonb_build_object(
+        'id_potrero_pasto',pp.id_potrero_pasto,'id_tipo_pasto',tp.id_tipo_pasto,'pasto',tp.nombre,
+        'porcentaje_estimado',pp.porcentaje_estimado,'area_estimada',pp.area_estimada,
+        'id_unidad_area',pp.id_unidad_area,'fecha_siembra',pp.fecha_siembra,'observaciones',pp.observaciones
+      )) FILTER(WHERE pp.id_potrero_pasto IS NOT NULL),'[]') pastos
+    FROM potrero p
+    JOIN ubicacion u ON u.id_ubicacion=p.id_ubicacion
+    JOIN tipo_uso_potrero tu ON tu.id_tipo_uso_potrero=p.id_tipo_uso_potrero
+    LEFT JOIN unidad_medida um ON um.id_unidad=p.id_unidad_area
+    LEFT JOIN potrero_pasto pp ON pp.id_potrero=p.id_potrero AND pp.deleted_at IS NULL
+    LEFT JOIN tipo_pasto tp ON tp.id_tipo_pasto=pp.id_tipo_pasto
+    WHERE p.deleted_at IS NULL AND u.deleted_at IS NULL
+    GROUP BY p.id_potrero,u.id_ubicacion,tu.nombre,um.simbolo
+  )
+  SELECT base.*,
+    CASE WHEN base.total_animales>0 THEN 'OCUPADO' ELSE 'DESCANSO' END estado_ocupacion,
+    CASE WHEN base.total_animales>0
+      THEN COALESCE(open_history.inicio,latest_closed.fecha_desde)
+      ELSE COALESCE(latest_closed.fecha_hasta,base.fecha_ultimo_descanso::timestamptz) END fecha_estado_desde,
+    CASE WHEN base.total_animales>0 AND open_history.inicio IS NOT NULL
+      THEN GREATEST(0,CURRENT_DATE-open_history.inicio::date)::int
+      WHEN base.total_animales=0 AND latest_closed.fecha_desde IS NOT NULL
+      THEN GREATEST(0,latest_closed.fecha_hasta::date-latest_closed.fecha_desde::date)::int
+      ELSE NULL END dias_ocupacion,
+    CASE WHEN base.total_animales=0 AND COALESCE(latest_closed.fecha_hasta,base.fecha_ultimo_descanso::timestamptz) IS NOT NULL
+      THEN GREATEST(0,CURRENT_DATE-COALESCE(latest_closed.fecha_hasta,base.fecha_ultimo_descanso::timestamptz)::date)::int
+      WHEN base.total_animales>0 AND open_history.inicio IS NOT NULL AND previous_end.fecha_hasta IS NOT NULL
+      THEN GREATEST(0,open_history.inicio::date-previous_end.fecha_hasta::date)::int
+      ELSE NULL END dias_descanso
+  FROM base
+  LEFT JOIN LATERAL (
+    SELECT MIN(h.fecha_desde) inicio FROM animal_ubicacion_historial h
+    JOIN animal a ON a.id_animal=h.id_animal AND a.deleted_at IS NULL AND a.estado='ACTIVO'
+      AND a.id_ubicacion_actual=base.id_ubicacion
+    WHERE h.id_ubicacion=base.id_ubicacion AND h.fecha_hasta IS NULL AND h.deleted_at IS NULL
+  ) open_history ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT h.fecha_desde,h.fecha_hasta FROM animal_ubicacion_historial h
+    WHERE h.id_ubicacion=base.id_ubicacion AND h.fecha_hasta IS NOT NULL AND h.deleted_at IS NULL
+    ORDER BY h.fecha_hasta DESC LIMIT 1
+  ) latest_closed ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT MAX(h.fecha_hasta) fecha_hasta FROM animal_ubicacion_historial h
+    WHERE h.id_ubicacion=base.id_ubicacion AND h.fecha_hasta IS NOT NULL AND h.deleted_at IS NULL
+      AND (open_history.inicio IS NULL OR h.fecha_hasta<=open_history.inicio)
+  ) previous_end ON TRUE
+  ORDER BY base.nombre
 `)).rows)));
 pasturesRouter.get('/:id/resumen', requirePermission('POTRERO_CONSULTAR'), asyncHandler(async (req, res) => {
     const id = routeParam(req.params.id, 'id');
