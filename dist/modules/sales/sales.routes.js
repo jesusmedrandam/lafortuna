@@ -38,6 +38,7 @@ const productSaleSchema = z.object({
     observaciones: z.string().trim().max(2000).nullable().optional(),
     productos: z.array(productDetailSchema).min(1),
 });
+const animalSaleUpdateSchema = saleSchema.omit({ animales: true });
 export const salesRouter = Router();
 salesRouter.get('/', requirePermission('VENTA_CONSULTAR'), asyncHandler(async (_req, res) => {
     const rows = (await pool.query(`SELECT v.*,
@@ -200,6 +201,59 @@ salesRouter.post('/productos', requirePermission('VENTA_ADMINISTRAR'), asyncHand
     }, req.user.id);
     cache.forgetModuleVersion('ventas');
     return created(res, sale);
+}));
+salesRouter.patch('/productos/:id', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async (req, res) => {
+    const id = routeParam(req.params.id, 'id');
+    const input = productSaleSchema.parse(req.body);
+    const uniqueIds = new Set(input.productos.map((item) => item.id_producto_venta));
+    if (uniqueIds.size !== input.productos.length)
+        throw new ValidationError('No repitas productos en la misma venta.');
+    const sale = await transaction(async (client) => {
+        const current = (await client.query(`SELECT estado FROM venta_producto WHERE id_venta_producto=$1 AND deleted_at IS NULL FOR UPDATE`, [id])).rows[0];
+        if (!current)
+            throw new NotFoundError('Venta de productos no encontrada.');
+        if (current.estado === 'ANULADA')
+            throw new ConflictError('Una venta anulada no se puede modificar.');
+        const buyer = (await client.query(`SELECT id_comprador,nombre,contacto,destino FROM comprador WHERE id_comprador=$1 AND deleted_at IS NULL AND activo=TRUE`, [input.id_comprador])).rows[0];
+        if (!buyer)
+            throw new NotFoundError('El comprador no existe o está inactivo.');
+        const products = (await client.query(`SELECT id_producto_venta FROM producto_venta WHERE id_producto_venta=ANY($1::uuid[]) AND deleted_at IS NULL AND activo=TRUE`, [[...uniqueIds]])).rows;
+        if (products.length !== uniqueIds.size)
+            throw new NotFoundError('Uno o más productos no existen o están inactivos.');
+        const details = input.productos.map((item) => ({ ...item, subtotal: Number((item.cantidad * item.precio_unitario).toFixed(2)) }));
+        const total = Number(details.reduce((sum, item) => sum + item.subtotal, 0).toFixed(2));
+        const row = (await client.query(`UPDATE venta_producto SET fecha_venta=$2,periodicidad=$3,id_comprador=$4,comprador_nombre=$5,
+       comprador_contacto=$6,destino=$7,precio_total=$8,moneda=$9,observaciones=$10,updated_at=NOW()
+       WHERE id_venta_producto=$1 RETURNING *`, [id, input.fecha_venta, input.periodicidad, input.id_comprador, buyer.nombre, buyer.contacto ?? null,
+            input.destino ?? buyer.destino ?? null, total, input.moneda.toUpperCase(), input.observaciones ?? null])).rows[0];
+        await client.query(`DELETE FROM venta_producto_detalle WHERE id_venta_producto=$1`, [id]);
+        for (const detail of details) {
+            await client.query(buildInsert('venta_producto_detalle', { ...detail, id_venta_producto: id }));
+        }
+        return { ...row, productos: details };
+    }, req.user.id);
+    cache.forgetModuleVersion('ventas');
+    return ok(res, sale);
+}));
+salesRouter.patch('/:id', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async (req, res) => {
+    const id = routeParam(req.params.id, 'id');
+    const input = animalSaleUpdateSchema.parse(req.body);
+    const row = await transaction(async (client) => {
+        const current = (await client.query(`SELECT estado FROM venta_animal WHERE id_venta=$1 AND deleted_at IS NULL FOR UPDATE`, [id])).rows[0];
+        if (!current)
+            throw new NotFoundError('Venta no encontrada.');
+        if (current.estado === 'ANULADA')
+            throw new ConflictError('Una venta anulada no se puede modificar.');
+        const buyer = (await client.query(`SELECT id_comprador,nombre,contacto,destino FROM comprador WHERE id_comprador=$1 AND deleted_at IS NULL AND activo=TRUE`, [input.id_comprador])).rows[0];
+        if (!buyer)
+            throw new NotFoundError('El comprador no existe o está inactivo.');
+        return (await client.query(`UPDATE venta_animal SET fecha_venta=$2,id_comprador=$3,comprador_nombre=$4,comprador_contacto=$5,
+       destino=$6,precio_total=$7,moneda=$8,observaciones=$9,updated_at=NOW()
+       WHERE id_venta=$1 RETURNING *`, [id, input.fecha_venta, input.id_comprador, buyer.nombre, buyer.contacto ?? null,
+            input.destino ?? buyer.destino ?? null, input.precio_total ?? null, input.moneda.toUpperCase(), input.observaciones ?? null])).rows[0];
+    }, req.user.id);
+    cache.forgetModuleVersion('ventas');
+    return ok(res, row);
 }));
 salesRouter.patch('/productos/:id/anular', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async (req, res) => {
     const id = routeParam(req.params.id, 'id');

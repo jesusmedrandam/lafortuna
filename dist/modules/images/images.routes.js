@@ -114,6 +114,7 @@ imagesRouter.get('/', requirePermission('IMAGEN_CONSULTAR'), asyncHandler(async 
         tipo: z.enum(['IMAGEN', 'VIDEO']).optional(), id_animal: z.string().uuid().optional(),
         id_grupo: z.string().uuid().optional(), id_ubicacion: z.string().uuid().optional(),
         sexo: z.enum(['MACHO', 'HEMBRA']).optional(), fecha_desde: z.string().date().optional(), fecha_hasta: z.string().date().optional(),
+        orden: z.enum(['NEWEST', 'OLDEST', 'AZ', 'ZA']).default('NEWEST'),
     }).parse(req.query);
     const params = [];
     const where = ['i.deleted_at IS NULL'];
@@ -151,6 +152,7 @@ imagesRouter.get('/', requirePermission('IMAGEN_CONSULTAR'), asyncHandler(async 
     }
     if (animalConditions.length)
         where.push(`EXISTS(SELECT 1 FROM animal_imagen_relacion rf JOIN animal af ON af.id_animal=rf.id_animal WHERE rf.id_imagen=i.id_imagen AND rf.deleted_at IS NULL AND af.deleted_at IS NULL AND ${animalConditions.join(' AND ')})`);
+    const orderBy = { NEWEST: 'i.created_at DESC', OLDEST: 'i.created_at ASC', AZ: "COALESCE(i.nombre_original,'') ASC", ZA: "COALESCE(i.nombre_original,'') DESC" }[filters.orden];
     params.push(filters.limit, offset(filters.page, filters.limit));
     const rows = (await pool.query(`SELECT i.*,COALESCE((SELECT jsonb_agg(jsonb_build_object(
        'id_animal',a.id_animal,'nombre',a.nombre,'codigo_arete',a.codigo_arete,'sexo',a.sexo,
@@ -161,7 +163,7 @@ imagesRouter.get('/', requirePermission('IMAGEN_CONSULTAR'), asyncHandler(async 
      WHERE r.id_imagen=i.id_imagen AND r.deleted_at IS NULL),'[]') animales,
      COUNT(*) OVER()::int total
      FROM animal_imagen i WHERE ${where.join(' AND ')}
-     ORDER BY i.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params)).rows;
+     ORDER BY ${orderBy},i.id_imagen LIMIT $${params.length - 1} OFFSET $${params.length}`, params)).rows;
     return ok(res, rows, { page: filters.page, limit: filters.limit, total: rows[0]?.total ?? 0 });
 }));
 imagesRouter.patch('/:id/perfil', requirePermission('IMAGEN_ADMINISTRAR'), asyncHandler(async (req, res) => {
