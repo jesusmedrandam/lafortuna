@@ -99,18 +99,24 @@ async function pregnancyData(client, input) {
 export const reproductionRouter = Router();
 reproductionRouter.get('/opciones', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => {
     const [females, males] = await Promise.all([
-        pool.query(`SELECT id_animal,nombre,codigo_arete,fecha_nacimiento,id_especie
-      FROM animal WHERE deleted_at IS NULL AND estado='ACTIVO' AND sexo='HEMBRA'
-        AND (fecha_nacimiento IS NULL OR fecha_nacimiento<=CURRENT_DATE-INTERVAL '1 year') ORDER BY nombre`),
-        pool.query(`SELECT id_animal,nombre,codigo_arete,fecha_nacimiento,id_especie
-      FROM animal WHERE deleted_at IS NULL AND estado='ACTIVO' AND sexo='MACHO'
-        AND (fecha_nacimiento IS NULL OR fecha_nacimiento<=CURRENT_DATE-INTERVAL '1 year') ORDER BY nombre`),
+        pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,a.fecha_nacimiento,a.id_especie,
+      a.id_categoria_animal,ca.codigo categoria_codigo,ca.nombre categoria
+      FROM animal a JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
+      WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='HEMBRA'
+        AND (a.fecha_nacimiento IS NULL OR a.fecha_nacimiento<=CURRENT_DATE-INTERVAL '1 year') ORDER BY a.nombre`),
+        pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,a.fecha_nacimiento,a.id_especie,
+      a.id_categoria_animal,ca.codigo categoria_codigo,ca.nombre categoria
+      FROM animal a JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
+      WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='MACHO'
+        AND (a.fecha_nacimiento IS NULL OR a.fecha_nacimiento<=CURRENT_DATE-INTERVAL '1 year') ORDER BY a.nombre`),
     ]);
     return ok(res, { hembras: females.rows, machos: males.rows });
 }));
 reproductionRouter.get('/celos', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(`SELECT c.*,v.nombre vaca,v.codigo_arete,t.nombre toro,t.codigo_arete toro_arete,
+    ca.codigo categoria_codigo,ca.nombre categoria,
     EXISTS(SELECT 1 FROM prenez p WHERE p.id_celo=c.id_celo AND p.deleted_at IS NULL) tiene_prenez
    FROM celo c JOIN animal v ON v.id_animal=c.id_vaca
+   JOIN categoria_animal ca ON ca.id_categoria_animal=v.id_categoria_animal
    LEFT JOIN animal t ON t.id_animal=c.id_toro
    WHERE c.deleted_at IS NULL ORDER BY c.fecha_inicio DESC,c.created_at DESC`)).rows)));
 reproductionRouter.post('/celos', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(async (req, res) => {
@@ -159,8 +165,10 @@ reproductionRouter.delete('/celos/:id', requirePermission('PARTO_ADMINISTRAR'), 
     return noContent(res);
 }));
 reproductionRouter.get('/preneces', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(`SELECT p.*,v.nombre vaca,v.codigo_arete,v.id_especie,v.id_categoria_animal,pa.nombre padre,c.fecha_inicio celo_inicio,
+    ca.codigo categoria_codigo,ca.nombre categoria,
     pp.id_proximo_parto,pp.estado proximo_estado
    FROM prenez p JOIN animal v ON v.id_animal=p.id_vaca
+   JOIN categoria_animal ca ON ca.id_categoria_animal=v.id_categoria_animal
    LEFT JOIN animal pa ON pa.id_animal=p.id_padre LEFT JOIN celo c ON c.id_celo=p.id_celo
    LEFT JOIN proximo_parto pp ON pp.id_prenez=p.id_prenez AND pp.deleted_at IS NULL
    WHERE p.deleted_at IS NULL ORDER BY p.estado='CONFIRMADA' DESC,p.fecha_confirmacion DESC`)).rows)));
@@ -216,9 +224,11 @@ reproductionRouter.delete('/preneces/:id', requirePermission('PARTO_ADMINISTRAR'
     return noContent(res);
 }));
 reproductionRouter.get('/proximos-partos', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(`SELECT pp.*,p.fecha_confirmacion,p.metodo_embarazo,p.metodo_confirmacion,p.dias_gestacion_confirmacion,
-    v.nombre vaca,v.codigo_arete,pa.nombre padre
+    v.nombre vaca,v.codigo_arete,pa.nombre padre,ca.codigo categoria_codigo,ca.nombre categoria
    FROM proximo_parto pp JOIN prenez p ON p.id_prenez=pp.id_prenez AND p.deleted_at IS NULL
-   JOIN animal v ON v.id_animal=pp.id_vaca LEFT JOIN animal pa ON pa.id_animal=p.id_padre
+   JOIN animal v ON v.id_animal=pp.id_vaca
+   JOIN categoria_animal ca ON ca.id_categoria_animal=v.id_categoria_animal
+   LEFT JOIN animal pa ON pa.id_animal=p.id_padre
    WHERE pp.deleted_at IS NULL AND pp.estado='PENDIENTE' AND p.estado='CONFIRMADA'
    ORDER BY pp.fecha_tentativa NULLS LAST,v.nombre`)).rows)));
 //# sourceMappingURL=reproduction.routes.js.map
