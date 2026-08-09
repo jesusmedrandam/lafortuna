@@ -13,6 +13,12 @@ export function dateInputValue(value?: string | null) {
   return match?.[1] ?? '';
 }
 
+export function currentDateInput() {
+  const date = new Date();
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 10);
+}
+
 export function formatAge(value?: string | null, reference = new Date()) {
   const normalized = dateInputValue(value);
   if (!normalized) return 'Sin fecha';

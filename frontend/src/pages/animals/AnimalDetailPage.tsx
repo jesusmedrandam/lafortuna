@@ -46,7 +46,7 @@ import {
   Textarea,
 } from '../../components/ui';
 import type { Animal, AnimalImage, Group, Location } from '../../types/api';
-import { formatAge, formatDate, formatNumber, humanizeCode } from '../../utils';
+import { currentDateInput, formatAge, formatDate, formatNumber, humanizeCode } from '../../utils';
 import { AnimalFormModal } from './AnimalFormModal';
 import { AnimalMultiPicker } from '../../components/AnimalMultiPicker';
 
@@ -69,12 +69,6 @@ interface UploadDraft {
 
 type ConditionAction = 'DESACTIVAR' | 'REACTIVAR' | 'REPORTAR_DESAPARICION' | 'REGISTRAR_HALLAZGO';
 
-function localDateTime() {
-  const date = new Date();
-  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-  return date.toISOString().slice(0, 16);
-}
-
 export function AnimalDetailPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
@@ -92,7 +86,7 @@ export function AnimalDetailPage() {
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [conditionAction, setConditionAction] = useState<ConditionAction | null>(null);
-  const [conditionForm, setConditionForm] = useState({ fecha_evento: localDateTime(), id_grupo_actual: '', id_ubicacion_actual: '', observaciones: '' });
+  const [conditionForm, setConditionForm] = useState({ fecha_evento: currentDateInput(), id_grupo_actual: '', id_ubicacion_actual: '', observaciones: '' });
 
   const query = useQuery({
     queryKey: ['animal', id],
@@ -109,6 +103,7 @@ export function AnimalDetailPage() {
     queryFn: () => apiRequest<Location[]>('/ubicaciones'),
     enabled: conditionAction === 'REGISTRAR_HALLAZGO',
   });
+  const hallazgoCategoryId = locations.data?.find((item) => item.id_ubicacion === conditionForm.id_ubicacion_actual)?.id_categoria_animal ?? query.data?.id_categoria_animal;
 
   const deleteAnimal = useMutation({
     mutationFn: () => apiRequest(`/animales/${id}`, { method: 'DELETE' }),
@@ -154,7 +149,7 @@ export function AnimalDetailPage() {
       method: 'POST',
       body: {
         accion: conditionAction,
-        fecha_evento: new Date(conditionForm.fecha_evento).toISOString(),
+        fecha_evento: conditionForm.fecha_evento,
         id_grupo_actual: conditionAction === 'REGISTRAR_HALLAZGO' ? conditionForm.id_grupo_actual || null : undefined,
         id_ubicacion_actual: conditionAction === 'REGISTRAR_HALLAZGO' ? conditionForm.id_ubicacion_actual || null : undefined,
         observaciones: conditionForm.observaciones.trim() || null,
@@ -310,7 +305,7 @@ export function AnimalDetailPage() {
     if (viewerImages.length > 1) setViewerIndex((current) => current === null ? 0 : (current - 1 + viewerImages.length) % viewerImages.length);
   }
   function openConditionAction(action: ConditionAction) {
-    setConditionForm({ fecha_evento: localDateTime(), id_grupo_actual: '', id_ubicacion_actual: '', observaciones: '' });
+    setConditionForm({ fecha_evento: currentDateInput(), id_grupo_actual: '', id_ubicacion_actual: '', observaciones: '' });
     setConditionAction(action);
   }
 
@@ -494,10 +489,10 @@ export function AnimalDetailPage() {
           {conditionAction === 'REPORTAR_DESAPARICION' ? 'Se cerrará su ubicación y grupo actuales hasta que se registre el hallazgo.' : null}
           {conditionAction === 'REGISTRAR_HALLAZGO' ? 'El animal volverá a estado activo. Puedes indicar dónde fue encontrado y el grupo al que se reincorpora.' : null}
         </div>
-        <Field label="Fecha y hora" required><Input type="datetime-local" value={conditionForm.fecha_evento} onChange={(event) => setConditionForm((current) => ({ ...current, fecha_evento: event.target.value }))} /></Field>
+        <Field label="Fecha" required><Input type="date" value={conditionForm.fecha_evento} onChange={(event) => setConditionForm((current) => ({ ...current, fecha_evento: event.target.value }))} /></Field>
         {conditionAction === 'REGISTRAR_HALLAZGO' ? <div className="form-grid">
-          <Field label="Ubicación del hallazgo"><Select value={conditionForm.id_ubicacion_actual} onChange={(event) => setConditionForm((current) => ({ ...current, id_ubicacion_actual: event.target.value }))}><option value="">Sin ubicación específica</option>{locations.data?.filter((item) => item.activo).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.categoria}</option>)}</Select></Field>
-          <Field label="Grupo al reincorporarse"><Select value={conditionForm.id_grupo_actual} onChange={(event) => setConditionForm((current) => ({ ...current, id_grupo_actual: event.target.value }))}><option value="">Sin grupo</option>{groups.data?.filter((item) => item.activo).map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre}</option>)}</Select></Field>
+          <Field label="Ubicación del hallazgo"><Select value={conditionForm.id_ubicacion_actual} onChange={(event) => setConditionForm((current) => ({ ...current, id_ubicacion_actual: event.target.value, id_grupo_actual: '' }))}><option value="">Sin ubicación específica</option>{locations.data?.filter((item) => item.activo).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.categoria}</option>)}</Select></Field>
+          <Field label="Grupo al reincorporarse"><Select value={conditionForm.id_grupo_actual} onChange={(event) => setConditionForm((current) => ({ ...current, id_grupo_actual: event.target.value }))}><option value="">Sin grupo</option>{groups.data?.filter((item) => item.activo && (!hallazgoCategoryId || item.id_categoria_animal === hallazgoCategoryId)).map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre} · {item.categoria}</option>)}</Select></Field>
         </div> : null}
         <Field label="Motivo u observaciones"><Textarea rows={3} value={conditionForm.observaciones} onChange={(event) => setConditionForm((current) => ({ ...current, observaciones: event.target.value }))} /></Field>
       </div>

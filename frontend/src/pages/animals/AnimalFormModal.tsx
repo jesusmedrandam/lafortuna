@@ -437,7 +437,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
           <h3>Clasificación y lugar actual</h3>
           <div className="form-grid">
             <Field label="Situación de propiedad" required hint="Indica si el animal está dentro de la finca o en otra propiedad.">
-              <Select value={form.id_categoria_animal} onChange={(event) => setForm((current) => ({ ...current, id_categoria_animal: event.target.value, id_ubicacion_actual: '' }))} required>
+              <Select value={form.id_categoria_animal} onChange={(event) => setForm((current) => ({ ...current, id_categoria_animal: event.target.value, id_grupo_actual: '', id_ubicacion_actual: '' }))} required>
                 <option value="">Selecciona</option>
                 {categories.data?.filter((item) => item.activo !== false).map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}
               </Select>
@@ -445,7 +445,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
             <Field label="Grupo actual">
               <Select value={form.id_grupo_actual} onChange={(event) => setForm((current) => ({ ...current, id_grupo_actual: event.target.value }))}>
                 <option value="">Sin grupo</option>
-                {groups.data?.map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre}</option>)}
+                {groups.data?.filter((item) => !form.id_categoria_animal || item.id_categoria_animal === form.id_categoria_animal).map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre} · {item.categoria}</option>)}
               </Select>
             </Field>
             <Field label="Ubicación actual">

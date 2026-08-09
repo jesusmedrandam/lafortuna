@@ -17,9 +17,10 @@ interface Props {
   onChange: (value: AnimalSelectionValue) => void;
   allowDose?: boolean;
   doseUnitId?: string;
+  operationCode?: string | string[];
 }
 
-export function AnimalSelectionBuilder({ value, onChange, allowDose = false, doseUnitId }: Props) {
+export function AnimalSelectionBuilder({ value, onChange, allowDose = false, doseUnitId, operationCode }: Props) {
   const toast = useToast();
   const [search, setSearch] = useState('');
   const groups = useQuery({
@@ -35,6 +36,7 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
           id_grupo: value.mode === 'GRUPO' ? value.groupId || null : null,
           ids: [],
           filtros: {},
+          operaciones: operationCode ? (Array.isArray(operationCode) ? operationCode : [operationCode]) : [],
         },
       });
       return response.map((animal) => ({
@@ -86,7 +88,7 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
         {value.mode === 'GRUPO' ? <Field label="Grupo" required>
           <Select value={value.groupId} onChange={(event) => onChange({ ...value, groupId: event.target.value, animals: [] })}>
             <option value="">Selecciona un grupo</option>
-            {groups.data?.map((group) => <option value={group.id_grupo} key={group.id_grupo}>{group.nombre} · {group.total_animales ?? 0} animales</option>)}
+            {groups.data?.map((group) => <option value={group.id_grupo} key={group.id_grupo}>{group.nombre} · {group.categoria} · {group.total_animales ?? 0} animales</option>)}
           </Select>
         </Field> : <div className="selection-mode-note">
           {value.mode === 'TODOS'

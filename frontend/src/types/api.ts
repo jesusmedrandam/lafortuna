@@ -212,6 +212,9 @@ export interface Group {
   nombre: string;
   id_tipo_grupo: string;
   tipo_grupo: string;
+  id_categoria_animal: string;
+  categoria: string;
+  categoria_codigo: string;
   id_especie: string | null;
   especie: string | null;
   descripcion: string | null;
@@ -363,6 +366,8 @@ export interface SelectableAnimal {
   codigo_arete: string | null;
   nombre: string;
   sexo: 'MACHO' | 'HEMBRA';
+  id_categoria_animal: string;
+  categoria: string;
   id_grupo_actual: string | null;
   grupo: string | null;
   id_ubicacion_actual: string | null;
@@ -384,6 +389,8 @@ export interface MovementDetail {
   nombre?: string;
   codigo_arete?: string | null;
   sexo?: 'MACHO' | 'HEMBRA';
+  id_categoria_animal?: string;
+  categoria?: string;
   id_grupo_actual?: string | null;
   grupo?: string | null;
   id_ubicacion_actual?: string | null;
@@ -393,6 +400,7 @@ export interface MovementDetail {
 
 export interface Movement {
   id_movimiento: string;
+  tipo_movimiento: 'UBICACION' | 'GRUPO' | 'PROPIEDAD' | 'COMBINADO';
   modo_seleccion: SelectionMode;
   id_grupo_filtro: string | null;
   id_ubicacion_origen: string | null;
@@ -423,6 +431,8 @@ export interface SanitaryDetail {
   nombre?: string;
   codigo_arete?: string | null;
   sexo?: 'MACHO' | 'HEMBRA';
+  id_categoria_animal?: string;
+  categoria?: string;
   id_grupo_actual?: string | null;
   grupo?: string | null;
   id_ubicacion_actual?: string | null;
@@ -553,6 +563,7 @@ export interface PregnancyRecord {
   vaca: string;
   codigo_arete: string | null;
   id_especie: string;
+  id_categoria_animal: string;
   padre: string | null;
   celo_inicio: string | null;
   metodo_embarazo: string;

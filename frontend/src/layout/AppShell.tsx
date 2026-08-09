@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   ArrowLeftRight, Baby, Beef, Bell, BookOpen, ChevronRight, ClipboardList, Droplets,
   HeartOff, Home, Images, LayoutDashboard, LogOut, MapPinned, Menu, Milk, Moon, ShieldCheck, ShoppingCart, Sprout, Sun, Syringe,
-  Tag, UserCircle, UserCog, Users, Warehouse, Weight, X, type LucideIcon,
+  Settings2, Tag, UserCircle, UserCog, Users, Warehouse, Weight, X, type LucideIcon,
 } from 'lucide-react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
@@ -34,6 +34,7 @@ const destinations: Destination[] = [
   { to: '/muertes', label: 'Muertes y bajas', icon: HeartOff, permissions: ['MUERTE_CONSULTAR'], section: 'operaciones' },
   { to: '/ventas', label: 'Ventas', icon: ShoppingCart, permissions: ['VENTA_CONSULTAR'], section: 'operaciones' },
   { to: '/catalogos', label: 'Catálogos', icon: BookOpen, permissions: ['CATALOGO_CONSULTAR'], section: 'administracion' },
+  { to: '/configuracion', label: 'Configuración', icon: Settings2, permissions: ['CATALOGO_CONSULTAR'], section: 'administracion' },
   { to: '/marquillas', label: 'Fierros', icon: Tag, permissions: ['CATALOGO_CONSULTAR'], section: 'administracion' },
   { to: '/usuarios', label: 'Usuarios', icon: UserCog, permissions: ['USUARIO_CONSULTAR'], section: 'administracion' },
   { to: '/roles', label: 'Roles y permisos', icon: ShieldCheck, permissions: ['ROL_CONSULTAR'], section: 'administracion' },
