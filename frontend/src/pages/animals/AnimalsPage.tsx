@@ -11,8 +11,8 @@ import { formatAgeCompact, humanizeCode } from '../../utils';
 import { AnimalFormModal } from './AnimalFormModal';
 
 const pageSize = 20;
-const filterKeys = ['sexo', 'estado', 'id_especie', 'id_grupo', 'id_ubicacion', 'id_propietario', 'id_raza', 'id_color', 'id_marquilla', 'nacimiento_desde', 'nacimiento_hasta'] as const;
-const advancedFilterKeys = ['id_ubicacion', 'id_propietario', 'id_raza', 'id_color', 'id_marquilla', 'nacimiento_desde', 'nacimiento_hasta'] as const;
+const filterKeys = ['sexo', 'estado', 'id_categoria_animal', 'id_especie', 'id_grupo', 'id_ubicacion', 'id_propietario', 'id_raza', 'id_color', 'id_marquilla', 'nacimiento_desde', 'nacimiento_hasta'] as const;
+const advancedFilterKeys = ['id_ubicacion', 'id_especie', 'id_raza', 'id_color', 'id_marquilla', 'nacimiento_desde', 'nacimiento_hasta'] as const;
 
 export function AnimalsPage() {
   const { hasPermission } = useAuth();
@@ -75,9 +75,10 @@ export function AnimalsPage() {
       <div className="toolbar-filters">
         <Select aria-label="Filtrar por sexo" value={filters.sexo} onChange={(event) => updateParam('sexo', event.target.value)}><option value="">Todos los sexos</option><option value="HEMBRA">Hembras</option><option value="MACHO">Machos</option></Select>
         <Select aria-label="Filtrar por estado" value={filters.estado} onChange={(event) => updateParam('estado', event.target.value)}><option value="">Todos los estados</option>{['ACTIVO', 'INACTIVO', 'VENDIDO', 'TRASLADADO', 'DESAPARECIDO', 'MUERTO'].map((item) => <option key={item} value={item}>{humanizeCode(item)}</option>)}</Select>
-        <Select aria-label="Filtrar por especie" value={filters.id_especie} onChange={(event) => updateSpecies(event.target.value)}><option value="">Todas las especies</option>{options.data?.especies.map((item) => <option key={item.id_especie} value={item.id_especie}>{item.nombre}</option>)}</Select>
+        <Select aria-label="Filtrar por propietario" value={filters.id_propietario} onChange={(event) => updateParam('id_propietario', event.target.value)}><option value="">Todos los propietarios</option>{options.data?.propietarios.map((item) => <option key={item.id_usuario} value={item.id_usuario}>{item.nombre}</option>)}</Select>
+        <Select aria-label="Filtrar por categoría" value={filters.id_categoria_animal} onChange={(event) => updateParam('id_categoria_animal', event.target.value)}><option value="">Todas las categorías</option>{options.data?.categorias.map((item) => <option key={item.id_categoria_animal} value={item.id_categoria_animal}>{item.nombre}</option>)}</Select>
         <Select aria-label="Filtrar por grupo" value={filters.id_grupo} onChange={(event) => updateParam('id_grupo', event.target.value)}><option value="">Todos los grupos</option>{options.data?.grupos.map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre}</option>)}</Select>
-        <IconButton label="Filtros avanzados" onClick={() => setAdvancedOpen((current) => !current)} aria-expanded={advancedOpen}><SlidersHorizontal size={18} />{activeFilterCount ? <span className="filter-count">{activeFilterCount}</span> : null}</IconButton>
+        <IconButton className="advanced-filter-trigger" label="Filtros avanzados" onClick={() => setAdvancedOpen((current) => !current)} aria-expanded={advancedOpen}><SlidersHorizontal size={20} />{activeFilterCount ? <span className="filter-count">{activeFilterCount}</span> : null}</IconButton>
       </div>
     </div>
 
@@ -85,8 +86,8 @@ export function AnimalsPage() {
       <div className="advanced-filters-heading"><div><h2>Búsqueda avanzada</h2><p>Combina varios criterios para encontrar animales específicos.</p></div><div className="advanced-filter-actions"><IconButton label="Limpiar filtros" disabled={!activeFilterCount} onClick={clearFilters}><Paintbrush size={17} /></IconButton><IconButton label="Cerrar filtros" onClick={() => setAdvancedOpen(false)}><X size={18} /></IconButton></div></div>
       {options.isError ? <p className="form-alert form-alert-error">No se pudieron cargar las opciones de los filtros.</p> : null}
       <div className="advanced-filters-grid">
-        <Field label="Corral o potrero"><Select value={filters.id_ubicacion} onChange={(event) => updateParam('id_ubicacion', event.target.value)}><option value="">Todas las ubicaciones</option>{options.data?.ubicaciones.map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {humanizeCode(item.tipo)}</option>)}</Select></Field>
-        <Field label="Propietario"><Select value={filters.id_propietario} onChange={(event) => updateParam('id_propietario', event.target.value)}><option value="">Todos los propietarios</option>{options.data?.propietarios.map((item) => <option key={item.id_usuario} value={item.id_usuario}>{item.nombre}</option>)}</Select></Field>
+        <Field label="Ubicación"><Select value={filters.id_ubicacion} onChange={(event) => updateParam('id_ubicacion', event.target.value)}><option value="">Todas las ubicaciones</option>{options.data?.ubicaciones.filter((item) => !filters.id_categoria_animal || item.id_categoria_animal === filters.id_categoria_animal).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.tipo === 'OTRO' ? 'Otra propiedad' : humanizeCode(item.tipo)}</option>)}</Select></Field>
+        <Field label="Especie"><Select value={filters.id_especie} onChange={(event) => updateSpecies(event.target.value)}><option value="">Todas las especies</option>{options.data?.especies.map((item) => <option key={item.id_especie} value={item.id_especie}>{item.nombre}</option>)}</Select></Field>
         <Field label="Raza"><Select value={filters.id_raza} onChange={(event) => updateParam('id_raza', event.target.value)}><option value="">Todas las razas</option>{visibleRaces.map((item) => <option key={item.id_raza} value={item.id_raza}>{item.nombre}</option>)}</Select></Field>
         <Field label="Color"><Select value={filters.id_color} onChange={(event) => updateParam('id_color', event.target.value)}><option value="">Todos los colores</option>{options.data?.colores.map((item) => <option key={item.id_color} value={item.id_color}>{item.nombre}</option>)}</Select></Field>
         <Field label="Fierro"><Select value={filters.id_marquilla} onChange={(event) => updateParam('id_marquilla', event.target.value)}><option value="">Todos los fierros</option>{options.data?.marquillas.map((item) => <option key={item.id_marquilla} value={item.id_marquilla}>{item.nombre} · {item.codigo}</option>)}</Select></Field>
@@ -98,12 +99,12 @@ export function AnimalsPage() {
 
     {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : query.data?.data.length === 0 ? <EmptyState icon={Beef} title="No hay animales" description="Registra el primer animal o modifica los filtros de búsqueda." action={hasPermission('ANIMAL_CREAR') ? <Button onClick={() => setCreating(true)}><Plus size={18} />Registrar animal</Button> : undefined} /> : <>
       <div className="animal-list" role="table" aria-label="Listado de animales">
-        <div className="animal-list-head" role="row"><span>Animal</span><span>Propietario</span><span>Clasificación</span><span>Corral o potrero</span><span>Edad</span><span>Estado</span></div>
+        <div className="animal-list-head" role="row"><span>Animal</span><span>Propietario</span><span>Clasificación</span><span>Ubicación</span><span>Edad</span><span>Estado</span></div>
         {query.data?.data.map((animal) => <button type="button" className="animal-list-row" role="row" key={animal.id_animal} onClick={() => navigate(`/animales/${animal.id_animal}`)}>
           <span className="animal-list-identity"><span className="animal-list-photo">{animal.foto_perfil ? <img src={animal.foto_perfil} alt="" /> : <Beef size={24} />}</span><span><strong>{animal.nombre}</strong><small>{animal.codigo_arete ? `Arete ${animal.codigo_arete}` : 'Sin arete'}</small></span></span>
           <span className="animal-list-cell"><UserRound size={16} /><span>{animal.propietario_principal || 'Sin propietario'}</span></span>
-          <span className="animal-list-cell"><span>{animal.especie}</span><small>{animal.sexo === 'HEMBRA' ? 'Hembra' : 'Macho'} · {animal.grupo || 'Sin grupo'}</small></span>
-          <span className="animal-list-cell"><MapPin size={16} /><span>{animal.ubicacion || 'Sin corral o potrero'}</span></span>
+          <span className="animal-list-cell"><span>{animal.categoria || animal.especie}</span><small>{animal.sexo === 'HEMBRA' ? 'Hembra' : 'Macho'} · {animal.grupo || 'Sin grupo'}</small></span>
+          <span className="animal-list-cell"><MapPin size={16} /><span>{animal.ubicacion || 'Sin ubicación específica'}</span></span>
           <span className="animal-list-cell animal-list-age"><CalendarClock size={16} /><span>{formatAgeCompact(animal.fecha_nacimiento)}</span></span>
           <span><Badge tone={animal.estado === 'ACTIVO' ? 'success' : animal.estado === 'MUERTO' ? 'danger' : 'warning'}>{humanizeCode(animal.estado)}</Badge></span>
         </button>)}

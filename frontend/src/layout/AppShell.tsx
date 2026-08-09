@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   ArrowLeftRight, Baby, Beef, Bell, BookOpen, ChevronRight, ClipboardList, Droplets,
-  HeartOff, Home, Images, LayoutDashboard, LogOut, Menu, Milk, Moon, ShieldCheck, ShoppingCart, Sprout, Sun, Syringe,
+  HeartOff, Home, Images, LayoutDashboard, LogOut, MapPinned, Menu, Milk, Moon, ShieldCheck, ShoppingCart, Sprout, Sun, Syringe,
   Tag, UserCircle, UserCog, Users, Warehouse, Weight, X, type LucideIcon,
 } from 'lucide-react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
@@ -24,6 +24,7 @@ const destinations: Destination[] = [
   { to: '/grupos', label: 'Grupos', icon: Users, permissions: ['GRUPO_CONSULTAR'], section: 'principal' },
   { to: '/potreros', label: 'Potreros', icon: Sprout, permissions: ['POTRERO_CONSULTAR'], section: 'principal' },
   { to: '/corrales', label: 'Corrales', icon: Warehouse, permissions: ['CORRAL_CONSULTAR'], section: 'principal' },
+  { to: '/ubicaciones', label: 'Otras propiedades', icon: MapPinned, permissions: ['UBICACION_CONSULTAR'], section: 'principal' },
   { to: '/movimientos', label: 'Movimientos', icon: ArrowLeftRight, permissions: ['MOVIMIENTO_CONSULTAR'], section: 'operaciones' },
   { to: '/sanidad', label: 'Sanidad', icon: Syringe, permissions: ['SANIDAD_CONSULTAR'], section: 'operaciones' },
   { to: '/limpiezas', label: 'Limpieza de potreros', icon: Droplets, permissions: ['LIMPIEZA_CONSULTAR'], section: 'operaciones' },

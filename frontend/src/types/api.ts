@@ -46,19 +46,16 @@ export interface Profile {
 }
 
 export interface DashboardSummary {
-  animales_total: number;
-  animales_activos: number;
-  hembras: number;
-  machos: number;
-  grupos: number;
-  ubicaciones: number;
-  litros_hoy: string | number;
-  tratamientos_hoy: number;
-  potreros_ocupados: number;
-  ventas_mes: number;
-  ingresos_hoy: string | number;
-  ingresos_mes: string | number;
-  proximos_partos: number;
+  animales: { en_propiedad: number; fuera_propiedad: number; activos: number; inactivos: number };
+  ingresos: { semana: string | number; mes: string | number; anio: string | number };
+  ventas: { semana: number; mes: number; anio: number };
+  produccion: { hoy: string | number; semana: string | number; mes: string | number };
+  tratamientos: { hoy: number; semana: number; mes: number };
+  traslados: { semana: number; mes: number; anio: number };
+  potreros: { total: number; ocupados: number; descanso: number };
+  grupos: { total: number; con_animales: number; animales_agrupados: number };
+  reproduccion: { celos_abiertos: number; preneces_confirmadas: number; proximos_partos: number; partos_mes: number };
+  sexo: { hembras: number; machos: number };
 }
 
 export interface CatalogItem {
@@ -83,6 +80,9 @@ export interface Animal {
   id_padre: string | null;
   padre?: string | null;
   id_origen: string;
+  id_categoria_animal: string;
+  categoria?: string;
+  categoria_codigo?: string;
   id_marquilla: string | null;
   marquilla?: string | null;
   marquilla_codigo?: string | null;
@@ -156,8 +156,9 @@ export interface OwnerOption {
 
 export interface AnimalFilterOptions {
   especies: { id_especie: string; nombre: string }[];
+  categorias: { id_categoria_animal: string; codigo: string; nombre: string }[];
   grupos: { id_grupo: string; nombre: string }[];
-  ubicaciones: { id_ubicacion: string; nombre: string; tipo: Location['tipo'] }[];
+  ubicaciones: { id_ubicacion: string; nombre: string; tipo: Location['tipo']; id_categoria_animal: string }[];
   propietarios: { id_usuario: string; nombre: string }[];
   razas: { id_raza: string; nombre: string; id_especie: string | null }[];
   colores: { id_color: string; nombre: string }[];
@@ -210,6 +211,9 @@ export interface Location {
   codigo: string | null;
   nombre: string;
   tipo: 'POTRERO' | 'CORRAL' | 'OTRO';
+  id_categoria_animal: string;
+  categoria: string;
+  categoria_codigo: string;
   descripcion: string | null;
   latitud: number | null;
   longitud: number | null;

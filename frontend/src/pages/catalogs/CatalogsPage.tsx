@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Edit3, Plus, Trash2 } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
@@ -11,7 +11,7 @@ import type { CatalogItem } from '../../types/api';
 
 const catalogDefinitions = [
   ['compradores', 'Compradores'], ['productos-venta', 'Productos de venta'], ['unidades', 'Unidades de medida'],
-  ['especies', 'Especies'], ['origenes', 'Orígenes'], ['colores', 'Colores'], ['razas', 'Razas'],
+  ['categorias-animales', 'Categorías de animales'], ['especies', 'Especies'], ['origenes', 'Orígenes'], ['colores', 'Colores'], ['razas', 'Razas'],
   ['tipos-grupo', 'Tipos de grupo'], ['pastos', 'Tipos de pasto'], ['usos-potrero', 'Usos de potrero'], ['tipos-corral', 'Tipos de corral'],
   ['tipos-limpieza', 'Tipos de limpieza'], ['categorias-agroquimicos', 'Categorías agroquímicas'], ['agroquimicos', 'Productos agroquímicos'],
   ['tipos-tratamiento', 'Tipos de tratamiento'], ['vias', 'Vías de administración'], ['medicamentos', 'Medicamentos'],
@@ -24,6 +24,7 @@ const emptyForm = (): CatalogForm => ({ codigo: '', nombre: '', descripcion: '',
 
 export function CatalogsPage() {
   const { hasPermission } = useAuth();
+  const navigate = useNavigate();
   const toast = useToast();
   const client = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -99,7 +100,7 @@ export function CatalogsPage() {
     <div className="catalog-layout">
       <aside className="catalog-menu">{catalogDefinitions.map(([name, label]) => <button key={name} className={catalog === name ? 'active' : ''} onClick={() => selectCatalog(name)}><BookOpen size={17} /><span>{label}</span></button>)}</aside>
       <section className="catalog-content">
-        <div className="section-heading-inline catalog-heading"><div><h2>{title}</h2><p className="muted">{query.data?.length ?? 0} elementos registrados</p></div>{hasPermission('CATALOGO_ADMINISTRAR') ? <Button onClick={() => { setEditingId(null); setForm(emptyForm()); setOpen(true); }}><Plus size={17} />Agregar</Button> : null}</div>
+        <div className="section-heading-inline catalog-heading"><div><h2>{title}</h2><p className="muted">{query.data?.length ?? 0} elementos registrados</p></div><div className="inline-actions">{catalog === 'categorias-animales' && hasPermission('UBICACION_CONSULTAR') ? <Button variant="ghost" onClick={() => navigate('/ubicaciones')}>Otras propiedades</Button> : null}{hasPermission('CATALOGO_ADMINISTRAR') ? <Button onClick={() => { setEditingId(null); setForm(emptyForm()); setOpen(true); }}><Plus size={17} />Agregar</Button> : null}</div></div>
         {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : query.data?.length ? <div className="table-card"><div className="table-responsive"><table className="data-table"><thead><tr><th>Nombre</th>{fields.filter((field) => !['nombre','nombre_comercial','descripcion','instrucciones'].includes(field)).slice(0, 3).map((field) => <th key={field}>{field.replace(/^id_/, '').replaceAll('_', ' ')}</th>)}<th>Estado</th>{hasPermission('CATALOGO_ADMINISTRAR') ? <th>Acciones</th> : null}</tr></thead><tbody>{query.data.map((item) => <tr key={itemId(item)}><td><strong>{itemLabel(item)}</strong><small>{String(item.descripcion ?? item.instrucciones ?? item.principio_activo ?? '')}</small></td>{fields.filter((field) => !['nombre','nombre_comercial','descripcion','instrucciones'].includes(field)).slice(0, 3).map((field) => <td key={field}>{displayValue(item, field)}</td>)}<td><Badge tone={item.activo !== false ? 'success' : 'neutral'}>{item.activo !== false ? 'Activo' : 'Inactivo'}</Badge></td>{hasPermission('CATALOGO_ADMINISTRAR') ? <td><div className="inline-actions"><Button variant="ghost" onClick={() => openEdit(item)}><Edit3 size={16} /></Button><Button variant="ghost" onClick={() => setDeleteId(itemId(item))}><Trash2 size={16} /></Button></div></td> : null}</tr>)}</tbody></table></div></div> : <EmptyState icon={BookOpen} title={`Sin elementos en ${title.toLowerCase()}`} description="Agrega el primer elemento para utilizarlo en los demás módulos." />}
       </section>
     </div>

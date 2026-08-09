@@ -161,8 +161,18 @@ export function AnimalDetailPage() {
         type: image.tipo_archivo ?? 'IMAGEN',
       });
     }
+    if (query.data?.marquilla_foto) {
+      items.push({
+        key: 'fierro',
+        url: query.data.marquilla_foto,
+        alt: `Fierro ${query.data.marquilla_codigo || query.data.marquilla || animalName}`,
+        title: `Fierro ${query.data.marquilla_codigo || query.data.marquilla || animalName}`,
+        isProfile: false,
+        type: 'IMAGEN',
+      });
+    }
     return items;
-  }, [gallery, profileImage, profileUrl, query.data?.nombre]);
+  }, [gallery, profileImage, profileUrl, query.data?.marquilla, query.data?.marquilla_codigo, query.data?.marquilla_foto, query.data?.nombre]);
 
   useEffect(() => {
     if (galleryIndex >= gallery.length) setGalleryIndex(0);
@@ -231,6 +241,10 @@ export function AnimalDetailPage() {
     const index = viewerImages.findIndex((item) => item.imageId === image.id_imagen);
     if (index >= 0) setViewerIndex(index);
   }
+  function openMarkViewer() {
+    const index = viewerImages.findIndex((item) => item.key === 'fierro');
+    if (index >= 0) setViewerIndex(index);
+  }
   function nextViewer() {
     if (viewerImages.length > 1) setViewerIndex((current) => current === null ? 0 : (current + 1) % viewerImages.length);
   }
@@ -290,12 +304,13 @@ export function AnimalDetailPage() {
           <div className="animal-compact-info-grid">
             <CompactInfo icon={Beef} label="Especie / sexo" value={`${animal.especie} · ${animal.sexo === 'HEMBRA' ? 'Hembra' : 'Macho'}`} />
             <CompactInfo icon={Users} label="Grupo" value={animal.grupo || 'Sin grupo'} />
-            <CompactInfo icon={MapPin} label="Corral o potrero" value={animal.ubicacion || 'Sin ubicación actual'} />
+            <CompactInfo icon={MapPin} label="Ubicación actual" value={animal.ubicacion || 'Sin ubicación actual'} />
+            <CompactInfo icon={Tag} label="Categoría" value={animal.categoria || 'Sin categoría'} />
             <CompactInfo icon={Weight} label="Último peso" value={animal.ultimo_pesaje ? `${formatNumber(animal.ultimo_pesaje.peso_kg)} kg · ${formatDate(animal.ultimo_pesaje.fecha)}` : 'Sin pesaje'} />
             <CompactInfo icon={UserRound} label="Propietario(s)" value={ownerText} wide />
             <CompactInfo icon={CalendarDays} label="Nacimiento / ingreso" value={`${formatDate(animal.fecha_nacimiento)} · ${formatDate(animal.fecha_ingreso)}`} />
             {animal.fecha_nacimiento ? <CompactInfo icon={CalendarDays} label="Edad" value={formatAge(animal.fecha_nacimiento)} /> : null}
-            {animal.marquilla ? <CompactInfo icon={Tag} label="Fierro" value={<span className="animal-mark-inline">{animal.marquilla_foto ? <img src={animal.marquilla_foto} alt={`Fierro ${animal.marquilla}`} /> : null}<span>{animal.marquilla}{animal.marquilla_codigo ? ` · ${animal.marquilla_codigo}` : ''}{animal.marquilla_usuario ? ` · ${animal.marquilla_usuario}` : ''}</span></span>} wide /> : null}
+            {animal.marquilla ? <CompactInfo icon={Tag} label="Fierro" value={<span className="animal-mark-inline"><span>{animal.marquilla_codigo || animal.marquilla}</span>{animal.marquilla_foto ? <button type="button" className="animal-mark-thumb" onClick={openMarkViewer} aria-label="Ver imagen del fierro en grande"><img src={animal.marquilla_foto} alt={`Fierro ${animal.marquilla_codigo || animal.marquilla}`} /></button> : null}</span>} /> : null}
             <CompactInfo icon={UserRound} label="Padres" value={`Madre: ${animal.madre || '—'} · Padre: ${animal.padre || '—'}`} wide />
             {lastTreatment ? <CompactInfo icon={Syringe} label="Último tratamiento" value={treatmentText} wide /> : null}
             {lastMovement ? <CompactInfo icon={ArrowRightLeft} label="Último traslado" value={movementText} wide /> : null}
