@@ -111,7 +111,7 @@ function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => v
     <form id="group-form" className="form-stack" onSubmit={submit}>
       <div className="form-grid">
         <Field label="Nombre" required><Input value={form.nombre} onChange={(event) => setForm((current) => ({ ...current, nombre: event.target.value }))} required /></Field>
-        <Field label="Código"><Input value={form.codigo} onChange={(event) => setForm((current) => ({ ...current, codigo: event.target.value }))} /></Field>
+        <Field label="Código" hint="Si lo dejas vacío, el sistema lo genera a partir del nombre."><Input value={form.codigo} onChange={(event) => setForm((current) => ({ ...current, codigo: event.target.value }))} /></Field>
         <Field label="Tipo de grupo" required><Select value={form.id_tipo_grupo} onChange={(event) => setForm((current) => ({ ...current, id_tipo_grupo: event.target.value }))} required><option value="">Selecciona</option>{types.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>
         <Field label="Propiedad" hint={group?.total_animales ? 'Para cambiarla, traslada primero todos los animales.' : 'Determina en qué finca permanece el grupo.'} required><Select disabled={Boolean(group?.total_animales)} value={form.id_propiedad} onChange={(event) => {
           const propertyId = event.target.value;
