@@ -8,7 +8,7 @@ import { transaction } from '../../database/transaction.js';
 import { asyncHandler } from '../../core/async-handler.js';
 import { routeParam } from '../../core/route-param.js';
 import { created, noContent, ok } from '../../core/http.js';
-import { NotFoundError, ValidationError } from '../../core/errors.js';
+import { ConflictError, NotFoundError, ValidationError } from '../../core/errors.js';
 import { paginationSchema, offset } from '../../core/pagination.js';
 import { requirePermission } from '../../middleware/permission.js';
 import { deleteCloudinaryImage, uploadAnimalImage } from '../../services/cloudinary.service.js';
@@ -57,6 +57,20 @@ const createSchema = schema.extend({
     metodo_pesaje_inicial: z.string().trim().max(80).nullable().optional(),
     observaciones_pesaje_inicial: z.string().trim().max(300).nullable().optional(),
     descripcion_foto_perfil: z.string().trim().max(300).nullable().optional(),
+});
+const animalUpdateSchema = schema.omit({
+    id_categoria_animal: true,
+    id_grupo_actual: true,
+    id_ubicacion_actual: true,
+    fecha_ingreso: true,
+    estado: true,
+}).partial();
+const conditionActionSchema = z.object({
+    accion: z.enum(['DESACTIVAR', 'REACTIVAR', 'REPORTAR_DESAPARICION', 'REGISTRAR_HALLAZGO']),
+    fecha_evento: z.string().datetime(),
+    id_grupo_actual: z.string().uuid().nullable().optional(),
+    id_ubicacion_actual: z.string().uuid().nullable().optional(),
+    observaciones: z.string().trim().max(1000).nullable().optional(),
 });
 const createUpload = multer({
     storage: multer.memoryStorage(),
@@ -287,7 +301,17 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
          AND md.deleted_at IS NULL
          AND mv.estado='COMPLETADO'
          AND mv.deleted_at IS NULL
-       ORDER BY COALESCE(md.aplicado_en,mv.aplicado_en,mv.fecha_movimiento) DESC LIMIT 1) ultimo_movimiento
+       ORDER BY COALESCE(md.aplicado_en,mv.aplicado_en,mv.fecha_movimiento) DESC LIMIT 1) ultimo_movimiento,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_evento',ace.id_evento,'tipo_evento',ace.tipo_evento,
+        'estado_anterior',ace.estado_anterior,'estado_nuevo',ace.estado_nuevo,
+        'fecha_evento',ace.fecha_evento,'observaciones',ace.observaciones,
+        'ubicacion',ace_u.nombre,'grupo',ace_g.nombre
+      ) ORDER BY ace.fecha_evento DESC)
+      FROM animal_condicion_evento ace
+      LEFT JOIN ubicacion ace_u ON ace_u.id_ubicacion=ace.id_ubicacion_destino
+      LEFT JOIN grupo ace_g ON ace_g.id_grupo=ace.id_grupo_destino
+      WHERE ace.id_animal=a.id_animal AND ace.deleted_at IS NULL),'[]'::jsonb) eventos_condicion
      FROM animal a
      JOIN especie e ON e.id_especie=a.id_especie
      JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
@@ -467,12 +491,79 @@ animalsRouter.post('/', requirePermission('ANIMAL_CREAR'), createUpload.single('
         throw error;
     }
 }));
+animalsRouter.post('/:id/condicion', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
+    const id = routeParam(req.params.id, 'id');
+    const input = conditionActionSchema.parse(req.body);
+    const result = await transaction(async (client) => {
+        const current = (await client.query(`SELECT id_animal,id_especie,estado,id_categoria_animal,id_grupo_actual,id_ubicacion_actual
+       FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR UPDATE`, [id])).rows[0];
+        if (!current)
+            throw new NotFoundError('Animal no encontrado.');
+        const transitions = {
+            DESACTIVAR: { from: 'ACTIVO', to: 'INACTIVO' },
+            REACTIVAR: { from: 'INACTIVO', to: 'ACTIVO' },
+            REPORTAR_DESAPARICION: { from: 'ACTIVO', to: 'DESAPARECIDO' },
+            REGISTRAR_HALLAZGO: { from: 'DESAPARECIDO', to: 'ACTIVO' },
+        };
+        const transition = transitions[input.accion];
+        if (current.estado !== transition.from) {
+            throw new ConflictError(`La acción ${input.accion.toLowerCase().replaceAll('_', ' ')} no corresponde a la condición actual del animal.`);
+        }
+        let nextCategory = current.id_categoria_animal;
+        let nextGroup = current.id_grupo_actual;
+        let nextLocation = current.id_ubicacion_actual;
+        if (input.accion === 'REPORTAR_DESAPARICION') {
+            nextGroup = null;
+            nextLocation = null;
+        }
+        if (input.accion === 'REGISTRAR_HALLAZGO') {
+            nextGroup = input.id_grupo_actual ?? null;
+            nextLocation = input.id_ubicacion_actual ?? null;
+            if (nextLocation) {
+                const location = (await client.query(`SELECT id_categoria_animal FROM ubicacion
+           WHERE id_ubicacion=$1 AND deleted_at IS NULL AND activo=TRUE`, [nextLocation])).rows[0];
+                if (!location)
+                    throw new ValidationError('La ubicación del hallazgo no está disponible.');
+                nextCategory = location.id_categoria_animal;
+            }
+            if (nextGroup) {
+                const group = (await client.query(`SELECT id_especie FROM grupo WHERE id_grupo=$1 AND deleted_at IS NULL AND activo=TRUE`, [nextGroup])).rows[0];
+                if (!group)
+                    throw new ValidationError('El grupo seleccionado no está disponible.');
+                if (group.id_especie && group.id_especie !== current.id_especie)
+                    throw new ValidationError('El grupo no corresponde a la especie del animal.');
+            }
+        }
+        await client.query("SELECT set_config('app.fecha_movimiento', $1, true)", [input.fecha_evento]);
+        await client.query("SELECT set_config('app.motivo_cambio', $1, true)", [input.accion.toLowerCase().replaceAll('_', ' ')]);
+        const updated = (await client.query(`UPDATE animal
+       SET estado=$2,id_categoria_animal=$3,id_grupo_actual=$4,id_ubicacion_actual=$5,updated_at=NOW()
+       WHERE id_animal=$1 RETURNING *`, [id, transition.to, nextCategory, nextGroup, nextLocation])).rows[0];
+        await client.query(buildInsert('animal_condicion_evento', {
+            id_animal: id,
+            tipo_evento: input.accion,
+            estado_anterior: current.estado,
+            estado_nuevo: transition.to,
+            fecha_evento: input.fecha_evento,
+            id_categoria_anterior: current.id_categoria_animal,
+            id_categoria_destino: nextCategory,
+            id_grupo_anterior: current.id_grupo_actual,
+            id_grupo_destino: nextGroup,
+            id_ubicacion_anterior: current.id_ubicacion_actual,
+            id_ubicacion_destino: nextLocation,
+            observaciones: input.observaciones ?? null,
+            registrado_por: req.user.id,
+        }));
+        return updated;
+    }, req.user.id);
+    return ok(res, result);
+}));
 animalsRouter.patch('/:id', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
-    const input = schema.partial().parse(req.body);
+    const input = animalUpdateSchema.parse(req.body);
     const id = routeParam(req.params.id, 'id');
     const result = await transaction(async (client) => {
         const { colores, razas, propietarios, ...animal } = input;
-        const current = (await client.query('SELECT id_especie,id_madre,id_padre,id_categoria_animal,id_ubicacion_actual,estado FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR UPDATE', [id])).rows[0];
+        const current = (await client.query('SELECT id_especie,id_madre,id_padre FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR UPDATE', [id])).rows[0];
         if (!current)
             throw new NotFoundError();
         await assertGenealogyRules(client, {
@@ -481,9 +572,6 @@ animalsRouter.patch('/:id', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(
             id_madre: Object.prototype.hasOwnProperty.call(animal, 'id_madre') ? animal.id_madre : current.id_madre,
             id_padre: Object.prototype.hasOwnProperty.call(animal, 'id_padre') ? animal.id_padre : current.id_padre,
         });
-        await assertCategoryLocation(client, animal.id_categoria_animal ?? current.id_categoria_animal, Object.prototype.hasOwnProperty.call(animal, 'id_ubicacion_actual') ? animal.id_ubicacion_actual : current.id_ubicacion_actual);
-        if (animal.estado !== undefined)
-            await assertAnimalCondition(client, animal.estado, animal.estado === current.estado);
         let row;
         if (Object.keys(animal).length) {
             row = (await client.query(buildUpdate('animal', 'id_animal', id, animal))).rows[0];

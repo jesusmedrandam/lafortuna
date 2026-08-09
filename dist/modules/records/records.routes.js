@@ -46,6 +46,15 @@ recordsRouter.post('/:module', asyncHandler(async (req, res) => {
     const d = definition(routeParam(req.params.module, 'module'));
     assertPermission(req.user, d.write);
     const data = allowedBody(req.body, d.columns);
+    const animalId = data[d.animalColumn];
+    if (typeof animalId !== 'string')
+        throw new ValidationError('Selecciona un animal.');
+    const animal = (await pool.query(`SELECT nombre,estado FROM animal WHERE id_animal=$1 AND deleted_at IS NULL`, [animalId])).rows[0];
+    if (!animal)
+        throw new NotFoundError('Animal no encontrado.');
+    if (animal.estado !== 'ACTIVO') {
+        throw new ValidationError(`${animal.nombre} no está activo y no admite nuevas operaciones.`);
+    }
     const row = (await pool.query(buildInsert(d.table, { ...data, registrado_por: req.user.id }))).rows[0];
     return created(res, row);
 }));
