@@ -20,8 +20,8 @@ Antes de ejecutar `bootstrap:admin`, configura la nueva `DATABASE_URL`, las dos 
 - `GET|PATCH /api/auth/me`
 - `GET /api/versiones`
 - `GET /api/dashboard/resumen`
-- CRUD `/api/animales`, `/api/grupos`, `/api/ubicaciones`
-- Categorías de animales y ubicaciones externas mediante `/api/catalogos/categorias-animales` y `/api/ubicaciones`
+- CRUD `/api/animales`, `/api/grupos`, `/api/propiedades` y `/api/ubicaciones`
+- Cada grupo, potrero y corral pertenece a una propiedad; la clasificación interna o externa se deriva de la propiedad principal
 - Fierros con varios usuarios y fotografía 4:3 `/api/marquillas`
 - CRUD compuesto `/api/potreros`, `/api/corrales`
 - Multimedia `/api/animales/:id/imagenes`, `/api/imagenes` y `/api/imagenes/:id`
@@ -56,3 +56,4 @@ El archivo `render.yaml` crea el Web Service. Configura manualmente las variable
 - Para la versión 13 aplica `migrations/20260817_grupos_politicas_operaciones.sql` después de la migración de la versión 12.
 - Para la versión 14 aplica `migrations/20260818_grupo_ubicacion_consistente.sql` después de la migración de la versión 13.
 - Para la versión 15 aplica `migrations/20260819_motivos_movimiento_y_consumo_limpieza.sql` después de la migración de la versión 14.
+- Para la versión 16 aplica `migrations/20260820_propiedades_y_movimientos_consistentes.sql` después de la migración de la versión 15.
