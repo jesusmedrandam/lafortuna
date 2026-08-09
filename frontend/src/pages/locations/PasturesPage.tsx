@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, ChevronRight, Clock3, Droplets, Edit3, Plus, Sprout, Trash2, Users } from 'lucide-react';
+import { CalendarDays, ChevronRight, Clock3, Droplets, Edit3, FilterX, Plus, SlidersHorizontal, Sprout, Trash2, Users, X } from 'lucide-react';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
-import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, ListToolbar, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
+import { Badge, Button, Card, EmptyState, ErrorState, Field, IconButton, Input, ListToolbar, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
 import { useListControls } from '../../hooks/useListControls';
 import type { Pasture, PastureDetail } from '../../types/api';
@@ -26,20 +26,33 @@ function PastureModal({ pasture, onClose }: { pasture?: Pasture | null; onClose:
 
 export function PasturesPage() {
   const { hasPermission } = useAuth(); const [editing, setEditing] = useState<Pasture | null | undefined>(undefined); const [detailId, setDetailId] = useState<string | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filters, setFilters] = useState({ estado: '', ocupacion_min: '', ocupacion_max: '', descanso_min: '', descanso_max: '' });
   const query = useQuery({ queryKey: ['pastures'], queryFn: () => apiRequest<Pasture[]>('/potreros') });
   const list = useListControls({ items: query.data ?? [], storageKey: 'pastures', searchText: (pasture) => `${pasture.nombre} ${pasture.codigo ?? ''} ${pasture.tipo_uso} ${pasture.pastos.map((item) => item.pasto).join(' ')}`, nameValue: (pasture) => pasture.nombre, defaultOrder: 'AZ' });
+  const filtered = list.visible.filter((pasture) => {
+    if (filters.estado && pasture.estado_ocupacion !== filters.estado) return false;
+    if (filters.ocupacion_min && (pasture.dias_ocupacion == null || pasture.dias_ocupacion < Number(filters.ocupacion_min))) return false;
+    if (filters.ocupacion_max && (pasture.dias_ocupacion == null || pasture.dias_ocupacion > Number(filters.ocupacion_max))) return false;
+    if (filters.descanso_min && (pasture.dias_descanso == null || pasture.dias_descanso < Number(filters.descanso_min))) return false;
+    if (filters.descanso_max && (pasture.dias_descanso == null || pasture.dias_descanso > Number(filters.descanso_max))) return false;
+    return true;
+  });
+  const activeFilters = Object.values(filters).filter(Boolean).length;
+  const clearFilters = () => setFilters({ estado: '', ocupacion_min: '', ocupacion_max: '', descanso_min: '', descanso_max: '' });
   const detail = useQuery({ queryKey: ['pastures', detailId, 'summary'], queryFn: () => apiRequest<PastureDetail>(`/potreros/${detailId}/resumen`), enabled: Boolean(detailId) });
   const openEdit = (pasture: Pasture) => { setDetailId(null); setEditing(pasture); };
   return <div>
     <PageHeader title="Potreros" description="Consulta ocupación, descanso, pastos e historial de cada potrero." action={hasPermission('POTRERO_ADMINISTRAR') ? <Button onClick={() => setEditing(null)}><Plus size={18} />Nuevo potrero</Button> : undefined} />
-    <ListToolbar search={list.search} onSearch={list.setSearch} order={list.order} onOrder={list.setOrder} placeholder="Buscar potrero, código, uso o pasto…" count={list.visible.length} />
-    {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : list.visible.length === 0 ? <EmptyState icon={Sprout} title="Sin potreros" description="Registra el primer potrero de la propiedad." /> : <Card className="pasture-list">
-      <div className="pasture-list-head"><span>Potrero</span><span>Área</span><span>Pastos</span><span>Estado actual</span><span /></div>
-      {list.visible.map((pasture) => <button type="button" className="pasture-list-row" key={pasture.id_potrero} onClick={() => setDetailId(pasture.id_potrero)}>
+    <div className="pasture-list-controls"><ListToolbar search={list.search} onSearch={list.setSearch} order={list.order} onOrder={list.setOrder} placeholder="Buscar potrero, código, uso o pasto…" count={filtered.length} /><IconButton className={activeFilters ? 'active-filter-button' : ''} label="Filtrar ocupación y descanso" onClick={() => setFiltersOpen((value) => !value)}><SlidersHorizontal size={18} />{activeFilters ? <span className="filter-count">{activeFilters}</span> : null}</IconButton></div>
+    {filtersOpen ? <section className="advanced-filters pasture-advanced-filters"><div className="advanced-filters-heading"><div><h2>Ocupación y descanso</h2><p>Filtra por el estado actual o por rangos de días.</p></div><div className="advanced-filter-actions"><IconButton label="Limpiar filtros" disabled={!activeFilters} onClick={clearFilters}><FilterX size={17} /></IconButton><IconButton label="Cerrar filtros" onClick={() => setFiltersOpen(false)}><X size={18} /></IconButton></div></div><div className="advanced-filters-grid"><Field label="Estado actual"><Select value={filters.estado} onChange={(event) => setFilters((current) => ({ ...current, estado: event.target.value }))}><option value="">Ocupados y en descanso</option><option value="OCUPADO">Solo ocupados</option><option value="DESCANSO">Solo en descanso</option></Select></Field><Field label="Ocupación mínima (días)"><Input type="number" min="0" value={filters.ocupacion_min} onChange={(event) => setFilters((current) => ({ ...current, ocupacion_min: event.target.value }))} /></Field><Field label="Ocupación máxima (días)"><Input type="number" min={filters.ocupacion_min || '0'} value={filters.ocupacion_max} onChange={(event) => setFilters((current) => ({ ...current, ocupacion_max: event.target.value }))} /></Field><Field label="Descanso mínimo (días)"><Input type="number" min="0" value={filters.descanso_min} onChange={(event) => setFilters((current) => ({ ...current, descanso_min: event.target.value }))} /></Field><Field label="Descanso máximo (días)"><Input type="number" min={filters.descanso_min || '0'} value={filters.descanso_max} onChange={(event) => setFilters((current) => ({ ...current, descanso_max: event.target.value }))} /></Field></div><div className="advanced-filters-footer"><span>{activeFilters ? `${activeFilters} filtros activos · ${filtered.length} potreros encontrados` : 'Sin filtros aplicados'}</span></div></section> : null}
+    {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : filtered.length === 0 ? <EmptyState icon={Sprout} title={activeFilters || list.search ? 'No hay coincidencias' : 'Sin potreros'} description={activeFilters || list.search ? 'Modifica la búsqueda o los filtros de ocupación y descanso.' : 'Registra el primer potrero de la propiedad.'} /> : <Card className="pasture-list">
+      <div className="pasture-list-head"><span>Potrero</span><span>Área</span><span>Pastos</span><span>Estado y tiempo</span><span /></div>
+      {filtered.map((pasture) => <button type="button" className="pasture-list-row" key={pasture.id_potrero} onClick={() => setDetailId(pasture.id_potrero)}>
         <span className="pasture-name"><span className="pasture-mini-icon"><Sprout size={18} /></span><span><strong>{pasture.nombre}</strong><small>{pasture.tipo_uso}{pasture.codigo ? ` · ${pasture.codigo}` : ''}</small></span></span>
         <span><strong>{pasture.area != null ? `${formatNumber(pasture.area)}${pasture.unidad_area ? ` ${pasture.unidad_area}` : ''}` : 'Sin registrar'}</strong><small>{pasture.capacidad_estimada != null ? `Capacidad: ${pasture.capacidad_estimada}` : 'Sin capacidad'}</small></span>
         <span className="pasture-grass-summary"><strong>{pasture.pastos.length ? pasture.pastos.map((item) => item.pasto).filter(Boolean).join(', ') : 'Sin pastos'}</strong><small>{pasture.pastos.length} {pasture.pastos.length === 1 ? 'tipo registrado' : 'tipos registrados'}</small></span>
-        <span><Badge tone={Number(pasture.total_animales) > 0 ? 'info' : 'success'}>{Number(pasture.total_animales) > 0 ? 'Ocupado' : 'En descanso'}</Badge><small>{Number(pasture.total_animales)} animales</small></span>
+        <span><Badge tone={pasture.estado_ocupacion === 'OCUPADO' ? 'info' : 'success'}>{pasture.estado_ocupacion === 'OCUPADO' ? 'Ocupado' : 'En descanso'}</Badge><small>{pasture.estado_ocupacion === 'OCUPADO' ? `${pasture.dias_ocupacion ?? '—'} días ocupado · ${Number(pasture.total_animales)} animales` : `${pasture.dias_descanso ?? '—'} días en descanso`}</small></span>
         <span className="pasture-row-actions">{hasPermission('POTRERO_ADMINISTRAR') ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); openEdit(pasture); }}><Edit3 size={16} /><span>Editar</span></Button> : null}<ChevronRight size={19} /></span>
       </button>)}
     </Card>}

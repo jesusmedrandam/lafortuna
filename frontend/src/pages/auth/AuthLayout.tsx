@@ -6,14 +6,10 @@ export function AuthLayout() {
     <main className="auth-layout">
       <section className="auth-brand-panel">
         <div className="auth-brand">
-          <img src="/logo-mm.png" alt="M&M Ganadería" />
-          <div>
-            <span>M&M</span>
-            <h1>Ganadería</h1>
-          </div>
+          <span className="auth-logo-surface"><img src="/branding/logo-sgb-full.png" alt="Sistema de Gestión Bovina" /></span>
         </div>
         <div className="auth-copy">
-          <span className="eyebrow">Gestión inteligente del campo</span>
+          <span className="eyebrow">Sistema de Gestión Bovina</span>
           <h2>La información de tu finca, organizada y disponible.</h2>
           <p>Animales, grupos, potreros, corrales, sanidad y producción en un mismo sistema.</p>
         </div>

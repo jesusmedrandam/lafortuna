@@ -19,7 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
-import { Button, Card, ErrorState, IconButton, LoadingState, Modal, PageHeader } from '../../components/ui';
+import { Button, Card, ErrorState, IconButton, LoadingState, Modal } from '../../components/ui';
 import type { DashboardSummary } from '../../types/api';
 import { formatNumber } from '../../utils';
 
@@ -139,11 +139,11 @@ export function DashboardPage() {
   if (query.isError) return <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} />;
 
   return <div>
-    <PageHeader
-      title={`Hola, ${user?.nombres ?? 'bienvenido'}`}
-      description="Resumen operativo y financiero de la finca."
-      action={<IconButton label="Personalizar panel" onClick={() => setSettingsOpen(true)}><Settings2 size={20} /></IconButton>}
-    />
+    <div className="dashboard-home-header">
+      <div><span className="eyebrow">Panel principal</span><h1>Hola, {user?.nombres ?? 'bienvenido'}</h1><p>Resumen operativo y financiero de la finca.</p></div>
+      <img src="/branding/logo-sgb-full.png" alt="Sistema de Gestión Bovina" />
+      <IconButton label="Personalizar panel" onClick={() => setSettingsOpen(true)}><Settings2 size={20} /></IconButton>
+    </div>
 
     {visibleModules.length ? <div className="dashboard-module-grid">
       {visibleModules.map((module) => {

@@ -253,6 +253,10 @@ export interface Pasture {
   unidad_area?: string | null;
   total_animales: number;
   pastos: PastureGrass[];
+  estado_ocupacion: 'OCUPADO' | 'DESCANSO';
+  fecha_estado_desde: string | null;
+  dias_ocupacion: number | null;
+  dias_descanso: number | null;
 }
 
 export interface PastureOccupationPeriod {
@@ -490,10 +494,12 @@ export interface BirthChild {
   id_parto_cria: string;
   id_cria: string;
   cria: string;
+  codigo_arete: string | null;
   sexo: 'MACHO' | 'HEMBRA';
   estado_nacimiento: string;
   peso_nacimiento_kg: number | string | null;
   orden_nacimiento: number;
+  foto_perfil: string | null;
 }
 
 export interface Birth {
@@ -502,7 +508,9 @@ export interface Birth {
   id_madre: string;
   id_padre: string | null;
   madre: string;
+  madre_arete: string | null;
   padre: string | null;
+  padre_arete: string | null;
   fecha_parto: string;
   tipo_parto: string;
   observaciones: string | null;
