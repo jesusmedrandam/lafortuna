@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
@@ -12,8 +12,8 @@ import {
   Expand,
   ImagePlus,
   MapPin,
-  Pencil,
   Star,
+  Tag,
   Syringe,
   Trash2,
   UserRound,
@@ -38,10 +38,9 @@ import {
   LoadingState,
   Modal,
   PageHeader,
-  Textarea,
 } from '../../components/ui';
 import type { Animal, AnimalImage } from '../../types/api';
-import { formatDate, formatNumber } from '../../utils';
+import { formatAge, formatDate, formatNumber } from '../../utils';
 import { AnimalFormModal } from './AnimalFormModal';
 import { AnimalMultiPicker } from '../../components/AnimalMultiPicker';
 
@@ -49,7 +48,7 @@ interface ViewerImage {
   key: string;
   url: string;
   alt: string;
-  description: string | null;
+  title: string;
   createdAt?: string;
   imageId?: string;
   isProfile: boolean;
@@ -60,11 +59,6 @@ interface UploadDraft {
   file: File;
   profile: boolean;
   previewUrl: string;
-}
-
-interface DescriptionDraft {
-  imageId: string;
-  description: string;
 }
 
 export function AnimalDetailPage() {
@@ -80,9 +74,7 @@ export function AnimalDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [imageProfile, setImageProfile] = useState(false);
   const [uploadDraft, setUploadDraft] = useState<UploadDraft | null>(null);
-  const [uploadDescription, setUploadDescription] = useState('');
   const [relatedAnimalIds, setRelatedAnimalIds] = useState<string[]>([]);
-  const [descriptionDraft, setDescriptionDraft] = useState<DescriptionDraft | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
@@ -103,18 +95,16 @@ export function AnimalDetailPage() {
   });
 
   const upload = useMutation({
-    mutationFn: async ({ file, profile, description, animalIds }: { file: File; profile: boolean; description: string; animalIds: string[] }) => {
+    mutationFn: async ({ file, profile, animalIds }: { file: File; profile: boolean; animalIds: string[] }) => {
       const data = new FormData();
       data.set('archivo', file);
       data.set('es_perfil', String(profile));
-      data.set('descripcion', description.trim());
       data.set('id_animales', JSON.stringify(animalIds));
       return apiRequest<AnimalImage>(`/animales/${id}/imagenes`, { method: 'POST', body: data });
     },
     onSuccess: () => {
       toast.show('Archivo subido y relacionado correctamente.');
       setUploadDraft(null);
-      setUploadDescription('');
       void client.invalidateQueries({ queryKey: ['animal', id] });
     },
     onError: (error) => toast.show((error as ApiError).message, 'error'),
@@ -128,19 +118,6 @@ export function AnimalDetailPage() {
     onSuccess: (_data, variables) => {
       toast.show(variables.action === 'profile' ? 'Foto de perfil actualizada.' : 'Fotografía eliminada.');
       setViewerIndex(null);
-      void client.invalidateQueries({ queryKey: ['animal', id] });
-    },
-    onError: (error) => toast.show((error as ApiError).message, 'error'),
-  });
-
-  const updateDescription = useMutation({
-    mutationFn: ({ imageId, description }: DescriptionDraft) => apiRequest<AnimalImage>(`/imagenes/${imageId}`, {
-      method: 'PATCH',
-      body: { descripcion: description.trim() },
-    }),
-    onSuccess: () => {
-      toast.show('Descripción actualizada.');
-      setDescriptionDraft(null);
       void client.invalidateQueries({ queryKey: ['animal', id] });
     },
     onError: (error) => toast.show((error as ApiError).message, 'error'),
@@ -165,7 +142,7 @@ export function AnimalDetailPage() {
         key: profileImage?.id_imagen ?? 'profile',
         url: profileUrl,
         alt: `Foto de perfil de ${animalName}`,
-        description: profileImage?.descripcion ?? 'Foto de perfil',
+        title: animalName,
         createdAt: profileImage?.created_at,
         imageId: profileImage?.id_imagen,
         isProfile: true,
@@ -176,8 +153,8 @@ export function AnimalDetailPage() {
       items.push({
         key: image.id_imagen,
         url: image.secure_url,
-        alt: image.descripcion || `Fotografía de ${animalName}`,
-        description: image.descripcion,
+        alt: `Archivo de ${image.animales?.[0]?.nombre ?? animalName}`,
+        title: image.animales?.[0]?.nombre ?? animalName,
         createdAt: image.created_at,
         imageId: image.id_imagen,
         isProfile: false,
@@ -284,7 +261,6 @@ export function AnimalDetailPage() {
             event.currentTarget.value = '';
             return;
           }
-          setUploadDescription('');
           setRelatedAnimalIds([id]);
           setUploadDraft({ file, profile: imageProfile, previewUrl: URL.createObjectURL(file) });
         }
@@ -318,6 +294,8 @@ export function AnimalDetailPage() {
             <CompactInfo icon={Weight} label="Último peso" value={animal.ultimo_pesaje ? `${formatNumber(animal.ultimo_pesaje.peso_kg)} kg · ${formatDate(animal.ultimo_pesaje.fecha)}` : 'Sin pesaje'} />
             <CompactInfo icon={UserRound} label="Propietario(s)" value={ownerText} wide />
             <CompactInfo icon={CalendarDays} label="Nacimiento / ingreso" value={`${formatDate(animal.fecha_nacimiento)} · ${formatDate(animal.fecha_ingreso)}`} />
+            {animal.fecha_nacimiento ? <CompactInfo icon={CalendarDays} label="Edad" value={formatAge(animal.fecha_nacimiento)} /> : null}
+            {animal.marquilla ? <CompactInfo icon={Tag} label="Fierro" value={<span className="animal-mark-inline">{animal.marquilla_foto ? <img src={animal.marquilla_foto} alt={`Fierro ${animal.marquilla}`} /> : null}<span>{animal.marquilla}{animal.marquilla_codigo ? ` · ${animal.marquilla_codigo}` : ''}{animal.marquilla_usuario ? ` · ${animal.marquilla_usuario}` : ''}</span></span>} wide /> : null}
             <CompactInfo icon={UserRound} label="Padres" value={`Madre: ${animal.madre || '—'} · Padre: ${animal.padre || '—'}`} wide />
             {lastTreatment ? <CompactInfo icon={Syringe} label="Último tratamiento" value={treatmentText} wide /> : null}
             {lastMovement ? <CompactInfo icon={ArrowRightLeft} label="Último traslado" value={movementText} wide /> : null}
@@ -348,8 +326,9 @@ export function AnimalDetailPage() {
             touchStart.current = null;
           }}
         >
+          <strong className="animal-media-title">{currentGallery.animales?.[0]?.nombre ?? animal.nombre}</strong>
           <button className="carousel-image-button" type="button" onClick={() => openGalleryViewer(currentGallery)}>
-            {currentGallery.tipo_archivo==='VIDEO'?<video src={currentGallery.secure_url} muted preload="metadata"/>:<img src={currentGallery.secure_url} alt={currentGallery.descripcion || animal.nombre} />}
+            {currentGallery.tipo_archivo==='VIDEO'?<video src={currentGallery.secure_url} muted preload="metadata"/>:<img src={currentGallery.secure_url} alt={currentGallery.animales?.[0]?.nombre ?? animal.nombre} />}
             <span><Expand size={18} /></span>
           </button>
           <span className="carousel-counter">{galleryIndex + 1} / {gallery.length}</span>
@@ -385,11 +364,10 @@ export function AnimalDetailPage() {
         {currentViewer.type==='VIDEO'?<video src={currentViewer.url} controls autoPlay/>:<img src={currentViewer.url} alt={currentViewer.alt} />}
         <div className="image-lightbox-details">
           <div>
-            <strong>{currentViewer.description || 'Fotografía sin descripción'}</strong>
+            <strong>{currentViewer.title}</strong>
             <small>{currentViewer.createdAt ? formatDate(currentViewer.createdAt) : ''}{viewerImages.length > 1 ? ` · ${(viewerIndex ?? 0) + 1} de ${viewerImages.length}` : ''}</small>
           </div>
           {hasPermission('IMAGEN_ADMINISTRAR') && currentViewer.imageId ? <div className="lightbox-actions">
-            <IconButton label="Editar descripción" onClick={() => setDescriptionDraft({ imageId: currentViewer.imageId!, description: currentViewer.description ?? '' })}><Pencil size={18} /></IconButton>
             {!currentViewer.isProfile&&currentViewer.type==='IMAGEN' ? <IconButton label="Usar como foto de perfil" onClick={() => imageAction.mutate({ imageId: currentViewer.imageId!, action: 'profile' })}><Star size={18} /></IconButton> : null}
             <IconButton className="detail-action-danger" label="Eliminar fotografía" onClick={() => imageAction.mutate({ imageId: currentViewer.imageId!, action: 'delete' })}><Trash2 size={18} /></IconButton>
           </div> : null}
@@ -402,29 +380,13 @@ export function AnimalDetailPage() {
       onClose={() => setUploadDraft(null)}
       footer={<>
         <Button variant="ghost" onClick={() => setUploadDraft(null)}>Cancelar</Button>
-        <Button disabled={!uploadDraft.profile&&!relatedAnimalIds.length} loading={upload.isPending} onClick={() => upload.mutate({ file: uploadDraft.file, profile: uploadDraft.profile, description: uploadDescription, animalIds: uploadDraft.profile?[id]:relatedAnimalIds })}>Subir archivo</Button>
+        <Button disabled={!uploadDraft.profile&&!relatedAnimalIds.length} loading={upload.isPending} onClick={() => upload.mutate({ file: uploadDraft.file, profile: uploadDraft.profile, animalIds: uploadDraft.profile?[id]:relatedAnimalIds })}>Subir archivo</Button>
       </>}
     >
       <div className="animal-upload-dialog">
         {uploadDraft.file.type.startsWith('video/')?<video src={uploadDraft.previewUrl} controls/>:<img src={uploadDraft.previewUrl} alt="Vista previa del archivo" />}
-        <Field label="Descripción" hint="Esta descripción se mostrará al abrir el archivo.">
-          <Textarea value={uploadDescription} onChange={(event) => setUploadDescription(event.target.value)} maxLength={300} rows={4} placeholder="Ej.: Herida en la pata derecha, condición corporal, día del parto…" />
-        </Field>
       </div>
       {!uploadDraft.profile?<Field label="Animales relacionados" required hint="El archivo aparecerá en la ficha de todos los animales marcados."><AnimalMultiPicker value={relatedAnimalIds} onChange={setRelatedAnimalIds}/></Field>:null}
-    </Modal> : null}
-
-    {descriptionDraft ? <Modal
-      title="Editar descripción"
-      onClose={() => setDescriptionDraft(null)}
-      footer={<>
-        <Button variant="ghost" onClick={() => setDescriptionDraft(null)}>Cancelar</Button>
-        <Button loading={updateDescription.isPending} onClick={() => updateDescription.mutate(descriptionDraft)}>Guardar</Button>
-      </>}
-    >
-      <Field label="Descripción de la fotografía">
-        <Textarea value={descriptionDraft.description} onChange={(event) => setDescriptionDraft({ ...descriptionDraft, description: event.target.value })} maxLength={300} rows={5} />
-      </Field>
     </Modal> : null}
 
     {editing ? <AnimalFormModal animal={animal} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void query.refetch(); }} /> : null}
@@ -432,6 +394,6 @@ export function AnimalDetailPage() {
   </div>;
 }
 
-function CompactInfo({ icon: Icon, label, value, wide = false }: { icon: LucideIcon; label: string; value: string; wide?: boolean }) {
+function CompactInfo({ icon: Icon, label, value, wide = false }: { icon: LucideIcon; label: string; value: ReactNode; wide?: boolean }) {
   return <div className={`animal-compact-info ${wide ? 'animal-compact-info-wide' : ''}`}><Icon size={17} /><span><small>{label}</small><strong>{value}</strong></span></div>;
 }

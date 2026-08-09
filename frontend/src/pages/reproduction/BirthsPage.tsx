@@ -1,260 +1,247 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Baby, Camera, Edit3, HeartCrack, ImagePlus, Plus, Trash2, X } from 'lucide-react';
+import { Baby, CalendarClock, Camera, Edit3, HeartCrack, HeartPulse, ImagePlus, Plus, Trash2, X } from 'lucide-react';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
-import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, Input, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
+import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, IconButton, Input, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
-import type { Animal, Birth, GenericRecord, Group, Location } from '../../types/api';
-import { formatDateTime, formatNumber, humanizeCode, nullIfEmpty, numberOrNull } from '../../utils';
+import type { Birth, GenericRecord, Group, HeatRecord, Location, PregnancyRecord, UpcomingBirth } from '../../types/api';
+import { formatAge, formatDate, formatDateTime, formatNumber, humanizeCode, nullIfEmpty, numberOrNull } from '../../utils';
 
-type Tab = 'births' | 'abortions';
+type Tab = 'heats' | 'pregnancies' | 'upcoming' | 'births' | 'abortions';
+type ReproductionAnimal = { id_animal: string; nombre: string; codigo_arete: string | null; fecha_nacimiento: string | null; id_especie: string };
+type ReproductionOptions = { hembras: ReproductionAnimal[]; machos: ReproductionAnimal[] };
 
-const localNow = () => {
-  const date = new Date();
-  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-  return date.toISOString().slice(0, 16);
+const localToday = () => {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 };
+const localNow = () => `${localToday()}T${new Date().toTimeString().slice(0, 5)}`;
+
+interface HeatForm { id_celo?: string; id_vaca: string; id_toro: string; fecha_inicio: string; fecha_fin: string; observaciones: string }
+const emptyHeat = (): HeatForm => ({ id_vaca: '', id_toro: '', fecha_inicio: localToday(), fecha_fin: '', observaciones: '' });
+
+interface PregnancyForm {
+  id_prenez?: string;
+  id_celo: string;
+  id_vaca: string;
+  id_padre: string;
+  metodo_embarazo: 'MONTA_NATURAL' | 'INSEMINACION_ARTIFICIAL' | 'TRANSFERENCIA_EMBRIONES' | 'DESCONOCIDO';
+  metodo_confirmacion: 'PALPACION' | 'ECOGRAFIA' | 'ANALISIS_SANGRE' | 'OBSERVACION' | 'OTRO';
+  fecha_confirmacion: string;
+  dias_gestacion_confirmacion: string;
+  observaciones: string;
+}
+const emptyPregnancy = (): PregnancyForm => ({ id_celo: '', id_vaca: '', id_padre: '', metodo_embarazo: 'MONTA_NATURAL', metodo_confirmacion: 'PALPACION', fecha_confirmacion: localToday(), dias_gestacion_confirmacion: '', observaciones: '' });
 
 interface ChildForm {
-  codigo_arete: string;
-  nombre: string;
-  id_especie: string;
-  sexo: 'MACHO' | 'HEMBRA';
-  id_origen: string;
-  id_grupo_actual: string;
-  id_ubicacion_actual: string;
-  estado: 'ACTIVO' | 'MUERTO';
-  estado_nacimiento: 'VIVA' | 'MUERTA' | 'DEBIL' | 'DESCONOCIDO';
-  peso_nacimiento_kg: string;
-  observaciones: string;
-  foto_perfil: File | null;
-  fotos: File[];
+  codigo_arete: string; nombre: string; id_especie: string; sexo: 'MACHO' | 'HEMBRA'; id_origen: string;
+  id_grupo_actual: string; id_ubicacion_actual: string; estado: 'ACTIVO' | 'MUERTO';
+  estado_nacimiento: 'VIVA' | 'MUERTA' | 'DEBIL' | 'DESCONOCIDO'; peso_nacimiento_kg: string;
+  observaciones: string; foto_perfil: File | null; fotos: File[];
 }
-interface BirthForm { id_madre: string; id_padre: string; fecha_parto: string; tipo_parto: string; observaciones: string; crias: ChildForm[]; }
-const emptyChild = (): ChildForm => ({ codigo_arete: '', nombre: '', id_especie: '', sexo: 'HEMBRA', id_origen: '', id_grupo_actual: '', id_ubicacion_actual: '', estado: 'ACTIVO', estado_nacimiento: 'VIVA', peso_nacimiento_kg: '', observaciones: '', foto_perfil: null, fotos: [] });
-const emptyBirth = (): BirthForm => ({ id_madre: '', id_padre: '', fecha_parto: localNow(), tipo_parto: 'NORMAL', observaciones: '', crias: [emptyChild()] });
-interface AbortionForm { id_aborto?: string; id_vaca: string; fecha: string; causa: string; meses_gestacion: string; descripcion: string; }
+const emptyChild = (species = ''): ChildForm => ({ codigo_arete: '', nombre: '', id_especie: species, sexo: 'HEMBRA', id_origen: '', id_grupo_actual: '', id_ubicacion_actual: '', estado: 'ACTIVO', estado_nacimiento: 'VIVA', peso_nacimiento_kg: '', observaciones: '', foto_perfil: null, fotos: [] });
+interface BirthForm { id_prenez: string; fecha_parto: string; tipo_parto: string; observaciones: string; crias: ChildForm[] }
+const emptyBirth = (): BirthForm => ({ id_prenez: '', fecha_parto: localNow(), tipo_parto: 'NORMAL', observaciones: '', crias: [emptyChild()] });
+
+interface AbortionForm { id_aborto?: string; id_vaca: string; fecha: string; causa: string; meses_gestacion: string; descripcion: string }
 const emptyAbortion = (): AbortionForm => ({ id_vaca: '', fecha: localNow(), causa: '', meses_gestacion: '', descripcion: '' });
 
 export function BirthsPage() {
   const { hasPermission } = useAuth();
   const toast = useToast();
   const client = useQueryClient();
-  const canReadBirths = hasPermission('PARTO_CONSULTAR');
-  const canReadAbortions = hasPermission('ABORTO_CONSULTAR');
-  const [tab, setTab] = useState<Tab>(() => canReadBirths ? 'births' : 'abortions');
-  const [birthOpen, setBirthOpen] = useState(false);
-  const [birthForm, setBirthForm] = useState<BirthForm>(emptyBirth);
-  const [abortionOpen, setAbortionOpen] = useState(false);
-  const [abortionForm, setAbortionForm] = useState<AbortionForm>(emptyAbortion);
-  const [deleteAbortion, setDeleteAbortion] = useState<string | null>(null);
+  const canBirths = hasPermission('PARTO_CONSULTAR');
+  const canAbortions = hasPermission('ABORTO_CONSULTAR');
+  const [tab, setTab] = useState<Tab>(() => canBirths ? 'upcoming' : 'abortions');
+  const [heatForm, setHeatForm] = useState<HeatForm | null>(null);
+  const [pregnancyForm, setPregnancyForm] = useState<PregnancyForm | null>(null);
+  const [birthForm, setBirthForm] = useState<BirthForm | null>(null);
+  const [abortionForm, setAbortionForm] = useState<AbortionForm | null>(null);
+  const [deleting, setDeleting] = useState<{ type: 'heat' | 'pregnancy' | 'abortion'; id: string } | null>(null);
 
-  const births = useQuery({ queryKey: ['births'], queryFn: () => apiRequest<Birth[]>('/partos'), enabled: canReadBirths });
-  const abortions = useQuery({ queryKey: ['records', 'abortos'], queryFn: () => apiRequest<GenericRecord[]>('/registros/abortos'), enabled: canReadAbortions });
-  const females = useQuery({ queryKey: ['animals', 'birth-females'], queryFn: () => apiRequest<Animal[]>('/animales?limit=100&sexo=HEMBRA') });
-  const males = useQuery({ queryKey: ['animals', 'birth-males'], queryFn: () => apiRequest<Animal[]>('/animales?limit=100&sexo=MACHO') });
+  const options = useQuery({ queryKey: ['reproduction', 'options'], queryFn: () => apiRequest<ReproductionOptions>('/reproduccion/opciones'), enabled: canBirths || canAbortions });
+  const heats = useQuery({ queryKey: ['reproduction', 'heats'], queryFn: () => apiRequest<HeatRecord[]>('/reproduccion/celos'), enabled: canBirths });
+  const pregnancies = useQuery({ queryKey: ['reproduction', 'pregnancies'], queryFn: () => apiRequest<PregnancyRecord[]>('/reproduccion/preneces'), enabled: canBirths });
+  const upcoming = useQuery({ queryKey: ['reproduction', 'upcoming'], queryFn: () => apiRequest<UpcomingBirth[]>('/reproduccion/proximos-partos'), enabled: canBirths });
+  const births = useQuery({ queryKey: ['births'], queryFn: () => apiRequest<Birth[]>('/partos'), enabled: canBirths });
+  const abortions = useQuery({ queryKey: ['records', 'abortos'], queryFn: () => apiRequest<GenericRecord[]>('/registros/abortos'), enabled: canAbortions });
   const species = useCatalog('especies');
   const origins = useCatalog('origenes');
   const groups = useQuery({ queryKey: ['groups', 'birth'], queryFn: () => apiRequest<Group[]>('/grupos?limit=100') });
   const locations = useQuery({ queryKey: ['locations', 'birth'], queryFn: () => apiRequest<Location[]>('/ubicaciones') });
 
+  const refreshReproduction = () => {
+    void client.invalidateQueries({ queryKey: ['reproduction'] });
+    void client.invalidateQueries({ queryKey: ['births'] });
+    void client.invalidateQueries({ queryKey: ['animals'] });
+  };
+
+  const saveHeat = useMutation({
+    mutationFn: () => {
+      if (!heatForm?.id_vaca || !heatForm.fecha_inicio) throw new Error('Selecciona la vaca y la fecha de inicio.');
+      return apiRequest(`/reproduccion/celos${heatForm.id_celo ? `/${heatForm.id_celo}` : ''}`, {
+        method: heatForm.id_celo ? 'PATCH' : 'POST',
+        body: { id_vaca: heatForm.id_vaca, id_toro: heatForm.id_toro || null, fecha_inicio: heatForm.fecha_inicio, fecha_fin: heatForm.fecha_fin || null, observaciones: nullIfEmpty(heatForm.observaciones) },
+      });
+    },
+    onSuccess: () => { toast.show(heatForm?.id_celo ? 'Celo actualizado.' : 'Celo registrado.'); setHeatForm(null); refreshReproduction(); },
+    onError: (error) => toast.show(error instanceof ApiError ? error.message : (error as Error).message, 'error'),
+  });
+
+  const savePregnancy = useMutation({
+    mutationFn: () => {
+      if (!pregnancyForm || (!pregnancyForm.id_celo && !pregnancyForm.id_vaca)) throw new Error('Selecciona un celo o una vaca.');
+      return apiRequest(`/reproduccion/preneces${pregnancyForm.id_prenez ? `/${pregnancyForm.id_prenez}` : ''}`, {
+        method: pregnancyForm.id_prenez ? 'PATCH' : 'POST',
+        body: {
+          id_celo: pregnancyForm.id_celo || null,
+          id_vaca: pregnancyForm.id_vaca || null,
+          id_padre: pregnancyForm.id_padre || null,
+          metodo_embarazo: pregnancyForm.metodo_embarazo,
+          metodo_confirmacion: pregnancyForm.metodo_confirmacion,
+          fecha_confirmacion: pregnancyForm.fecha_confirmacion,
+          dias_gestacion_confirmacion: numberOrNull(pregnancyForm.dias_gestacion_confirmacion),
+          observaciones: nullIfEmpty(pregnancyForm.observaciones),
+        },
+      });
+    },
+    onSuccess: () => { toast.show(pregnancyForm?.id_prenez ? 'Preñez actualizada.' : 'Preñez confirmada.'); setPregnancyForm(null); refreshReproduction(); },
+    onError: (error) => toast.show(error instanceof ApiError ? error.message : (error as Error).message, 'error'),
+  });
+
   const createBirth = useMutation({
     mutationFn: async () => {
-      if (!birthForm.id_madre || !birthForm.fecha_parto || !birthForm.crias.length) throw new Error('Selecciona la madre, fecha y al menos una cría.');
+      if (!birthForm?.id_prenez || !birthForm.fecha_parto || !birthForm.crias.length) throw new Error('Selecciona la preñez, fecha y al menos una cría.');
       if (birthForm.crias.some((child) => !child.nombre.trim() || !child.id_especie || !child.id_origen)) throw new Error('Cada cría debe tener nombre, especie y origen.');
-
       const result = await apiRequest<Birth>('/partos', {
         method: 'POST',
         body: {
-          id_madre: birthForm.id_madre,
-          id_padre: birthForm.id_padre || null,
+          id_prenez: birthForm.id_prenez,
           fecha_parto: new Date(birthForm.fecha_parto).toISOString(),
+          fecha_parto_local: birthForm.fecha_parto.slice(0, 10),
           tipo_parto: birthForm.tipo_parto,
           observaciones: nullIfEmpty(birthForm.observaciones),
           crias: birthForm.crias.map((child) => ({
-            animal: {
-              codigo_arete: nullIfEmpty(child.codigo_arete),
-              nombre: child.nombre.trim(),
-              id_especie: child.id_especie,
-              sexo: child.sexo,
-              id_origen: child.id_origen,
-              id_grupo_actual: child.id_grupo_actual || null,
-              id_ubicacion_actual: child.id_ubicacion_actual || null,
-              estado: child.estado,
-            },
+            animal: { codigo_arete: nullIfEmpty(child.codigo_arete), nombre: child.nombre.trim(), id_especie: child.id_especie, sexo: child.sexo, id_origen: child.id_origen, id_grupo_actual: child.id_grupo_actual || null, id_ubicacion_actual: child.id_ubicacion_actual || null, estado: child.estado },
             estado_nacimiento: child.estado_nacimiento,
             peso_nacimiento_kg: numberOrNull(child.peso_nacimiento_kg),
             observaciones: nullIfEmpty(child.observaciones),
           })),
         },
       });
-
-      const failedUploads: string[] = [];
+      const failed: string[] = [];
       for (let index = 0; index < result.crias.length; index += 1) {
         const createdChild = result.crias[index];
-        const childForm = birthForm.crias[index];
-        if (!createdChild || !childForm) continue;
-        const uploads: Array<{ file: File; profile: boolean }> = [];
-        if (childForm.foto_perfil) uploads.push({ file: childForm.foto_perfil, profile: true });
-        uploads.push(...childForm.fotos.map((file) => ({ file, profile: false })));
-
-        for (const upload of uploads) {
-          const data = new FormData();
-          data.set('imagen', upload.file);
-          data.set('es_perfil', String(upload.profile));
-          try {
-            await apiRequest(`/partos/${result.id_parto}/crias/${createdChild.id_cria}/imagenes`, {
-              method: 'POST',
-              body: data,
-            });
-          } catch {
-            failedUploads.push(`${createdChild.cria}: ${upload.file.name}`);
-          }
+        const draft = birthForm.crias[index];
+        if (!createdChild || !draft) continue;
+        const files = [...(draft.foto_perfil ? [{ file: draft.foto_perfil, profile: true }] : []), ...draft.fotos.map((file) => ({ file, profile: false }))];
+        for (const item of files) {
+          const data = new FormData(); data.set('imagen', item.file); data.set('es_perfil', String(item.profile));
+          try { await apiRequest(`/partos/${result.id_parto}/crias/${createdChild.id_cria}/imagenes`, { method: 'POST', body: data }); }
+          catch { failed.push(`${createdChild.cria}: ${item.file.name}`); }
         }
       }
-
-      return { result, failedUploads };
+      return failed;
     },
-    onSuccess: ({ failedUploads }) => {
-      if (failedUploads.length) {
-        toast.show(`El parto se guardó, pero no se pudieron subir ${failedUploads.length} foto(s). Puedes agregarlas desde la ficha de cada cría.`, 'error');
-      } else {
-        toast.show('Parto, crías, pesos y fotografías registrados.');
-      }
-      setBirthOpen(false);
-      setBirthForm(emptyBirth());
-      void client.invalidateQueries({ queryKey: ['births'] });
-      void client.invalidateQueries({ queryKey: ['animals'] });
+    onSuccess: (failed) => {
+      toast.show(failed.length ? `El parto se guardó, pero fallaron ${failed.length} fotografía(s).` : 'Parto y crías registrados.', failed.length ? 'error' : 'success');
+      setBirthForm(null); refreshReproduction();
     },
     onError: (error) => toast.show(error instanceof ApiError ? error.message : (error as Error).message, 'error'),
   });
 
   const saveAbortion = useMutation({
     mutationFn: () => {
-      if (!abortionForm.id_vaca) throw new Error('Selecciona la vaca.');
+      if (!abortionForm?.id_vaca) throw new Error('Selecciona la vaca.');
       const body = { id_vaca: abortionForm.id_vaca, fecha: abortionForm.fecha ? new Date(abortionForm.fecha).toISOString() : null, causa: nullIfEmpty(abortionForm.causa), meses_gestacion: numberOrNull(abortionForm.meses_gestacion), descripcion: nullIfEmpty(abortionForm.descripcion) };
       return apiRequest(`/registros/abortos${abortionForm.id_aborto ? `/${abortionForm.id_aborto}` : ''}`, { method: abortionForm.id_aborto ? 'PATCH' : 'POST', body });
     },
-    onSuccess: () => { toast.show(abortionForm.id_aborto ? 'Aborto actualizado.' : 'Aborto registrado.'); setAbortionOpen(false); setAbortionForm(emptyAbortion()); void client.invalidateQueries({ queryKey: ['records', 'abortos'] }); },
+    onSuccess: () => { toast.show(abortionForm?.id_aborto ? 'Aborto actualizado.' : 'Aborto registrado.'); setAbortionForm(null); void client.invalidateQueries({ queryKey: ['records', 'abortos'] }); },
     onError: (error) => toast.show(error instanceof ApiError ? error.message : (error as Error).message, 'error'),
   });
-  const removeAbortion = useMutation({ mutationFn: (id: string) => apiRequest(`/registros/abortos/${id}`, { method: 'DELETE' }), onSuccess: () => { toast.show('Registro eliminado.'); setDeleteAbortion(null); void client.invalidateQueries({ queryKey: ['records', 'abortos'] }); }, onError: (error) => toast.show((error as ApiError).message, 'error') });
 
-  const openEditAbortion = (record: GenericRecord) => {
-    const date = record.fecha ? new Date(String(record.fecha)) : null;
-    if (date) date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-    setAbortionForm({ id_aborto: String(record.id_aborto), id_vaca: String(record.id_vaca), fecha: date ? date.toISOString().slice(0, 16) : '', causa: String(record.causa ?? ''), meses_gestacion: String(record.meses_gestacion ?? ''), descripcion: String(record.descripcion ?? '') });
-    setAbortionOpen(true);
-  };
+  const remove = useMutation({
+    mutationFn: () => deleting?.type === 'heat' ? apiRequest(`/reproduccion/celos/${deleting.id}`, { method: 'DELETE' }) : deleting?.type === 'pregnancy' ? apiRequest(`/reproduccion/preneces/${deleting.id}`, { method: 'DELETE' }) : apiRequest(`/registros/abortos/${deleting?.id}`, { method: 'DELETE' }),
+    onSuccess: () => { toast.show(deleting?.type === 'pregnancy' ? 'Preñez cancelada.' : 'Registro eliminado.'); setDeleting(null); refreshReproduction(); void client.invalidateQueries({ queryKey: ['records', 'abortos'] }); },
+    onError: (error) => toast.show((error as ApiError).message, 'error'),
+  });
+
+  function pageAction() {
+    if (!hasPermission(tab === 'abortions' ? 'ABORTO_ADMINISTRAR' : 'PARTO_ADMINISTRAR')) return undefined;
+    if (tab === 'heats') return <IconButton label="Registrar celo" onClick={() => setHeatForm(emptyHeat())}><Plus size={20} /></IconButton>;
+    if (tab === 'pregnancies') return <IconButton label="Confirmar preñez" onClick={() => setPregnancyForm(emptyPregnancy())}><Plus size={20} /></IconButton>;
+    if (tab === 'births') return <IconButton label="Registrar parto" onClick={() => setBirthForm(emptyBirth())}><Plus size={20} /></IconButton>;
+    if (tab === 'abortions') return <IconButton label="Registrar aborto" onClick={() => setAbortionForm(emptyAbortion())}><Plus size={20} /></IconButton>;
+    return undefined;
+  }
+
+  const pendingPregnancies = pregnancies.data?.filter((item) => item.estado === 'CONFIRMADA') ?? [];
 
   return <div>
-    <PageHeader title="Reproducción" description="Partos con una o varias crías y registro de abortos." action={(tab === 'births' ? hasPermission('PARTO_ADMINISTRAR') : hasPermission('ABORTO_ADMINISTRAR')) ? <Button onClick={() => tab === 'births' ? (setBirthForm(emptyBirth()), setBirthOpen(true)) : (setAbortionForm(emptyAbortion()), setAbortionOpen(true))}><Plus size={18} />{tab === 'births' ? 'Nuevo parto' : 'Registrar aborto'}</Button> : undefined} />
-    <div className="page-tabs">{canReadBirths ? <button className={tab === 'births' ? 'active' : ''} onClick={() => setTab('births')}><Baby size={17} />Partos</button> : null}{canReadAbortions ? <button className={tab === 'abortions' ? 'active' : ''} onClick={() => setTab('abortions')}><HeartCrack size={17} />Abortos</button> : null}</div>
+    <PageHeader title="Reproducción" description="Celos, preñeces confirmadas, próximos partos y nacimientos." action={pageAction()} />
+    <div className="page-tabs reproduction-tabs">
+      {canBirths ? <><TabButton active={tab === 'heats'} onClick={() => setTab('heats')} icon={HeartPulse} label="Celos" /><TabButton active={tab === 'pregnancies'} onClick={() => setTab('pregnancies')} icon={HeartPulse} label="Preñeces" /><TabButton active={tab === 'upcoming'} onClick={() => setTab('upcoming')} icon={CalendarClock} label="Próximos partos" /><TabButton active={tab === 'births'} onClick={() => setTab('births')} icon={Baby} label="Partos" /></> : null}
+      {canAbortions ? <TabButton active={tab === 'abortions'} onClick={() => setTab('abortions')} icon={HeartCrack} label="Abortos" /> : null}
+    </div>
 
-    {tab === 'births' ? births.isLoading ? <LoadingState /> : births.isError ? <ErrorState message={(births.error as Error).message} onRetry={() => void births.refetch()} /> : births.data?.length ? <div className="record-grid operation-grid">{births.data.map((birth) => <Card className="operation-card" key={birth.id_parto}>
-      <div className="operation-card-header"><div className="operation-icon"><Baby size={23} /></div><div><h3>{birth.madre}</h3><span>{formatDateTime(birth.fecha_parto)}</span></div><Badge tone="success">{humanizeCode(birth.tipo_parto)}</Badge></div>
-      <div className="detail-grid compact"><div><small>Padre</small><strong>{birth.padre || 'No registrado'}</strong></div><div><small>Número de crías</small><strong>{birth.crias?.length ?? 0}</strong></div></div>
-      {birth.crias?.length ? <div className="offspring-list">{birth.crias.map((child) => <div key={child.id_parto_cria}><strong>{child.cria}</strong><span>{child.sexo === 'HEMBRA' ? 'Hembra' : 'Macho'} · {humanizeCode(child.estado_nacimiento)}{child.peso_nacimiento_kg ? ` · ${formatNumber(child.peso_nacimiento_kg)} kg` : ''}</span></div>)}</div> : null}
-      {birth.observaciones ? <p className="muted operation-notes">{birth.observaciones}</p> : null}
-    </Card>)}</div> : <EmptyState icon={Baby} title="Sin partos registrados" description="Registra la madre, el padre opcional y cada cría nacida." action={hasPermission('PARTO_ADMINISTRAR') ? <Button onClick={() => setBirthOpen(true)}><Plus size={18} />Registrar parto</Button> : undefined} /> : abortions.isLoading ? <LoadingState /> : abortions.isError ? <ErrorState message={(abortions.error as Error).message} onRetry={() => void abortions.refetch()} /> : abortions.data?.length ? <div className="table-card"><div className="table-responsive"><table className="data-table"><thead><tr><th>Animal</th><th>Fecha</th><th>Causa</th><th>Meses de gestación</th><th>Descripción</th>{hasPermission('ABORTO_ADMINISTRAR') ? <th>Acciones</th> : null}</tr></thead><tbody>{abortions.data.map((record) => <tr key={String(record.id_aborto)}><td><strong>{String(record.animal ?? '—')}</strong><small>{record.codigo_arete ? `Arete ${record.codigo_arete}` : ''}</small></td><td>{formatDateTime(record.fecha ? String(record.fecha) : null)}</td><td>{String(record.causa ?? '—')}</td><td>{record.meses_gestacion == null ? '—' : formatNumber(record.meses_gestacion as number | string, 1)}</td><td>{String(record.descripcion ?? '—')}</td>{hasPermission('ABORTO_ADMINISTRAR') ? <td><div className="inline-actions"><Button variant="ghost" onClick={() => openEditAbortion(record)}><Edit3 size={16} /></Button><Button variant="ghost" onClick={() => setDeleteAbortion(String(record.id_aborto))}><Trash2 size={16} /></Button></div></td> : null}</tr>)}</tbody></table></div></div> : <EmptyState icon={HeartCrack} title="Sin abortos registrados" description="No existen eventos de aborto en el historial." />}
+    {tab === 'heats' ? <HeatsList query={heats} canEdit={hasPermission('PARTO_ADMINISTRAR')} onEdit={setHeatForm} onDelete={(id) => setDeleting({ type: 'heat', id })} /> : null}
+    {tab === 'pregnancies' ? <PregnanciesList query={pregnancies} canEdit={hasPermission('PARTO_ADMINISTRAR')} onEdit={(record) => setPregnancyForm({ id_prenez: record.id_prenez, id_celo: record.id_celo ?? '', id_vaca: record.id_vaca, id_padre: record.id_padre ?? '', metodo_embarazo: record.metodo_embarazo as PregnancyForm['metodo_embarazo'], metodo_confirmacion: record.metodo_confirmacion as PregnancyForm['metodo_confirmacion'], fecha_confirmacion: String(record.fecha_confirmacion).slice(0, 10), dias_gestacion_confirmacion: record.dias_gestacion_confirmacion?.toString() ?? '', observaciones: record.observaciones ?? '' })} onDelete={(id) => setDeleting({ type: 'pregnancy', id })} /> : null}
+    {tab === 'upcoming' ? <UpcomingList query={upcoming} /> : null}
+    {tab === 'births' ? <BirthsList query={births} /> : null}
+    {tab === 'abortions' ? <AbortionsList query={abortions} canEdit={hasPermission('ABORTO_ADMINISTRAR')} onEdit={(record) => { const date = record.fecha ? new Date(String(record.fecha)) : null; if (date) date.setMinutes(date.getMinutes() - date.getTimezoneOffset()); setAbortionForm({ id_aborto: String(record.id_aborto), id_vaca: String(record.id_vaca), fecha: date ? date.toISOString().slice(0, 16) : '', causa: String(record.causa ?? ''), meses_gestacion: String(record.meses_gestacion ?? ''), descripcion: String(record.descripcion ?? '') }); }} onDelete={(id) => setDeleting({ type: 'abortion', id })} /> : null}
 
-    {birthOpen ? <Modal title="Registrar parto" wide onClose={() => setBirthOpen(false)} footer={<><Button variant="ghost" onClick={() => setBirthOpen(false)}>Cancelar</Button><Button onClick={() => createBirth.mutate()} loading={createBirth.isPending}>Guardar parto</Button></>}><div className="form-stack">
-      <div className="form-section"><h3>Datos del parto</h3><div className="form-grid"><Field label="Madre" required><Select value={birthForm.id_madre} onChange={(event) => { const mother = females.data?.find((animal) => animal.id_animal === event.target.value); setBirthForm((current) => ({ ...current, id_madre: event.target.value, crias: current.crias.map((child) => ({ ...child, id_especie: child.id_especie || mother?.id_especie || '' })) })); }}><option value="">Selecciona</option>{females.data?.filter((animal) => animal.estado === 'ACTIVO').map((animal) => <option key={animal.id_animal} value={animal.id_animal}>{animal.nombre}{animal.codigo_arete ? ` · ${animal.codigo_arete}` : ''}</option>)}</Select></Field><Field label="Padre"><Select value={birthForm.id_padre} onChange={(event) => setBirthForm((current) => ({ ...current, id_padre: event.target.value }))}><option value="">No registrado</option>{males.data?.filter((animal) => animal.estado === 'ACTIVO').map((animal) => <option key={animal.id_animal} value={animal.id_animal}>{animal.nombre}{animal.codigo_arete ? ` · ${animal.codigo_arete}` : ''}</option>)}</Select></Field><Field label="Fecha y hora" required><Input type="datetime-local" value={birthForm.fecha_parto} onChange={(event) => setBirthForm((current) => ({ ...current, fecha_parto: event.target.value }))} /></Field><Field label="Tipo de parto"><Select value={birthForm.tipo_parto} onChange={(event) => setBirthForm((current) => ({ ...current, tipo_parto: event.target.value }))}>{['NORMAL','ASISTIDO','CESAREA','DESCONOCIDO'].map((value) => <option value={value} key={value}>{humanizeCode(value)}</option>)}</Select></Field></div><Field label="Observaciones"><Textarea value={birthForm.observaciones} onChange={(event) => setBirthForm((current) => ({ ...current, observaciones: event.target.value }))} /></Field></div>
-      <div className="form-section"><div className="section-heading-inline"><h3>Crías</h3><Button type="button" variant="secondary" onClick={() => setBirthForm((current) => ({ ...current, crias: [...current.crias, emptyChild()] }))}><Plus size={16} />Agregar cría</Button></div><div className="nested-list">{birthForm.crias.map((child, index) => <div className="nested-card" key={`child-${index}`}><div className="nested-card-header"><strong>Cría {index + 1}</strong>{birthForm.crias.length > 1 ? <Button type="button" variant="ghost" onClick={() => setBirthForm((current) => ({ ...current, crias: current.crias.filter((_, childIndex) => childIndex !== index) }))}><Trash2 size={16} /></Button> : null}</div><div className="form-grid">
-        <Field label="Nombre" required><Input value={child.nombre} onChange={(event) => setBirthForm((current) => ({ ...current, crias: current.crias.map((item, childIndex) => childIndex === index ? { ...item, nombre: event.target.value } : item) }))} /></Field>
-        <Field label="Arete"><Input value={child.codigo_arete} onChange={(event) => setBirthForm((current) => ({ ...current, crias: current.crias.map((item, childIndex) => childIndex === index ? { ...item, codigo_arete: event.target.value } : item) }))} /></Field>
-        <Field label="Especie" required><Select value={child.id_especie} onChange={(event) => setBirthForm((current) => ({ ...current, crias: current.crias.map((item, childIndex) => childIndex === index ? { ...item, id_especie: event.target.value } : item) }))}><option value="">Selecciona</option>{species.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>
-        <Field label="Sexo"><Select value={child.sexo} onChange={(event) => setBirthForm((current) => ({ ...current, crias: current.crias.map((item, childIndex) => childIndex === index ? { ...item, sexo: event.target.value as ChildForm['sexo'] } : item) }))}><option value="HEMBRA">Hembra</option><option value="MACHO">Macho</option></Select></Field>
-        <Field label="Origen" required><Select value={child.id_origen} onChange={(event) => setBirthForm((current) => ({ ...current, crias: current.crias.map((item, childIndex) => childIndex === index ? { ...item, id_origen: event.target.value } : item) }))}><option value="">Selecciona</option>{origins.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>
-        <Field label="Grupo"><Select value={child.id_grupo_actual} onChange={(event) => setBirthForm((current) => ({ ...current, crias: current.crias.map((item, childIndex) => childIndex === index ? { ...item, id_grupo_actual: event.target.value } : item) }))}><option value="">Sin grupo</option>{groups.data?.map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre}</option>)}</Select></Field>
-        <Field label="Corral o potrero"><Select value={child.id_ubicacion_actual} onChange={(event) => setBirthForm((current) => ({ ...current, crias: current.crias.map((item, childIndex) => childIndex === index ? { ...item, id_ubicacion_actual: event.target.value } : item) }))}><option value="">Sin ubicación</option>{locations.data?.map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre}</option>)}</Select></Field>
-        <Field label="Estado al nacer"><Select value={child.estado_nacimiento} onChange={(event) => setBirthForm((current) => ({ ...current, crias: current.crias.map((item, childIndex) => childIndex === index ? { ...item, estado_nacimiento: event.target.value as ChildForm['estado_nacimiento'], estado: event.target.value === 'MUERTA' ? 'MUERTO' : 'ACTIVO' } : item) }))}>{['VIVA','MUERTA','DEBIL','DESCONOCIDO'].map((value) => <option value={value} key={value}>{humanizeCode(value)}</option>)}</Select></Field>
-        <Field label="Peso al nacer (kg)"><Input type="number" min="0.01" step="0.001" value={child.peso_nacimiento_kg} onChange={(event) => setBirthForm((current) => ({ ...current, crias: current.crias.map((item, childIndex) => childIndex === index ? { ...item, peso_nacimiento_kg: event.target.value } : item) }))} /></Field>
-      </div>
-      <Field label="Observaciones"><Input value={child.observaciones} onChange={(event) => setBirthForm((current) => ({ ...current, crias: current.crias.map((item, childIndex) => childIndex === index ? { ...item, observaciones: event.target.value } : item) }))} /></Field>
-      <div className="birth-photo-fields">
-        <Field label="Foto de perfil">
-          <SinglePhotoPicker
-            file={child.foto_perfil}
-            onChange={(file) => setBirthForm((current) => ({ ...current, crias: current.crias.map((item, childIndex) => childIndex === index ? { ...item, foto_perfil: file } : item) }))}
-          />
-        </Field>
-        <Field label="Otras fotografías">
-          <MultiplePhotoPicker
-            files={child.fotos}
-            onChange={(files) => setBirthForm((current) => ({ ...current, crias: current.crias.map((item, childIndex) => childIndex === index ? { ...item, fotos: files } : item) }))}
-          />
-        </Field>
-      </div>
-    </div>)}</div></div>
-    </div></Modal> : null}
+    {heatForm ? <Modal title={heatForm.id_celo ? 'Editar celo' : 'Registrar celo'} onClose={() => setHeatForm(null)} footer={<><Button variant="ghost" onClick={() => setHeatForm(null)}>Cancelar</Button><Button loading={saveHeat.isPending} onClick={() => saveHeat.mutate()}>Guardar</Button></>}><div className="form-stack"><Field label="Vaca" required><Select value={heatForm.id_vaca} onChange={(event) => setHeatForm({ ...heatForm, id_vaca: event.target.value })}><option value="">Selecciona</option>{options.data?.hembras.map((item) => <option key={item.id_animal} value={item.id_animal}>{item.nombre}{item.codigo_arete ? ` · ${item.codigo_arete}` : ''} · {formatAge(item.fecha_nacimiento)}</option>)}</Select></Field><Field label="Toro con el que anda"><Select value={heatForm.id_toro} onChange={(event) => setHeatForm({ ...heatForm, id_toro: event.target.value })}><option value="">No registrado</option>{options.data?.machos.map((item) => <option key={item.id_animal} value={item.id_animal}>{item.nombre}{item.codigo_arete ? ` · ${item.codigo_arete}` : ''}</option>)}</Select></Field><div className="form-grid"><Field label="Inicio" required><Input type="date" value={heatForm.fecha_inicio} onChange={(event) => setHeatForm({ ...heatForm, fecha_inicio: event.target.value })} /></Field><Field label="Fin"><Input type="date" min={heatForm.fecha_inicio} value={heatForm.fecha_fin} onChange={(event) => setHeatForm({ ...heatForm, fecha_fin: event.target.value })} /></Field></div><Field label="Observaciones"><Textarea value={heatForm.observaciones} onChange={(event) => setHeatForm({ ...heatForm, observaciones: event.target.value })} /></Field></div></Modal> : null}
 
-    {abortionOpen ? <Modal title={abortionForm.id_aborto ? 'Editar aborto' : 'Registrar aborto'} onClose={() => setAbortionOpen(false)} footer={<><Button variant="ghost" onClick={() => setAbortionOpen(false)}>Cancelar</Button><Button onClick={() => saveAbortion.mutate()} loading={saveAbortion.isPending}>Guardar</Button></>}><div className="form-stack"><Field label="Vaca" required><Select value={abortionForm.id_vaca} onChange={(event) => setAbortionForm((current) => ({ ...current, id_vaca: event.target.value }))}><option value="">Selecciona</option>{females.data?.map((animal) => <option key={animal.id_animal} value={animal.id_animal}>{animal.nombre}{animal.codigo_arete ? ` · ${animal.codigo_arete}` : ''}</option>)}</Select></Field><Field label="Fecha"><Input type="datetime-local" value={abortionForm.fecha} onChange={(event) => setAbortionForm((current) => ({ ...current, fecha: event.target.value }))} /></Field><Field label="Causa"><Input value={abortionForm.causa} onChange={(event) => setAbortionForm((current) => ({ ...current, causa: event.target.value }))} /></Field><Field label="Meses de gestación"><Input type="number" min="0" max="12" step="0.1" value={abortionForm.meses_gestacion} onChange={(event) => setAbortionForm((current) => ({ ...current, meses_gestacion: event.target.value }))} /></Field><Field label="Descripción"><Textarea value={abortionForm.descripcion} onChange={(event) => setAbortionForm((current) => ({ ...current, descripcion: event.target.value }))} /></Field></div></Modal> : null}
-    {deleteAbortion ? <ConfirmDialog title="Eliminar aborto" message="¿Deseas eliminar este registro?" onClose={() => setDeleteAbortion(null)} onConfirm={() => removeAbortion.mutate(deleteAbortion)} loading={removeAbortion.isPending} /> : null}
+    {pregnancyForm ? <Modal title={pregnancyForm.id_prenez ? 'Editar preñez' : 'Confirmar preñez'} wide onClose={() => setPregnancyForm(null)} footer={<><Button variant="ghost" onClick={() => setPregnancyForm(null)}>Cancelar</Button><Button loading={savePregnancy.isPending} onClick={() => savePregnancy.mutate()}>Guardar</Button></>}><div className="form-stack"><Field label="Confirmar desde un celo"><Select value={pregnancyForm.id_celo} onChange={(event) => { const heat = heats.data?.find((item) => item.id_celo === event.target.value); setPregnancyForm({ ...pregnancyForm, id_celo: event.target.value, id_vaca: heat?.id_vaca ?? pregnancyForm.id_vaca, id_padre: heat?.id_toro ?? pregnancyForm.id_padre }); }}><option value="">Registrar sin celo relacionado</option>{heats.data?.filter((item) => !item.tiene_prenez || item.id_celo === pregnancyForm.id_celo).map((item) => <option key={item.id_celo} value={item.id_celo}>{item.vaca} · celo del {formatDate(item.fecha_inicio)}</option>)}</Select></Field><div className="form-grid"><Field label="Vaca" required><Select disabled={Boolean(pregnancyForm.id_celo)} value={pregnancyForm.id_vaca} onChange={(event) => setPregnancyForm({ ...pregnancyForm, id_vaca: event.target.value })}><option value="">Selecciona</option>{options.data?.hembras.map((item) => <option key={item.id_animal} value={item.id_animal}>{item.nombre}{item.codigo_arete ? ` · ${item.codigo_arete}` : ''}</option>)}</Select></Field><Field label="Padre de la cría"><Select value={pregnancyForm.id_padre} onChange={(event) => setPregnancyForm({ ...pregnancyForm, id_padre: event.target.value })}><option value="">No registrado</option>{options.data?.machos.map((item) => <option key={item.id_animal} value={item.id_animal}>{item.nombre}{item.codigo_arete ? ` · ${item.codigo_arete}` : ''}</option>)}</Select></Field><Field label="Método de embarazo"><Select value={pregnancyForm.metodo_embarazo} onChange={(event) => setPregnancyForm({ ...pregnancyForm, metodo_embarazo: event.target.value as PregnancyForm['metodo_embarazo'] })}>{['MONTA_NATURAL','INSEMINACION_ARTIFICIAL','TRANSFERENCIA_EMBRIONES','DESCONOCIDO'].map((item) => <option value={item} key={item}>{humanizeCode(item)}</option>)}</Select></Field><Field label="Método de confirmación"><Select value={pregnancyForm.metodo_confirmacion} onChange={(event) => setPregnancyForm({ ...pregnancyForm, metodo_confirmacion: event.target.value as PregnancyForm['metodo_confirmacion'] })}>{['PALPACION','ECOGRAFIA','ANALISIS_SANGRE','OBSERVACION','OTRO'].map((item) => <option value={item} key={item}>{humanizeCode(item)}</option>)}</Select></Field><Field label="Fecha de confirmación" required><Input type="date" value={pregnancyForm.fecha_confirmacion} onChange={(event) => setPregnancyForm({ ...pregnancyForm, fecha_confirmacion: event.target.value })} /></Field><Field label="Días de gestación al confirmar" hint={pregnancyForm.id_celo ? 'Se calculará desde el inicio del celo.' : 'Opcional; permite calcular la fecha tentativa.'}><Input type="number" min="0" max="400" disabled={Boolean(pregnancyForm.id_celo)} value={pregnancyForm.dias_gestacion_confirmacion} onChange={(event) => setPregnancyForm({ ...pregnancyForm, dias_gestacion_confirmacion: event.target.value })} /></Field></div><Field label="Observaciones"><Textarea value={pregnancyForm.observaciones} onChange={(event) => setPregnancyForm({ ...pregnancyForm, observaciones: event.target.value })} /></Field></div></Modal> : null}
+
+    {birthForm ? <BirthModal form={birthForm} setForm={setBirthForm} pregnancies={pendingPregnancies} species={species.data ?? []} origins={origins.data ?? []} groups={groups.data ?? []} locations={locations.data ?? []} saving={createBirth.isPending} onSave={() => createBirth.mutate()} onClose={() => setBirthForm(null)} /> : null}
+
+    {abortionForm ? <Modal title={abortionForm.id_aborto ? 'Editar aborto' : 'Registrar aborto'} onClose={() => setAbortionForm(null)} footer={<><Button variant="ghost" onClick={() => setAbortionForm(null)}>Cancelar</Button><Button loading={saveAbortion.isPending} onClick={() => saveAbortion.mutate()}>Guardar</Button></>}><div className="form-stack"><Field label="Vaca" required><Select value={abortionForm.id_vaca} onChange={(event) => setAbortionForm({ ...abortionForm, id_vaca: event.target.value })}><option value="">Selecciona</option>{options.data?.hembras.map((item) => <option key={item.id_animal} value={item.id_animal}>{item.nombre}</option>)}</Select></Field><Field label="Fecha"><Input type="datetime-local" value={abortionForm.fecha} onChange={(event) => setAbortionForm({ ...abortionForm, fecha: event.target.value })} /></Field><Field label="Causa"><Input value={abortionForm.causa} onChange={(event) => setAbortionForm({ ...abortionForm, causa: event.target.value })} /></Field><Field label="Meses de gestación"><Input type="number" min="0" max="12" step="0.1" value={abortionForm.meses_gestacion} onChange={(event) => setAbortionForm({ ...abortionForm, meses_gestacion: event.target.value })} /></Field><Field label="Descripción"><Textarea value={abortionForm.descripcion} onChange={(event) => setAbortionForm({ ...abortionForm, descripcion: event.target.value })} /></Field></div></Modal> : null}
+    {deleting ? <ConfirmDialog title={deleting.type === 'pregnancy' ? 'Cancelar preñez' : 'Eliminar registro'} message={deleting.type === 'pregnancy' ? 'La preñez dejará de aparecer en próximos partos.' : '¿Deseas eliminar este registro?'} onClose={() => setDeleting(null)} onConfirm={() => remove.mutate()} loading={remove.isPending} /> : null}
   </div>;
 }
 
-function useObjectUrl(file: File | null) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!file) {
-      setUrl(null);
-      return undefined;
-    }
-    const nextUrl = URL.createObjectURL(file);
-    setUrl(nextUrl);
-    return () => URL.revokeObjectURL(nextUrl);
-  }, [file]);
-  return url;
+function TabButton({ active, onClick, icon: Icon, label }: { active: boolean; onClick: () => void; icon: typeof Baby; label: string }) { return <button className={active ? 'active' : ''} onClick={onClick}><Icon size={17} />{label}</button>; }
+
+function HeatsList({ query, canEdit, onEdit, onDelete }: { query: ReturnType<typeof useQuery<HeatRecord[]>>; canEdit: boolean; onEdit: (value: HeatForm) => void; onDelete: (id: string) => void }) {
+  if (query.isLoading) return <LoadingState />; if (query.isError) return <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} />;
+  if (!query.data?.length) return <EmptyState icon={HeartPulse} title="Sin celos registrados" description="Registra cuándo una vaca inicia y termina su periodo de celo." />;
+  return <div className="table-card"><div className="table-responsive"><table className="data-table"><thead><tr><th>Vaca</th><th>Toro</th><th>Inicio</th><th>Fin</th><th>Estado</th>{canEdit ? <th>Acciones</th> : null}</tr></thead><tbody>{query.data.map((item) => <tr key={item.id_celo}><td><strong>{item.vaca}</strong><small>{item.codigo_arete || ''}</small></td><td>{item.toro || 'No registrado'}</td><td>{formatDate(item.fecha_inicio)}</td><td>{formatDate(item.fecha_fin)}</td><td><Badge tone={item.tiene_prenez ? 'success' : 'info'}>{item.tiene_prenez ? 'Preñez relacionada' : 'Registrado'}</Badge></td>{canEdit ? <td>{item.tiene_prenez ? <small>Vinculado</small> : <div className="inline-actions"><IconButton label="Editar celo" onClick={() => onEdit({ id_celo: item.id_celo, id_vaca: item.id_vaca, id_toro: item.id_toro ?? '', fecha_inicio: String(item.fecha_inicio).slice(0, 10), fecha_fin: item.fecha_fin ? String(item.fecha_fin).slice(0, 10) : '', observaciones: item.observaciones ?? '' })}><Edit3 size={16} /></IconButton><IconButton label="Eliminar celo" onClick={() => onDelete(item.id_celo)}><Trash2 size={16} /></IconButton></div>}</td> : null}</tr>)}</tbody></table></div></div>;
 }
 
-function SinglePhotoPicker({ file, onChange }: { file: File | null; onChange: (file: File | null) => void }) {
-  const url = useObjectUrl(file);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  return <div className="birth-profile-photo-picker">
-    <input ref={inputRef} type="file" accept="image/*" hidden onChange={(event) => onChange(event.target.files?.[0] ?? null)} />
-    <button type="button" className={url ? 'birth-profile-preview has-photo' : 'birth-profile-preview'} onClick={() => inputRef.current?.click()}>
-      {url ? <img src={url} alt="Vista previa de la foto de perfil" /> : <span><Camera size={26} /><strong>Seleccionar foto</strong><small>Se guardará como foto de perfil de la cría.</small></span>}
-    </button>
-    {file ? <button type="button" className="photo-remove-button" onClick={() => onChange(null)}><X size={15} />Quitar</button> : null}
-  </div>;
+function PregnanciesList({ query, canEdit, onEdit, onDelete }: { query: ReturnType<typeof useQuery<PregnancyRecord[]>>; canEdit: boolean; onEdit: (value: PregnancyRecord) => void; onDelete: (id: string) => void }) {
+  if (query.isLoading) return <LoadingState />; if (query.isError) return <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} />;
+  if (!query.data?.length) return <EmptyState icon={HeartPulse} title="Sin preñeces" description="Confirma una preñez desde un celo o regístrala directamente." />;
+  return <div className="reproduction-list">{query.data.map((item) => <Card className="reproduction-row" key={item.id_prenez}><div><strong>{item.vaca}</strong><small>{item.codigo_arete || 'Sin arete'}</small></div><div><small>Confirmación</small><strong>{formatDate(item.fecha_confirmacion)} · {humanizeCode(item.metodo_confirmacion)}</strong></div><div><small>Parto tentativo</small><strong>{formatDate(item.fecha_parto_tentativa)}</strong></div><Badge tone={item.estado === 'CONFIRMADA' ? 'success' : item.estado === 'CANCELADA' ? 'danger' : 'neutral'}>{humanizeCode(item.estado)}</Badge>{canEdit && item.estado === 'CONFIRMADA' ? <div className="inline-actions"><IconButton label="Editar preñez" onClick={() => onEdit(item)}><Edit3 size={16} /></IconButton><IconButton label="Cancelar preñez" onClick={() => onDelete(item.id_prenez)}><Trash2 size={16} /></IconButton></div> : null}</Card>)}</div>;
 }
 
-function MultiplePhotoPicker({ files, onChange }: { files: File[]; onChange: (files: File[]) => void }) {
-  const [urls, setUrls] = useState<string[]>([]);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  useEffect(() => {
-    const nextUrls = files.map((file) => URL.createObjectURL(file));
-    setUrls(nextUrls);
-    return () => nextUrls.forEach((url) => URL.revokeObjectURL(url));
-  }, [files]);
-
-  return <div className="birth-extra-photo-picker">
-    <input
-      ref={inputRef}
-      type="file"
-      accept="image/*"
-      multiple
-      hidden
-      onChange={(event) => {
-        const selected = Array.from(event.target.files ?? []);
-        const merged = [...files];
-        for (const file of selected) {
-          if (!merged.some((current) => current.name === file.name && current.size === file.size && current.lastModified === file.lastModified)) merged.push(file);
-        }
-        onChange(merged.slice(0, 10));
-        event.currentTarget.value = '';
-      }}
-    />
-    <button type="button" className="birth-extra-photo-button" onClick={() => inputRef.current?.click()}>
-      <ImagePlus size={22} />
-      <span><strong>Agregar fotografías</strong><small>Hasta 10 imágenes adicionales.</small></span>
-    </button>
-    {files.length ? <div className="birth-photo-thumbnails">{files.map((file, index) => <div key={`${file.name}-${file.lastModified}`}>
-      {urls[index] ? <img src={urls[index]} alt={`Fotografía adicional ${index + 1}`} /> : null}
-      <button type="button" aria-label={`Quitar ${file.name}`} onClick={() => onChange(files.filter((_, fileIndex) => fileIndex !== index))}><X size={14} /></button>
-    </div>)}</div> : null}
-  </div>;
+function UpcomingList({ query }: { query: ReturnType<typeof useQuery<UpcomingBirth[]>> }) {
+  if (query.isLoading) return <LoadingState />; if (query.isError) return <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} />;
+  if (!query.data?.length) return <EmptyState icon={CalendarClock} title="Sin próximos partos" description="Aquí aparecerán las vacas con preñez confirmada." />;
+  return <div className="reproduction-list">{query.data.map((item) => <Card className="reproduction-row upcoming-row" key={item.id_proximo_parto}><div><strong>{item.vaca}</strong><small>{item.codigo_arete || 'Sin arete'}</small></div><div><small>Fecha tentativa</small><strong>{formatDate(item.fecha_tentativa)}</strong></div><div><small>Padre</small><strong>{item.padre || 'No registrado'}</strong></div><div><small>Confirmación</small><strong>{formatDate(item.fecha_confirmacion)}</strong></div><Badge tone={item.fecha_tentativa ? 'info' : 'warning'}>{item.fecha_tentativa ? 'Fecha calculada' : 'Sin fecha estimada'}</Badge></Card>)}</div>;
 }
+
+function BirthsList({ query }: { query: ReturnType<typeof useQuery<Birth[]>> }) {
+  if (query.isLoading) return <LoadingState />; if (query.isError) return <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} />;
+  if (!query.data?.length) return <EmptyState icon={Baby} title="Sin partos" description="Registra el parto desde una preñez confirmada." />;
+  return <div className="record-grid operation-grid">{query.data.map((birth) => <Card className="operation-card" key={birth.id_parto}><div className="operation-card-header"><div className="operation-icon"><Baby size={23} /></div><div><h3>{birth.madre}</h3><span>{formatDateTime(birth.fecha_parto)}</span></div><Badge tone="success">{humanizeCode(birth.tipo_parto)}</Badge></div><div className="detail-grid compact"><div><small>Padre</small><strong>{birth.padre || 'No registrado'}</strong></div><div><small>Crías</small><strong>{birth.crias?.length ?? 0}</strong></div></div>{birth.crias?.length ? <div className="offspring-list">{birth.crias.map((child) => <div key={child.id_parto_cria}><strong>{child.cria}</strong><span>{child.sexo === 'HEMBRA' ? 'Hembra' : 'Macho'} · {humanizeCode(child.estado_nacimiento)}{child.peso_nacimiento_kg ? ` · ${formatNumber(child.peso_nacimiento_kg)} kg` : ''}</span></div>)}</div> : null}</Card>)}</div>;
+}
+
+function AbortionsList({ query, canEdit, onEdit, onDelete }: { query: ReturnType<typeof useQuery<GenericRecord[]>>; canEdit: boolean; onEdit: (record: GenericRecord) => void; onDelete: (id: string) => void }) {
+  if (query.isLoading) return <LoadingState />; if (query.isError) return <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} />;
+  if (!query.data?.length) return <EmptyState icon={HeartCrack} title="Sin abortos registrados" description="No existen eventos de aborto en el historial." />;
+  return <div className="table-card"><div className="table-responsive"><table className="data-table"><thead><tr><th>Animal</th><th>Fecha</th><th>Causa</th><th>Gestación</th>{canEdit ? <th>Acciones</th> : null}</tr></thead><tbody>{query.data.map((item) => <tr key={String(item.id_aborto)}><td><strong>{String(item.animal ?? '—')}</strong></td><td>{formatDateTime(item.fecha ? String(item.fecha) : null)}</td><td>{String(item.causa ?? '—')}</td><td>{item.meses_gestacion == null ? '—' : `${formatNumber(item.meses_gestacion as number | string, 1)} meses`}</td>{canEdit ? <td><div className="inline-actions"><IconButton label="Editar aborto" onClick={() => onEdit(item)}><Edit3 size={16} /></IconButton><IconButton label="Eliminar aborto" onClick={() => onDelete(String(item.id_aborto))}><Trash2 size={16} /></IconButton></div></td> : null}</tr>)}</tbody></table></div></div>;
+}
+
+function BirthModal({ form, setForm, pregnancies, species, origins, groups, locations, saving, onSave, onClose }: { form: BirthForm; setForm: (form: BirthForm) => void; pregnancies: PregnancyRecord[]; species: Record<string, unknown>[]; origins: Record<string, unknown>[]; groups: Group[]; locations: Location[]; saving: boolean; onSave: () => void; onClose: () => void }) {
+  const selected = pregnancies.find((item) => item.id_prenez === form.id_prenez);
+  const selectedCow = selected?.id_vaca;
+  const updateChild = (index: number, change: Partial<ChildForm>) => setForm({ ...form, crias: form.crias.map((item, itemIndex) => itemIndex === index ? { ...item, ...change } : item) });
+  return <Modal title="Registrar parto" wide onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button loading={saving} onClick={onSave}>Guardar</Button></>}><div className="form-stack"><div className="form-section"><h3>Preñez y parto</h3><Field label="Preñez confirmada" required><Select value={form.id_prenez} onChange={(event) => { const pregnancy = pregnancies.find((item) => item.id_prenez === event.target.value); const cow = pregnancy?.id_vaca; setForm({ ...form, id_prenez: event.target.value, crias: form.crias.map((child) => ({ ...child, id_especie: child.id_especie || (cow ? '' : '') })) }); }}><option value="">Selecciona</option>{pregnancies.map((item) => <option key={item.id_prenez} value={item.id_prenez}>{item.vaca} · confirmada {formatDate(item.fecha_confirmacion)}{item.fecha_parto_tentativa ? ` · parto ${formatDate(item.fecha_parto_tentativa)}` : ''}</option>)}</Select></Field>{selected ? <p className="form-alert">Madre: <strong>{selected.vaca}</strong> · Padre: <strong>{selected.padre || 'No registrado'}</strong>{selectedCow ? '' : ''}</p> : null}<div className="form-grid"><Field label="Fecha y hora" required><Input type="datetime-local" value={form.fecha_parto} onChange={(event) => setForm({ ...form, fecha_parto: event.target.value })} /></Field><Field label="Tipo"><Select value={form.tipo_parto} onChange={(event) => setForm({ ...form, tipo_parto: event.target.value })}>{['NORMAL','ASISTIDO','CESAREA','DESCONOCIDO'].map((item) => <option key={item} value={item}>{humanizeCode(item)}</option>)}</Select></Field></div><Field label="Observaciones"><Textarea value={form.observaciones} onChange={(event) => setForm({ ...form, observaciones: event.target.value })} /></Field></div><div className="form-section"><div className="section-heading-inline"><h3>Crías</h3><IconButton label="Agregar cría" onClick={() => setForm({ ...form, crias: [...form.crias, emptyChild()] })}><Plus size={18} /></IconButton></div><div className="nested-list">{form.crias.map((child, index) => <div className="nested-card" key={`child-${index}`}><div className="nested-card-header"><strong>Cría {index + 1}</strong>{form.crias.length > 1 ? <IconButton label="Quitar cría" onClick={() => setForm({ ...form, crias: form.crias.filter((_, itemIndex) => itemIndex !== index) })}><Trash2 size={16} /></IconButton> : null}</div><div className="form-grid"><Field label="Nombre" required><Input value={child.nombre} onChange={(event) => updateChild(index, { nombre: event.target.value })} /></Field><Field label="Arete"><Input value={child.codigo_arete} onChange={(event) => updateChild(index, { codigo_arete: event.target.value })} /></Field><Field label="Especie" required><Select value={child.id_especie} onChange={(event) => updateChild(index, { id_especie: event.target.value })}><option value="">Selecciona</option>{species.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field><Field label="Sexo"><Select value={child.sexo} onChange={(event) => updateChild(index, { sexo: event.target.value as ChildForm['sexo'] })}><option value="HEMBRA">Hembra</option><option value="MACHO">Macho</option></Select></Field><Field label="Origen" required><Select value={child.id_origen} onChange={(event) => updateChild(index, { id_origen: event.target.value })}><option value="">Selecciona</option>{origins.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field><Field label="Grupo"><Select value={child.id_grupo_actual} onChange={(event) => updateChild(index, { id_grupo_actual: event.target.value })}><option value="">Sin grupo</option>{groups.map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre}</option>)}</Select></Field><Field label="Corral o potrero"><Select value={child.id_ubicacion_actual} onChange={(event) => updateChild(index, { id_ubicacion_actual: event.target.value })}><option value="">Sin ubicación</option>{locations.map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre}</option>)}</Select></Field><Field label="Estado al nacer"><Select value={child.estado_nacimiento} onChange={(event) => updateChild(index, { estado_nacimiento: event.target.value as ChildForm['estado_nacimiento'], estado: event.target.value === 'MUERTA' ? 'MUERTO' : 'ACTIVO' })}>{['VIVA','MUERTA','DEBIL','DESCONOCIDO'].map((item) => <option key={item} value={item}>{humanizeCode(item)}</option>)}</Select></Field><Field label="Peso (kg)"><Input type="number" min="0.01" step="0.001" value={child.peso_nacimiento_kg} onChange={(event) => updateChild(index, { peso_nacimiento_kg: event.target.value })} /></Field></div><Field label="Observaciones"><Input value={child.observaciones} onChange={(event) => updateChild(index, { observaciones: event.target.value })} /></Field><div className="birth-photo-fields"><Field label="Foto de perfil"><SinglePhotoPicker file={child.foto_perfil} onChange={(file) => updateChild(index, { foto_perfil: file })} /></Field><Field label="Otras fotografías"><MultiplePhotoPicker files={child.fotos} onChange={(files) => updateChild(index, { fotos: files })} /></Field></div></div>)}</div></div></div></Modal>;
+}
+
+function useObjectUrl(file: File | null) { const [url, setUrl] = useState<string | null>(null); useEffect(() => { if (!file) { setUrl(null); return undefined; } const next = URL.createObjectURL(file); setUrl(next); return () => URL.revokeObjectURL(next); }, [file]); return url; }
+function SinglePhotoPicker({ file, onChange }: { file: File | null; onChange: (file: File | null) => void }) { const url = useObjectUrl(file); const ref = useRef<HTMLInputElement | null>(null); return <div className="birth-profile-photo-picker"><input ref={ref} type="file" accept="image/*" hidden onChange={(event) => onChange(event.target.files?.[0] ?? null)} /><button type="button" className={url ? 'birth-profile-preview has-photo' : 'birth-profile-preview'} onClick={() => ref.current?.click()}>{url ? <img src={url} alt="Vista previa" /> : <span><Camera size={26} /><strong>Seleccionar foto</strong></span>}</button>{file ? <IconButton label="Quitar foto" onClick={() => onChange(null)}><X size={15} /></IconButton> : null}</div>; }
+function MultiplePhotoPicker({ files, onChange }: { files: File[]; onChange: (files: File[]) => void }) { const ref = useRef<HTMLInputElement | null>(null); return <div className="birth-extra-photo-picker"><input ref={ref} type="file" accept="image/*" multiple hidden onChange={(event) => { const selected = Array.from(event.target.files ?? []); onChange([...files, ...selected].slice(0, 10)); event.currentTarget.value = ''; }} /><button type="button" className="birth-extra-photo-button" onClick={() => ref.current?.click()}><ImagePlus size={22} /><span><strong>Agregar fotografías</strong><small>{files.length} seleccionada(s)</small></span></button>{files.length ? <div className="file-chip-list">{files.map((file, index) => <span key={`${file.name}-${index}`}>{file.name}<button type="button" onClick={() => onChange(files.filter((_, itemIndex) => itemIndex !== index))}><X size={12} /></button></span>)}</div> : null}</div>; }

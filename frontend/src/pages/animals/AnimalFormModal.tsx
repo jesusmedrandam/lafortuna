@@ -5,8 +5,8 @@ import { apiRequest, ApiError } from '../../api/client';
 import { useToast } from '../../components/ToastContext';
 import { Button, Field, Input, Modal, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
-import type { Animal, Corral, Group, OwnerOption, Pasture } from '../../types/api';
-import { dateInputValue, nullIfEmpty, numberOrNull } from '../../utils';
+import type { Animal, Corral, Group, Mark, OwnerOption, Pasture } from '../../types/api';
+import { dateInputValue, isAtLeastOneYear, nullIfEmpty, numberOrNull } from '../../utils';
 
 interface AnimalFormModalProps {
   animal?: Animal | null;
@@ -24,6 +24,7 @@ interface FormState {
   id_madre: string;
   id_padre: string;
   id_origen: string;
+  id_marquilla: string;
   id_grupo_actual: string;
   id_ubicacion_actual: string;
   fecha_ingreso: string;
@@ -35,7 +36,6 @@ interface FormState {
   fecha_pesaje_inicial: string;
   metodo_pesaje_inicial: string;
   observaciones_pesaje_inicial: string;
-  descripcion_foto_perfil: string;
 }
 
 function localToday() {
@@ -54,6 +54,7 @@ function emptyForm(): FormState {
     id_madre: '',
     id_padre: '',
     id_origen: '',
+    id_marquilla: '',
     id_grupo_actual: '',
     id_ubicacion_actual: '',
     fecha_ingreso: '',
@@ -65,7 +66,6 @@ function emptyForm(): FormState {
     fecha_pesaje_inicial: localToday(),
     metodo_pesaje_inicial: '',
     observaciones_pesaje_inicial: '',
-    descripcion_foto_perfil: '',
   };
 }
 
@@ -80,6 +80,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
   const origins = useCatalog('origenes');
   const colors = useCatalog('colores');
   const breeds = useCatalog('razas');
+  const marks = useQuery({ queryKey: ['marks'], queryFn: () => apiRequest<Mark[]>('/marquillas') });
   const groups = useQuery({
     queryKey: ['groups', 'select'],
     queryFn: () => apiRequest<Group[]>('/grupos?limit=100'),
@@ -122,6 +123,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
       id_madre: animal.id_madre ?? '',
       id_padre: animal.id_padre ?? '',
       id_origen: animal.id_origen,
+      id_marquilla: animal.id_marquilla ?? '',
       id_grupo_actual: animal.id_grupo_actual ?? '',
       id_ubicacion_actual: animal.id_ubicacion_actual ?? '',
       fecha_ingreso: dateInputValue(animal.fecha_ingreso),
@@ -133,7 +135,6 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
       fecha_pesaje_inicial: localToday(),
       metodo_pesaje_inicial: '',
       observaciones_pesaje_inicial: '',
-      descripcion_foto_perfil: '',
     });
   }, [animal]);
 
@@ -171,6 +172,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
       id_madre: form.id_madre || null,
       id_padre: form.id_padre || null,
       id_origen: form.id_origen,
+      id_marquilla: form.id_marquilla || null,
       id_grupo_actual: form.id_grupo_actual || null,
       id_ubicacion_actual: form.id_ubicacion_actual || null,
       fecha_ingreso: form.fecha_ingreso || null,
@@ -201,7 +203,6 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
         fecha_pesaje_inicial: weight ? form.fecha_pesaje_inicial || localToday() : null,
         metodo_pesaje_inicial: weight ? nullIfEmpty(form.metodo_pesaje_inicial) : null,
         observaciones_pesaje_inicial: weight ? nullIfEmpty(form.observaciones_pesaje_inicial) : null,
-        descripcion_foto_perfil: profileFile ? nullIfEmpty(form.descripcion_foto_perfil) : null,
       };
 
       const multipart = new FormData();
@@ -249,7 +250,6 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
     if (profilePreview?.startsWith('blob:')) URL.revokeObjectURL(profilePreview);
     setProfileFile(null);
     setProfilePreview(null);
-    setForm((current) => ({ ...current, descripcion_foto_perfil: '' }));
   }
 
   const toggleColor = (id: string) => setForm((current) => ({
@@ -319,15 +319,6 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
                   <input type="file" accept="image/*" onChange={chooseProfile} />
                 </label>
                 {profileFile ? <>
-                  <Field label="Descripción de la foto" hint="Se mostrará al ampliar la imagen.">
-                    <Textarea
-                      rows={3}
-                      maxLength={300}
-                      value={form.descripcion_foto_perfil}
-                      onChange={(event) => setForm((current) => ({ ...current, descripcion_foto_perfil: event.target.value }))}
-                      placeholder="Ej.: Foto tomada al ingresar a la finca."
-                    />
-                  </Field>
                   <Button type="button" variant="ghost" onClick={removeProfile}>
                     <Trash2 size={16} /> Quitar foto
                   </Button>
@@ -413,6 +404,12 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
                 {origins.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}
               </Select>
             </Field>
+            <Field label="Fierro">
+              <Select value={form.id_marquilla} onChange={(event) => setForm((current) => ({ ...current, id_marquilla: event.target.value }))}>
+                <option value="">Sin fierro</option>
+                {marks.data?.filter((item) => item.activo || item.id_marquilla === form.id_marquilla).map((item) => <option key={item.id_marquilla} value={item.id_marquilla}>{item.nombre} · {item.codigo}{item.usuario ? ` · ${item.usuario}` : ''}</option>)}
+              </Select>
+            </Field>
           </div>
           <Field label="Descripción">
             <Textarea rows={3} value={form.descripcion} onChange={(event) => setForm((current) => ({ ...current, descripcion: event.target.value }))} />
@@ -459,7 +456,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
             <Field label="Padre">
               <Select value={form.id_padre} onChange={(event) => setForm((current) => ({ ...current, id_padre: event.target.value }))}>
                 <option value="">Sin registrar</option>
-                {fathers.data?.filter((item) => item.id_animal !== animal?.id_animal).map((item) => (
+                {fathers.data?.filter((item) => item.id_animal !== animal?.id_animal && isAtLeastOneYear(item.fecha_nacimiento)).map((item) => (
                   <option key={item.id_animal} value={item.id_animal}>{item.nombre}{item.codigo_arete ? ` · ${item.codigo_arete}` : ''}</option>
                 ))}
               </Select>

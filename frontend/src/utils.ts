@@ -13,6 +13,49 @@ export function dateInputValue(value?: string | null) {
   return match?.[1] ?? '';
 }
 
+export function formatAge(value?: string | null, reference = new Date()) {
+  const normalized = dateInputValue(value);
+  if (!normalized) return 'Sin fecha';
+  const [year, month, day] = normalized.split('-').map(Number);
+  const birth = new Date(year, month - 1, day);
+  const today = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate());
+  if (Number.isNaN(birth.getTime()) || birth > today) return 'Fecha inválida';
+  let years = today.getFullYear() - birth.getFullYear();
+  let months = today.getMonth() - birth.getMonth();
+  let days = today.getDate() - birth.getDate();
+  if (days < 0) {
+    const previousMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+    days += previousMonth.getDate();
+    months -= 1;
+  }
+  if (months < 0) {
+    months += 12;
+    years -= 1;
+  }
+  return [
+    `${years} ${years === 1 ? 'año' : 'años'}`,
+    `${months} ${months === 1 ? 'mes' : 'meses'}`,
+    `${days} ${days === 1 ? 'día' : 'días'}`,
+  ].join(', ');
+}
+
+export function isAtLeastOneYear(value?: string | null) {
+  if (!value) return true;
+  const date = dateInputValue(value);
+  if (!date) return true;
+  const [year, month, day] = date.split('-').map(Number);
+  const threshold = new Date();
+  threshold.setHours(0, 0, 0, 0);
+  threshold.setFullYear(threshold.getFullYear() - 1);
+  return new Date(year, month - 1, day) <= threshold;
+}
+
+export function formatAgeCompact(value?: string | null) {
+  const full = formatAge(value);
+  if (full === 'Sin fecha' || full === 'Fecha inválida') return full;
+  return full.replace(/ años?/, 'a').replace(/ meses?/, 'm').replace(/ días?/, 'd').replaceAll(', ', ' ');
+}
+
 export function formatDateTime(value?: string | null) {
   if (!value) return '—';
   const date = new Date(value);

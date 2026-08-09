@@ -31,6 +31,7 @@ import { CatalogsPage } from '../pages/catalogs/CatalogsPage';
 import { AnimalRecordsPage } from '../pages/records/AnimalRecordsPage';
 import { SalesPage } from '../pages/sales/SalesPage';
 import { MultimediaPage } from '../pages/multimedia/MultimediaPage';
+import { MarksPage } from '../pages/marks/MarksPage';
 
 function ProtectedRoot() {
   const { user, ready } = useAuth();
@@ -80,6 +81,7 @@ export function AppRouter() {
           <Route path="muertes" element={<PermissionRoute permissions={['MUERTE_CONSULTAR']}><AnimalRecordsPage mode="muertes" /></PermissionRoute>} />
           <Route path="ventas" element={<PermissionRoute permissions={['VENTA_CONSULTAR']}><SalesPage /></PermissionRoute>} />
           <Route path="catalogos" element={<PermissionRoute permissions={['CATALOGO_CONSULTAR']}><CatalogsPage /></PermissionRoute>} />
+          <Route path="marquillas" element={<PermissionRoute permissions={['CATALOGO_CONSULTAR']}><MarksPage /></PermissionRoute>} />
           <Route path="usuarios" element={<PermissionRoute permissions={['USUARIO_CONSULTAR']}><UsersPage /></PermissionRoute>} />
           <Route path="roles" element={<PermissionRoute permissions={['ROL_CONSULTAR']}><RolesPage /></PermissionRoute>} />
           <Route path="auditoria" element={<PermissionRoute permissions={['AUDITORIA_CONSULTAR']}><AuditPage /></PermissionRoute>} />

@@ -58,6 +58,7 @@ export interface DashboardSummary {
   ventas_mes: number;
   ingresos_hoy: string | number;
   ingresos_mes: string | number;
+  proximos_partos: number;
 }
 
 export interface CatalogItem {
@@ -82,6 +83,11 @@ export interface Animal {
   id_padre: string | null;
   padre?: string | null;
   id_origen: string;
+  id_marquilla: string | null;
+  marquilla?: string | null;
+  marquilla_codigo?: string | null;
+  marquilla_foto?: string | null;
+  marquilla_usuario?: string | null;
   id_grupo_actual: string | null;
   grupo: string | null;
   id_ubicacion_actual: string | null;
@@ -118,6 +124,21 @@ export interface Animal {
   total?: number;
 }
 
+export interface Mark {
+  id_marquilla: string;
+  id_usuario?: string | null;
+  codigo: string;
+  nombre: string;
+  descripcion: string | null;
+  secure_url: string | null;
+  public_id?: string | null;
+  activo: boolean;
+  usuario: string;
+  correo?: string | null;
+  usuarios: OwnerOption[];
+  total_animales?: number;
+}
+
 
 export interface AnimalOwner {
   id_usuario: string;
@@ -140,6 +161,7 @@ export interface AnimalFilterOptions {
   propietarios: { id_usuario: string; nombre: string }[];
   razas: { id_raza: string; nombre: string; id_especie: string | null }[];
   colores: { id_color: string; nombre: string }[];
+  marquillas: { id_marquilla: string; nombre: string; codigo: string }[];
 }
 
 export interface AnimalImage {
@@ -397,6 +419,7 @@ export interface CleaningProduct {
   cantidad_total: number | string;
   unidad: string;
   cantidad_por_tanque: number | string | null;
+  observaciones: string | null;
 }
 
 export interface CleaningOperator {
@@ -404,6 +427,7 @@ export interface CleaningOperator {
   nombre: string;
   funcion: string | null;
   horas_trabajadas: number | string | null;
+  observaciones: string | null;
 }
 
 export interface PastureCleaning {
@@ -419,6 +443,7 @@ export interface PastureCleaning {
   capacidad_tanque_litros: number | string | null;
   area_intervenida: number | string | null;
   id_unidad_area: string | null;
+  unidad_area: string | null;
   estado: string;
   observaciones: string | null;
   productos: CleaningProduct[];
@@ -447,6 +472,7 @@ export interface BirthChild {
 
 export interface Birth {
   id_parto: string;
+  id_prenez: string | null;
   id_madre: string;
   id_padre: string | null;
   madre: string;
@@ -455,6 +481,55 @@ export interface Birth {
   tipo_parto: string;
   observaciones: string | null;
   crias: BirthChild[];
+}
+
+export interface HeatRecord {
+  id_celo: string;
+  id_vaca: string;
+  id_toro: string | null;
+  vaca: string;
+  codigo_arete: string | null;
+  toro: string | null;
+  toro_arete: string | null;
+  fecha_inicio: string;
+  fecha_fin: string | null;
+  observaciones: string | null;
+  tiene_prenez: boolean;
+}
+
+export interface PregnancyRecord {
+  id_prenez: string;
+  id_vaca: string;
+  id_celo: string | null;
+  id_padre: string | null;
+  vaca: string;
+  codigo_arete: string | null;
+  id_especie: string;
+  padre: string | null;
+  celo_inicio: string | null;
+  metodo_embarazo: string;
+  metodo_confirmacion: string;
+  fecha_confirmacion: string;
+  dias_gestacion_confirmacion: number | null;
+  fecha_inicio_estimada: string | null;
+  fecha_parto_tentativa: string | null;
+  estado: 'CONFIRMADA' | 'FINALIZADA' | 'CANCELADA';
+  observaciones: string | null;
+}
+
+export interface UpcomingBirth {
+  id_proximo_parto: string;
+  id_prenez: string;
+  id_vaca: string;
+  vaca: string;
+  codigo_arete: string | null;
+  padre: string | null;
+  fecha_tentativa: string | null;
+  fecha_confirmacion: string;
+  metodo_embarazo: string;
+  metodo_confirmacion: string;
+  dias_gestacion_confirmacion: number | null;
+  estado: 'PENDIENTE' | 'REGISTRADO' | 'CANCELADO';
 }
 
 export interface GenericRecord {
