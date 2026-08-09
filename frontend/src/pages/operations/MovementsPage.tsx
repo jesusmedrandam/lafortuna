@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeftRight, Ban, CheckCircle2, ClipboardCheck, Plus, Users } from 'lucide-react';
+import { ArrowLeftRight, Ban, CheckCircle2, ChevronRight, Edit3, Plus } from 'lucide-react';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { AnimalSelectionBuilder, type AnimalSelectionValue } from '../../components/AnimalSelectionBuilder';
 import { useToast } from '../../components/ToastContext';
-import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
+import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, ListToolbar, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
+import { useListControls } from '../../hooks/useListControls';
 import type { Group, Location, Movement } from '../../types/api';
 import { formatDateTime, humanizeCode } from '../../utils';
 
@@ -45,19 +46,19 @@ export function MovementsPage() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Movement | null>(null);
+  const [selected, setSelected] = useState<Movement | null>(null);
   const [form, setForm] = useState<MovementForm>(emptyForm);
   const movements = useQuery({ queryKey: ['movements'], queryFn: () => apiRequest<Movement[]>('/movimientos') });
   const groups = useQuery({ queryKey: ['groups', 'movement'], queryFn: () => apiRequest<Group[]>('/grupos?limit=100') });
   const locations = useQuery({ queryKey: ['locations', 'movement'], queryFn: () => apiRequest<Location[]>('/ubicaciones') });
 
-  const create = useMutation({
+  const save = useMutation({
     mutationFn: async () => {
       const selected = form.selection.animals.filter((animal) => animal.seleccionado);
       if (!selected.length) throw new Error('Selecciona al menos un animal.');
       if (!form.id_ubicacion_destino && !form.id_grupo_destino) throw new Error('Selecciona una ubicación o grupo de destino.');
-      const movement = await apiRequest<Movement>('/movimientos', {
-        method: 'POST',
-        body: {
+      const body = {
           modo_seleccion: form.selection.mode,
           id_grupo_filtro: form.selection.mode === 'GRUPO' ? form.selection.groupId : null,
           id_ubicacion_destino: form.id_ubicacion_destino || null,
@@ -72,18 +73,29 @@ export function MovementsPage() {
             id_grupo_destino: form.id_grupo_destino || null,
             observaciones: animal.observaciones || null,
           })),
-        },
+        };
+      const movement = await apiRequest<Movement>(editing ? `/movimientos/${editing.id_movimiento}` : '/movimientos', {
+        method: editing ? 'PATCH' : 'POST', body: editing ? { ...body, animales: undefined } : body,
       });
+      if (editing) await apiRequest(`/movimientos/${editing.id_movimiento}/seleccion`, { method: 'PUT', body: { animales: body.animales } });
       return movement;
     },
     onSuccess: () => {
-      toast.show('Movimiento guardado como borrador.');
+      toast.show(editing ? 'Movimiento actualizado.' : 'Movimiento guardado como borrador.');
       setCreating(false);
+      setEditing(null);
       setForm(emptyForm());
       void queryClient.invalidateQueries({ queryKey: ['movements'] });
     },
     onError: (error) => toast.show(error instanceof ApiError ? error.message : (error as Error).message, 'error'),
   });
+
+  const list = useListControls({ items: movements.data ?? [], storageKey: 'movements', searchText: (item) => `${item.motivo ?? ''} ${item.ubicacion_origen ?? ''} ${item.ubicacion_destino ?? ''} ${item.grupo_origen ?? ''} ${item.grupo_destino ?? ''} ${item.detalles.map((detail) => `${detail.animal} ${detail.arete ?? ''}`).join(' ')}`, dateValue: (item) => item.fecha_movimiento, nameValue: (item) => item.motivo || item.ubicacion_destino || item.grupo_destino || '' });
+  const editMovement = (item: Movement) => {
+    const date = new Date(item.fecha_movimiento); date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+    setForm({ selection: { mode: item.modo_seleccion, groupId: item.id_grupo_filtro ?? '', animals: item.detalles.map((detail) => ({ id_animal: detail.id_animal, nombre: detail.nombre ?? detail.animal, codigo_arete: detail.codigo_arete ?? detail.arete, sexo: detail.sexo ?? 'HEMBRA', id_grupo_actual: detail.id_grupo_actual ?? null, grupo: detail.grupo ?? null, id_ubicacion_actual: detail.id_ubicacion_actual ?? null, ubicacion: detail.ubicacion ?? null, seleccionado: detail.seleccionado, observaciones: detail.observaciones ?? null })) }, id_ubicacion_destino: item.id_ubicacion_destino ?? '', id_grupo_destino: item.id_grupo_destino ?? '', fecha_movimiento: date.toISOString().slice(0, 16), motivo: item.motivo ?? '', observaciones: item.observaciones ?? '' });
+    setEditing(item); setSelected(null); setCreating(true);
+  };
 
   const action = useMutation({
     mutationFn: ({ id, kind }: { id: string; kind: 'apply' | 'cancel' }) => apiRequest(`/movimientos/${id}/${kind === 'apply' ? 'aplicar' : 'cancelar'}`, { method: 'POST' }),
@@ -102,29 +114,13 @@ export function MovementsPage() {
       action={hasPermission('MOVIMIENTO_CREAR') ? <Button onClick={() => { setForm(emptyForm()); setCreating(true); }}><Plus size={18} />Nuevo movimiento</Button> : undefined}
     />
 
-    {movements.isLoading ? <LoadingState /> : movements.isError ? <ErrorState message={(movements.error as Error).message} onRetry={() => void movements.refetch()} /> : movements.data?.length ? <div className="record-grid operation-grid">
-      {movements.data.map((movement) => <Card className="operation-card" key={movement.id_movimiento}>
-        <div className="operation-card-header">
-          <div className="operation-icon"><ArrowLeftRight size={23} /></div>
-          <div><h3>{movement.motivo || 'Movimiento de animales'}</h3><span>{formatDateTime(movement.fecha_movimiento)}</span></div>
-          <Badge tone={movementTone(movement.estado)}>{humanizeCode(movement.estado)}</Badge>
-        </div>
-        <div className="route-summary">
-          <div><small>Origen</small><strong>{movement.ubicacion_origen || movement.grupo_origen || 'Varias ubicaciones'}</strong></div>
-          <ArrowLeftRight size={20} />
-          <div><small>Destino</small><strong>{movement.ubicacion_destino || movement.grupo_destino || 'Sin destino'}</strong></div>
-        </div>
-        <div className="operation-stats"><span><Users size={16} />{movement.total_seleccionados} seleccionados</span><span><ClipboardCheck size={16} />{movement.total_candidatos} candidatos</span></div>
-        {movement.detalles?.length ? <details className="operation-details"><summary>Ver animales</summary><div>{movement.detalles.map((detail) => <span key={detail.id_detalle} className={!detail.seleccionado ? 'excluded' : ''}>{detail.seleccionado ? '✓' : '—'} {detail.animal}{detail.arete ? ` · ${detail.arete}` : ''}{detail.estado !== 'PENDIENTE' ? ` · ${humanizeCode(detail.estado)}` : ''}</span>)}</div></details> : null}
-        {movement.observaciones ? <p className="muted operation-notes">{movement.observaciones}</p> : null}
-        {movement.estado === 'BORRADOR' ? <div className="card-actions">
-          {hasPermission('MOVIMIENTO_ANULAR') ? <Button variant="ghost" onClick={() => action.mutate({ id: movement.id_movimiento, kind: 'cancel' })} loading={action.isPending}><Ban size={17} />Cancelar</Button> : null}
-          {hasPermission('MOVIMIENTO_CREAR') ? <Button onClick={() => action.mutate({ id: movement.id_movimiento, kind: 'apply' })} loading={action.isPending}><CheckCircle2 size={17} />Aplicar</Button> : null}
-        </div> : null}
-      </Card>)}
-    </div> : <EmptyState icon={ArrowLeftRight} title="Aún no hay movimientos" description="Registra un cambio de grupo, potrero, corral u otra ubicación." action={hasPermission('MOVIMIENTO_CREAR') ? <Button onClick={() => setCreating(true)}><Plus size={18} />Crear movimiento</Button> : undefined} />}
+    <ListToolbar search={list.search} onSearch={list.setSearch} order={list.order} onOrder={list.setOrder} placeholder="Buscar por motivo, origen, destino o animal…" count={list.visible.length} />
 
-    {creating ? <Modal title="Nuevo movimiento" wide onClose={() => setCreating(false)} footer={<><Button variant="ghost" onClick={() => setCreating(false)}>Cancelar</Button><Button onClick={() => create.mutate()} loading={create.isPending} disabled={!form.selection.animals.some((item) => item.seleccionado)}>Guardar borrador</Button></>}>
+    {movements.isLoading ? <LoadingState /> : movements.isError ? <ErrorState message={(movements.error as Error).message} onRetry={() => void movements.refetch()} /> : list.visible.length ? <Card className="record-list movements-record-list"><div className="record-list-head"><span>Movimiento</span><span>Fecha</span><span>Origen</span><span>Destino</span><span>Estado</span><span /></div>{list.visible.map((movement) => <button type="button" className="record-list-row" key={movement.id_movimiento} onClick={() => setSelected(movement)}><span><strong>{movement.motivo || 'Movimiento de animales'}</strong><small>{movement.total_seleccionados} de {movement.total_candidatos} animales</small></span><span><strong>{formatDateTime(movement.fecha_movimiento)}</strong></span><span><strong>{movement.ubicacion_origen || movement.grupo_origen || 'Varias ubicaciones'}</strong></span><span><strong>{movement.ubicacion_destino || movement.grupo_destino || 'Sin destino'}</strong></span><span><Badge tone={movementTone(movement.estado)}>{humanizeCode(movement.estado)}</Badge></span><span className="record-row-actions">{movement.estado === 'BORRADOR' && hasPermission('MOVIMIENTO_CREAR') ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); editMovement(movement); }}><Edit3 size={16} />Editar</Button> : null}<ChevronRight size={18} /></span></button>)}</Card> : <EmptyState icon={ArrowLeftRight} title="Aún no hay movimientos" description="Registra un cambio de grupo, potrero, corral u otra ubicación." action={hasPermission('MOVIMIENTO_CREAR') ? <Button onClick={() => setCreating(true)}><Plus size={18} />Crear movimiento</Button> : undefined} />}
+
+    {selected ? <MovementDetailModal item={selected} onClose={() => setSelected(null)} onEdit={selected.estado === 'BORRADOR' && hasPermission('MOVIMIENTO_CREAR') ? () => editMovement(selected) : undefined} onApply={selected.estado === 'BORRADOR' && hasPermission('MOVIMIENTO_CREAR') ? () => action.mutate({ id: selected.id_movimiento, kind: 'apply' }) : undefined} onCancel={selected.estado === 'BORRADOR' && hasPermission('MOVIMIENTO_ANULAR') ? () => action.mutate({ id: selected.id_movimiento, kind: 'cancel' }) : undefined} loading={action.isPending} /> : null}
+
+    {creating ? <Modal title={editing ? 'Editar movimiento' : 'Nuevo movimiento'} wide onClose={() => { setCreating(false); setEditing(null); }} footer={<><Button variant="ghost" onClick={() => { setCreating(false); setEditing(null); }}>Cancelar</Button><Button onClick={() => save.mutate()} loading={save.isPending} disabled={!form.selection.animals.some((item) => item.seleccionado)}>{editing ? 'Guardar cambios' : 'Guardar borrador'}</Button></>}>
       <div className="form-stack">
         <div className="form-section">
           <h3>Destino y fecha</h3>
@@ -150,4 +146,8 @@ export function MovementsPage() {
       </div>
     </Modal> : null}
   </div>;
+}
+
+function MovementDetailModal({ item, onClose, onEdit, onApply, onCancel, loading }: { item: Movement; onClose: () => void; onEdit?: () => void; onApply?: () => void; onCancel?: () => void; loading: boolean }) {
+  return <Modal title="Detalle del movimiento" wide onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cerrar</Button>{onCancel ? <Button variant="ghost" onClick={onCancel} loading={loading}><Ban size={17} />Cancelar movimiento</Button> : null}{onEdit ? <Button variant="secondary" onClick={onEdit}><Edit3 size={17} />Editar</Button> : null}{onApply ? <Button onClick={onApply} loading={loading}><CheckCircle2 size={17} />Aplicar</Button> : null}</>}><div className="record-detail"><div className="record-detail-heading"><div className="record-icon"><ArrowLeftRight size={22} /></div><div><h2>{item.motivo || 'Movimiento de animales'}</h2><p>{formatDateTime(item.fecha_movimiento)}</p></div><Badge tone={movementTone(item.estado)}>{humanizeCode(item.estado)}</Badge></div><div className="detail-grid"><div><small>Origen</small><strong>{item.ubicacion_origen || item.grupo_origen || 'Varias ubicaciones'}</strong></div><div><small>Destino</small><strong>{item.ubicacion_destino || item.grupo_destino || 'Sin destino'}</strong></div><div><small>Seleccionados</small><strong>{item.total_seleccionados}</strong></div><div><small>Candidatos</small><strong>{item.total_candidatos}</strong></div></div><section><h3>Animales</h3><div className="detail-lines compact">{item.detalles.map((detail) => <div key={detail.id_detalle} className={!detail.seleccionado ? 'excluded' : ''}><span><strong>{detail.animal}</strong><small>{detail.arete ? `Arete ${detail.arete}` : 'Sin arete'}</small></span><Badge tone={detail.seleccionado ? 'success' : 'neutral'}>{detail.seleccionado ? humanizeCode(detail.estado) : 'Excluido'}</Badge></div>)}</div></section>{item.observaciones ? <section><h3>Observaciones</h3><p>{item.observaciones}</p></section> : null}</div></Modal>;
 }

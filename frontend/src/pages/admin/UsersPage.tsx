@@ -1,10 +1,11 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Edit3, MailCheck, Search, Shield, UserCog, UserRound } from 'lucide-react';
+import { Check, ChevronRight, Edit3, Search, Shield, UserCog, UserRound } from 'lucide-react';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
-import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, LoadingState, Modal, PageHeader, SearchBox } from '../../components/ui';
+import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, ListToolbar, LoadingState, Modal, PageHeader } from '../../components/ui';
+import { useListControls } from '../../hooks/useListControls';
 import type { AdminUser, RoleItem } from '../../types/api';
 import { formatDateTime, nullIfEmpty } from '../../utils';
 
@@ -18,19 +19,13 @@ export function UsersPage() {
   const canAdmin = hasPermission('USUARIO_ADMINISTRAR');
   const toast = useToast();
   const client = useQueryClient();
-  const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<AdminUser | null>(null);
+  const [selected, setSelected] = useState<AdminUser | null>(null);
 
   const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => apiRequest<AdminUser[]>('/usuarios') });
   const rolesQuery = useQuery({ queryKey: ['roles'], queryFn: () => apiRequest<RoleItem[]>('/roles') });
 
-  const visible = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return usersQuery.data ?? [];
-    return (usersQuery.data ?? []).filter((item) =>
-      `${item.nombres} ${item.apellidos} ${item.correo}`.toLowerCase().includes(term),
-    );
-  }, [search, usersQuery.data]);
+  const list = useListControls({ items: usersQuery.data ?? [], storageKey: 'users', searchText: (item) => `${item.nombres} ${item.apellidos} ${item.correo} ${item.telefono ?? ''} ${item.roles.map((role) => role.nombre).join(' ')}`, dateValue: (item) => item.created_at, nameValue: (item) => `${item.nombres} ${item.apellidos}` });
 
   if (usersQuery.isLoading || rolesQuery.isLoading) return <LoadingState />;
   if (usersQuery.isError) return <ErrorState message={(usersQuery.error as Error).message} onRetry={() => void usersQuery.refetch()} />;
@@ -42,58 +37,15 @@ export function UsersPage() {
         title="Usuarios"
         description="Las cuentas nuevas quedan sin rol y sin acceso a los datos hasta que un administrador las autorice."
       />
-      <div className="toolbar">
-        <SearchBox value={search} onChange={setSearch} placeholder="Buscar por nombre o correo…" />
-        <Badge tone="info">{visible.length} usuarios</Badge>
-      </div>
+      <ListToolbar search={list.search} onSearch={list.setSearch} order={list.order} onOrder={list.setOrder} placeholder="Buscar nombre, correo, teléfono o rol…" count={list.visible.length} />
 
-      {!visible.length ? (
+      {!list.visible.length ? (
         <Card><EmptyState icon={Search} title="No hay coincidencias" description="No encontramos usuarios con ese criterio." /></Card>
       ) : (
-        <div className="user-admin-grid">
-          {visible.map((item) => (
-            <Card key={item.id_usuario} className="user-admin-card">
-              <div className="user-admin-header">
-                <div className="admin-avatar">
-                  {item.foto_perfil_url
-                    ? <img src={item.foto_perfil_url} alt="" />
-                    : <span>{item.nombres[0]}{item.apellidos[0]}</span>}
-                </div>
-                <div className="user-admin-title">
-                  <h3>{item.nombres} {item.apellidos}</h3>
-                  <span>{item.correo}</span>
-                </div>
-                <Badge tone={item.activo ? 'success' : 'danger'}>{item.activo ? 'Activa' : 'Inactiva'}</Badge>
-              </div>
-
-              <div className="user-status-row">
-                <span><MailCheck size={16} />{item.correo_verificado ? 'Correo verificado' : 'Correo pendiente'}</span>
-                <span>Último acceso: {formatDateTime(item.ultimo_acceso)}</span>
-              </div>
-
-              <div className="assigned-roles">
-                <strong><Shield size={16} /> Roles asignados</strong>
-                <div>
-                  {item.roles.length
-                    ? item.roles.map((role) => <Badge key={role.id_rol} tone="info">{role.nombre}</Badge>)
-                    : <Badge tone="warning">Sin rol</Badge>}
-                </div>
-              </div>
-
-              {canAdmin ? (
-                <Button
-                  variant="secondary"
-                  disabled={item.id_usuario === currentUser?.id}
-                  title={item.id_usuario === currentUser?.id ? 'Modifica tus datos desde Mi perfil.' : undefined}
-                  onClick={() => setEditing(item)}
-                >
-                  <Edit3 size={17} />{item.id_usuario === currentUser?.id ? 'Mi cuenta: usar Mi perfil' : 'Editar cuenta y roles'}
-                </Button>
-              ) : null}
-            </Card>
-          ))}
-        </div>
+        <Card className="record-list users-record-list"><div className="record-list-head"><span>Usuario</span><span>Correo</span><span>Roles</span><span>Último acceso</span><span>Estado</span><span /></div>{list.visible.map((item) => <button type="button" className="record-list-row" key={item.id_usuario} onClick={() => setSelected(item)}><span className="record-person"><span className="admin-avatar">{item.foto_perfil_url ? <img src={item.foto_perfil_url} alt="" /> : <span>{item.nombres[0]}{item.apellidos[0]}</span>}</span><span><strong>{item.nombres} {item.apellidos}</strong><small>{item.telefono || 'Sin teléfono'}</small></span></span><span><strong>{item.correo}</strong><small>{item.correo_verificado ? 'Verificado' : 'Pendiente'}</small></span><span><strong>{item.roles.length ? item.roles.map((role) => role.nombre).join(', ') : 'Sin rol'}</strong></span><span><strong>{formatDateTime(item.ultimo_acceso)}</strong></span><span><Badge tone={item.activo ? 'success' : 'danger'}>{item.activo ? 'Activa' : 'Inactiva'}</Badge></span><span className="record-row-actions">{canAdmin && item.id_usuario !== currentUser?.id ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); setEditing(item); }}><Edit3 size={16} />Editar</Button> : null}<ChevronRight size={18} /></span></button>)}</Card>
       )}
+
+      {selected ? <UserDetail user={selected} onClose={() => setSelected(null)} onEdit={canAdmin && selected.id_usuario !== currentUser?.id ? () => { setEditing(selected); setSelected(null); } : undefined} /> : null}
 
       {editing ? (
         <UserEditor
@@ -111,6 +63,10 @@ export function UsersPage() {
       ) : null}
     </div>
   );
+}
+
+function UserDetail({ user, onClose, onEdit }: { user: AdminUser; onClose: () => void; onEdit?: () => void }) {
+  return <Modal title="Detalle del usuario" wide onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cerrar</Button>{onEdit ? <Button onClick={onEdit}><Edit3 size={17} />Editar cuenta y roles</Button> : null}</>}><div className="record-detail"><div className="record-detail-heading"><div className="admin-avatar large">{user.foto_perfil_url ? <img src={user.foto_perfil_url} alt="" /> : <span>{user.nombres[0]}{user.apellidos[0]}</span>}</div><div><h2>{user.nombres} {user.apellidos}</h2><p>{user.correo}</p></div><Badge tone={user.activo ? 'success' : 'danger'}>{user.activo ? 'Activa' : 'Inactiva'}</Badge></div><div className="detail-grid"><div><small>Teléfono</small><strong>{user.telefono || 'Sin registrar'}</strong></div><div><small>Fecha de nacimiento</small><strong>{user.fecha_nacimiento || 'Sin registrar'}</strong></div><div><small>Correo</small><strong>{user.correo_verificado ? 'Verificado' : 'Pendiente de verificación'}</strong></div><div><small>Último acceso</small><strong>{formatDateTime(user.ultimo_acceso)}</strong></div><div><small>Cuenta creada</small><strong>{formatDateTime(user.created_at)}</strong></div></div><section><h3><Shield size={17} /> Roles asignados</h3><div className="badge-list">{user.roles.length ? user.roles.map((role) => <Badge key={role.id_rol} tone="info">{role.nombre}</Badge>) : <Badge tone="warning">Sin rol</Badge>}</div></section></div></Modal>;
 }
 
 function UserEditor({

@@ -1,4 +1,4 @@
-import { CalendarDays, LoaderCircle, Search, X, type LucideIcon } from 'lucide-react';
+import { ArrowUpDown, CalendarDays, LoaderCircle, Search, X, type LucideIcon } from 'lucide-react';
 import { useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 
 export function Button({ children, className = '', variant = 'primary', loading, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; loading?: boolean }) {
@@ -53,6 +53,13 @@ export function Badge({ children, tone = 'neutral' }: { children: ReactNode; ton
 
 export function SearchBox({ value, onChange, placeholder = 'Buscar…' }: { value: string; onChange: (value: string) => void; placeholder?: string }) {
   return <div className="search-box"><Search size={18} /><input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></div>;
+}
+
+export function ListToolbar({ search, onSearch, order, onOrder, placeholder = 'Buscar…', count }: { search: string; onSearch: (value: string) => void; order: string; onOrder: (value: 'NEWEST' | 'OLDEST' | 'AZ' | 'ZA') => void; placeholder?: string; count?: number }) {
+  return <div className="toolbar list-toolbar">
+    <SearchBox value={search} onChange={onSearch} placeholder={placeholder} />
+    <div className="list-order"><ArrowUpDown size={17} /><Select aria-label="Ordenar registros" value={order} onChange={(event) => onOrder(event.target.value as 'NEWEST' | 'OLDEST' | 'AZ' | 'ZA')}><option value="NEWEST">Más recientes</option><option value="OLDEST">Más antiguos</option><option value="AZ">Nombre A–Z</option><option value="ZA">Nombre Z–A</option></Select>{count == null ? null : <Badge tone="info">{count}</Badge>}</div>
+  </div>;
 }
 
 export function ConfirmDialog({ title, message, onConfirm, onClose, loading }: { title: string; message: string; onConfirm: () => void; onClose: () => void; loading?: boolean }) {

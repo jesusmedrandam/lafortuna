@@ -4,8 +4,9 @@ import { CalendarDays, ChevronRight, Clock3, Droplets, Edit3, Plus, Sprout, Tras
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
-import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
+import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, ListToolbar, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
+import { useListControls } from '../../hooks/useListControls';
 import type { Pasture, PastureDetail } from '../../types/api';
 import { formatDate, formatNumber, nullIfEmpty, numberOrNull } from '../../utils';
 
@@ -26,13 +27,15 @@ function PastureModal({ pasture, onClose }: { pasture?: Pasture | null; onClose:
 export function PasturesPage() {
   const { hasPermission } = useAuth(); const [editing, setEditing] = useState<Pasture | null | undefined>(undefined); const [detailId, setDetailId] = useState<string | null>(null);
   const query = useQuery({ queryKey: ['pastures'], queryFn: () => apiRequest<Pasture[]>('/potreros') });
+  const list = useListControls({ items: query.data ?? [], storageKey: 'pastures', searchText: (pasture) => `${pasture.nombre} ${pasture.codigo ?? ''} ${pasture.tipo_uso} ${pasture.pastos.map((item) => item.pasto).join(' ')}`, nameValue: (pasture) => pasture.nombre, defaultOrder: 'AZ' });
   const detail = useQuery({ queryKey: ['pastures', detailId, 'summary'], queryFn: () => apiRequest<PastureDetail>(`/potreros/${detailId}/resumen`), enabled: Boolean(detailId) });
   const openEdit = (pasture: Pasture) => { setDetailId(null); setEditing(pasture); };
   return <div>
     <PageHeader title="Potreros" description="Consulta ocupación, descanso, pastos e historial de cada potrero." action={hasPermission('POTRERO_ADMINISTRAR') ? <Button onClick={() => setEditing(null)}><Plus size={18} />Nuevo potrero</Button> : undefined} />
-    {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : query.data?.length === 0 ? <EmptyState icon={Sprout} title="Sin potreros" description="Registra el primer potrero de la propiedad." /> : <Card className="pasture-list">
+    <ListToolbar search={list.search} onSearch={list.setSearch} order={list.order} onOrder={list.setOrder} placeholder="Buscar potrero, código, uso o pasto…" count={list.visible.length} />
+    {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : list.visible.length === 0 ? <EmptyState icon={Sprout} title="Sin potreros" description="Registra el primer potrero de la propiedad." /> : <Card className="pasture-list">
       <div className="pasture-list-head"><span>Potrero</span><span>Área</span><span>Pastos</span><span>Estado actual</span><span /></div>
-      {query.data?.map((pasture) => <button type="button" className="pasture-list-row" key={pasture.id_potrero} onClick={() => setDetailId(pasture.id_potrero)}>
+      {list.visible.map((pasture) => <button type="button" className="pasture-list-row" key={pasture.id_potrero} onClick={() => setDetailId(pasture.id_potrero)}>
         <span className="pasture-name"><span className="pasture-mini-icon"><Sprout size={18} /></span><span><strong>{pasture.nombre}</strong><small>{pasture.tipo_uso}{pasture.codigo ? ` · ${pasture.codigo}` : ''}</small></span></span>
         <span><strong>{pasture.area != null ? `${formatNumber(pasture.area)}${pasture.unidad_area ? ` ${pasture.unidad_area}` : ''}` : 'Sin registrar'}</strong><small>{pasture.capacidad_estimada != null ? `Capacidad: ${pasture.capacidad_estimada}` : 'Sin capacidad'}</small></span>
         <span className="pasture-grass-summary"><strong>{pasture.pastos.length ? pasture.pastos.map((item) => item.pasto).filter(Boolean).join(', ') : 'Sin pastos'}</strong><small>{pasture.pastos.length} {pasture.pastos.length === 1 ? 'tipo registrado' : 'tipos registrados'}</small></span>

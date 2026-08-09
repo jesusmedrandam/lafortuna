@@ -365,6 +365,14 @@ export interface MovementDetail {
   seleccionado: boolean;
   estado: string;
   mensaje_error: string | null;
+  nombre?: string;
+  codigo_arete?: string | null;
+  sexo?: 'MACHO' | 'HEMBRA';
+  id_grupo_actual?: string | null;
+  grupo?: string | null;
+  id_ubicacion_actual?: string | null;
+  ubicacion?: string | null;
+  observaciones?: string | null;
 }
 
 export interface Movement {
@@ -396,6 +404,15 @@ export interface SanitaryDetail {
   seleccionado: boolean;
   dosis_aplicada: number | string | null;
   estado: string;
+  nombre?: string;
+  codigo_arete?: string | null;
+  sexo?: 'MACHO' | 'HEMBRA';
+  id_grupo_actual?: string | null;
+  grupo?: string | null;
+  id_ubicacion_actual?: string | null;
+  ubicacion?: string | null;
+  id_unidad_dosis?: string | null;
+  observaciones?: string | null;
 }
 
 export interface SanitaryCampaign {
@@ -422,8 +439,10 @@ export interface SanitaryCampaign {
 }
 
 export interface CleaningProduct {
+  id_producto: string;
   producto: string;
   cantidad_total: number | string;
+  id_unidad: string;
   unidad: string;
   cantidad_por_tanque: number | string | null;
   observaciones: string | null;
