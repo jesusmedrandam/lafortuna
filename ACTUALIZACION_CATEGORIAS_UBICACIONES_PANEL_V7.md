@@ -12,6 +12,14 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/20260813_categorias_ubicac
 
 Si las dos primeras ya fueron aplicadas correctamente, ejecuta únicamente `20260813_categorias_ubicaciones_panel.sql`.
 
+Para asignar el fierro `M7L` y la categoría `Animales en propiedad` a todos los animales existentes, después de las migraciones anteriores puedes ejecutar:
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/20260814_asignar_m7l_y_categoria_en_propiedad.sql
+```
+
+El script reutiliza M7L si ya existe, por lo que conserva su fotografía. No cambia la condición operativa de los animales.
+
 ## Cambios incluidos
 
 - Nuevo catálogo **Categorías de animales**, con los valores iniciales `Animales en propiedad` y `Animales fuera de propiedad`.
@@ -31,4 +39,3 @@ Si las dos primeras ya fueron aplicadas correctamente, ejecuta únicamente `2026
 3. Desplegar el backend y frontend de esta versión.
 4. Registrar una ubicación de prueba desde `Catálogos → Categorías de animales → Otras propiedades`.
 5. Asignar un animal a esa ubicación y verificar el panel personalizado.
-

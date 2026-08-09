@@ -49,5 +49,5 @@ El archivo `render.yaml` crea el Web Service. Configura manualmente las variable
 
 - El proyecto apunta exclusivamente a la base nueva.
 - El sistema anterior no necesita cambios.
-- Para la versión 7 consulta `ACTUALIZACION_CATEGORIAS_UBICACIONES_PANEL_V7.md` y aplica las migraciones indicadas antes de desplegar.
+- Para la versión 8 consulta `ACTUALIZACION_MOVIL_Y_ASIGNACION_M7L_V8.md` y aplica las migraciones indicadas antes de desplegar.
 - Antes de producción conviene ejecutar pruebas de integración contra una copia de la base.
