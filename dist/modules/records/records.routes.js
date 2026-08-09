@@ -60,13 +60,7 @@ recordsRouter.patch('/:module/:id', asyncHandler(async (req, res) => {
     const d = definition(routeParam(req.params.module, 'module'));
     assertPermission(req.user, d.write);
     const data = allowedBody(req.body, d.columns);
-    const id = routeParam(req.params.id, 'id');
-    const current = (await pool.query(`SELECT ${d.animalColumn} id_animal FROM ${d.table} WHERE ${d.id}=$1 AND deleted_at IS NULL`, [id])).rows[0];
-    if (!current)
-        throw new NotFoundError();
-    const animalId = typeof data[d.animalColumn] === 'string' ? String(data[d.animalColumn]) : current.id_animal;
-    await assertAnimalOperationAllowed(pool, animalId, d.operation);
-    const row = (await pool.query(buildUpdate(d.table, d.id, id, data))).rows[0];
+    const row = (await pool.query(buildUpdate(d.table, d.id, routeParam(req.params.id, 'id'), data))).rows[0];
     if (!row)
         throw new NotFoundError();
     return ok(res, row);
@@ -143,11 +137,8 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
     try {
         const result = await transaction(async (client) => {
             const pregnancy = (await client.query(`SELECT p.id_prenez,p.id_vaca,p.id_padre,p.estado,
-          v.id_animal,v.id_especie,v.id_categoria_animal,v.sexo,v.estado animal_estado,
-          COALESCE(g.id_propiedad,u.id_propiedad) id_propiedad
+          v.id_animal,v.id_especie,v.id_categoria_animal,v.sexo,v.estado animal_estado
          FROM prenez p JOIN animal v ON v.id_animal=p.id_vaca AND v.deleted_at IS NULL
-         LEFT JOIN grupo g ON g.id_grupo=v.id_grupo_actual
-         LEFT JOIN ubicacion u ON u.id_ubicacion=v.id_ubicacion_actual
          WHERE p.id_prenez=$1 AND p.deleted_at IS NULL FOR UPDATE OF p`, [input.id_prenez])).rows[0];
             if (!pregnancy || pregnancy.estado !== 'CONFIRMADA') {
                 throw new ValidationError('El parto debe registrarse desde una preñez confirmada y pendiente.');
@@ -156,7 +147,6 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
                 id_animal: pregnancy.id_animal,
                 id_especie: pregnancy.id_especie,
                 id_categoria_animal: pregnancy.id_categoria_animal,
-                id_propiedad: pregnancy.id_propiedad,
                 sexo: pregnancy.sexo,
                 estado: pregnancy.animal_estado,
             };
@@ -203,7 +193,7 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
                     throw new ValidationError(`La especie de la cría ${order} debe coincidir con la de la madre.`);
                 }
                 if (item.animal.id_grupo_actual) {
-                    const group = (await client.query(`SELECT id_especie,id_categoria_animal,id_propiedad,id_ubicacion_actual,activo FROM grupo WHERE id_grupo=$1 AND deleted_at IS NULL`, [item.animal.id_grupo_actual])).rows[0];
+                    const group = (await client.query(`SELECT id_especie,id_categoria_animal,id_ubicacion_actual,activo FROM grupo WHERE id_grupo=$1 AND deleted_at IS NULL`, [item.animal.id_grupo_actual])).rows[0];
                     if (!group || !group.activo)
                         throw new ValidationError(`El grupo de la cría ${order} no está disponible.`);
                     if (group.id_especie && group.id_especie !== mother.id_especie) {
@@ -211,9 +201,6 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
                     }
                     if (group.id_categoria_animal !== mother.id_categoria_animal) {
                         throw new ValidationError(`El grupo de la cría ${order} no coincide con la situación de propiedad de la madre.`);
-                    }
-                    if (mother.id_propiedad && group.id_propiedad !== mother.id_propiedad) {
-                        throw new ValidationError(`El grupo de la cría ${order} debe pertenecer a la misma propiedad que la madre.`);
                     }
                     if (!group.id_ubicacion_actual || group.id_ubicacion_actual !== (item.animal.id_ubicacion_actual ?? null)) {
                         throw new ValidationError(`La ubicación de la cría ${order} debe coincidir con la ubicación de su grupo.`);
