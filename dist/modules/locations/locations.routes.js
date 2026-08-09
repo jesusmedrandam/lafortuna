@@ -5,31 +5,47 @@ import { transaction } from '../../database/transaction.js';
 import { asyncHandler } from '../../core/async-handler.js';
 import { routeParam } from '../../core/route-param.js';
 import { created, noContent, ok } from '../../core/http.js';
-import { NotFoundError } from '../../core/errors.js';
+import { ConflictError, NotFoundError } from '../../core/errors.js';
 import { requirePermission } from '../../middleware/permission.js';
 import { buildInsert, buildUpdate } from '../shared/sql.js';
-const locationSchema = z.object({ codigo: z.string().max(50).nullable().optional(), nombre: z.string().trim().min(2).max(120), tipo: z.enum(['POTRERO', 'CORRAL', 'OTRO']), id_categoria_animal: z.string().uuid(), descripcion: z.string().max(300).nullable().optional(), latitud: z.number().min(-90).max(90).nullable().optional(), longitud: z.number().min(-180).max(180).nullable().optional(), activo: z.boolean().optional() });
+const locationSchema = z.object({ codigo: z.string().max(50).nullable().optional(), nombre: z.string().trim().min(2).max(120), tipo: z.enum(['POTRERO', 'CORRAL', 'OTRO']), id_propiedad: z.string().uuid(), descripcion: z.string().max(300).nullable().optional(), latitud: z.number().min(-90).max(90).nullable().optional(), longitud: z.number().min(-180).max(180).nullable().optional(), activo: z.boolean().optional() });
 const externalLocationSchema = locationSchema.extend({ tipo: z.literal('OTRO') });
-const propertyLocationSchema = locationSchema.omit({ tipo: true, id_categoria_animal: true });
+const propertyLocationSchema = locationSchema.omit({ tipo: true });
 const pastureSchema = z.object({ ubicacion: propertyLocationSchema, area: z.number().positive().nullable().optional(), id_unidad_area: z.string().uuid().nullable().optional(), id_tipo_uso_potrero: z.string().uuid(), capacidad_estimada: z.number().int().min(0).nullable().optional(), disponibilidad_agua: z.boolean().nullable().optional(), fecha_ultimo_descanso: z.string().date().nullable().optional(), observaciones: z.string().nullable().optional(), pastos: z.array(z.object({ id_tipo_pasto: z.string().uuid(), porcentaje_estimado: z.number().min(0).max(100).nullable().optional(), area_estimada: z.number().positive().nullable().optional(), id_unidad_area: z.string().uuid().nullable().optional(), fecha_siembra: z.string().date().nullable().optional(), observaciones: z.string().max(300).nullable().optional() })).default([]) });
 const corralSchema = z.object({ ubicacion: propertyLocationSchema, id_tipo_corral: z.string().uuid(), area: z.number().positive().nullable().optional(), id_unidad_area: z.string().uuid().nullable().optional(), capacidad: z.number().int().min(0).nullable().optional(), material_piso: z.string().max(100).nullable().optional(), cubierto: z.boolean().nullable().optional(), disponibilidad_agua: z.boolean().nullable().optional(), observaciones: z.string().nullable().optional() });
+async function assertPropertyChangeAllowed(database, idLocation, nextProperty) {
+    if (!nextProperty)
+        return;
+    const current = (await database.query('SELECT id_propiedad FROM ubicacion WHERE id_ubicacion=$1 AND deleted_at IS NULL', [idLocation])).rows[0];
+    if (!current)
+        throw new NotFoundError('Ubicación no encontrada.');
+    if (current.id_propiedad === nextProperty)
+        return;
+    const related = await database.query(`SELECT
+    EXISTS(SELECT 1 FROM animal WHERE id_ubicacion_actual=$1 AND estado='ACTIVO' AND deleted_at IS NULL) animales,
+    EXISTS(SELECT 1 FROM grupo WHERE id_ubicacion_actual=$1 AND deleted_at IS NULL) grupos`, [idLocation]);
+    if (related.rows[0]?.animales || related.rows[0]?.grupos) {
+        throw new ConflictError('No puede cambiar la propiedad de un potrero o corral ocupado o asignado a un grupo. Realiza primero los movimientos correspondientes.');
+    }
+}
 export const locationsRouter = Router();
-locationsRouter.get('/', requirePermission('UBICACION_CONSULTAR'), asyncHandler(async (req, res) => { const tipo = req.query.tipo; const categoria = req.query.id_categoria_animal; const params = []; const filters = ['u.deleted_at IS NULL']; if (tipo) {
+locationsRouter.get('/', requirePermission('UBICACION_CONSULTAR'), asyncHandler(async (req, res) => { const tipo = req.query.tipo; const propiedad = req.query.id_propiedad; const params = []; const filters = ['u.deleted_at IS NULL']; if (tipo) {
     params.push(tipo);
     filters.push(`u.tipo=$${params.length}`);
-} if (categoria) {
-    params.push(categoria);
-    filters.push(`u.id_categoria_animal=$${params.length}`);
-} return ok(res, (await pool.query(`SELECT u.*,ca.nombre categoria,ca.codigo categoria_codigo,(SELECT COUNT(*)::int FROM animal a WHERE a.id_ubicacion_actual=u.id_ubicacion AND a.deleted_at IS NULL AND a.estado='ACTIVO') total_animales FROM ubicacion u JOIN categoria_animal ca ON ca.id_categoria_animal=u.id_categoria_animal WHERE ${filters.join(' AND ')} ORDER BY u.activo DESC,ca.nombre,u.nombre`, params)).rows); }));
+} if (propiedad) {
+    params.push(propiedad);
+    filters.push(`u.id_propiedad=$${params.length}`);
+} return ok(res, (await pool.query(`SELECT u.*,ca.nombre categoria,ca.codigo categoria_codigo,pg.nombre propiedad,pg.es_principal propiedad_principal,(SELECT COUNT(*)::int FROM animal a WHERE a.id_ubicacion_actual=u.id_ubicacion AND a.deleted_at IS NULL AND a.estado='ACTIVO') total_animales FROM ubicacion u JOIN categoria_animal ca ON ca.id_categoria_animal=u.id_categoria_animal JOIN propiedad_ganadera pg ON pg.id_propiedad=u.id_propiedad WHERE ${filters.join(' AND ')} ORDER BY u.activo DESC,pg.es_principal DESC,pg.nombre,u.tipo,u.nombre`, params)).rows); }));
 locationsRouter.post('/', requirePermission('UBICACION_ADMINISTRAR'), asyncHandler(async (req, res) => created(res, (await pool.query(buildInsert('ubicacion', externalLocationSchema.parse(req.body)))).rows[0])));
-locationsRouter.patch('/:id', requirePermission('UBICACION_ADMINISTRAR'), asyncHandler(async (req, res) => { const row = (await pool.query(buildUpdate('ubicacion', 'id_ubicacion', routeParam(req.params.id, 'id'), locationSchema.partial().parse(req.body)))).rows[0]; if (!row)
+locationsRouter.patch('/:id', requirePermission('UBICACION_ADMINISTRAR'), asyncHandler(async (req, res) => { const id = routeParam(req.params.id, 'id'); const input = locationSchema.partial().parse(req.body); await assertPropertyChangeAllowed(pool, id, input.id_propiedad); const row = (await pool.query(buildUpdate('ubicacion', 'id_ubicacion', id, input))).rows[0]; if (!row)
     throw new NotFoundError(); return ok(res, row); }));
 locationsRouter.delete('/:id', requirePermission('UBICACION_ADMINISTRAR'), asyncHandler(async (req, res) => { const r = await pool.query('UPDATE ubicacion SET deleted_at=NOW(),activo=FALSE WHERE id_ubicacion=$1 AND deleted_at IS NULL', [routeParam(req.params.id, 'id')]); if (!r.rowCount)
     throw new NotFoundError(); return noContent(res); }));
 export const pasturesRouter = Router();
 pasturesRouter.get('/', requirePermission('POTRERO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(`
   WITH base AS (
-    SELECT p.*,u.nombre,u.codigo,u.descripcion,u.activo,tu.nombre tipo_uso,um.simbolo unidad_area,
+    SELECT p.*,u.nombre,u.codigo,u.descripcion,u.activo,u.id_propiedad,
+      pg.nombre propiedad,pg.es_principal propiedad_principal,tu.nombre tipo_uso,um.simbolo unidad_area,
       (SELECT COUNT(*)::int FROM animal a
         WHERE a.id_ubicacion_actual=u.id_ubicacion AND a.deleted_at IS NULL AND a.estado='ACTIVO') total_animales,
       COALESCE(jsonb_agg(jsonb_build_object(
@@ -39,12 +55,13 @@ pasturesRouter.get('/', requirePermission('POTRERO_CONSULTAR'), asyncHandler(asy
       )) FILTER(WHERE pp.id_potrero_pasto IS NOT NULL),'[]') pastos
     FROM potrero p
     JOIN ubicacion u ON u.id_ubicacion=p.id_ubicacion
+    JOIN propiedad_ganadera pg ON pg.id_propiedad=u.id_propiedad
     JOIN tipo_uso_potrero tu ON tu.id_tipo_uso_potrero=p.id_tipo_uso_potrero
     LEFT JOIN unidad_medida um ON um.id_unidad=p.id_unidad_area
     LEFT JOIN potrero_pasto pp ON pp.id_potrero=p.id_potrero AND pp.deleted_at IS NULL
     LEFT JOIN tipo_pasto tp ON tp.id_tipo_pasto=pp.id_tipo_pasto
     WHERE p.deleted_at IS NULL AND u.deleted_at IS NULL
-    GROUP BY p.id_potrero,u.id_ubicacion,tu.nombre,um.simbolo
+    GROUP BY p.id_potrero,u.id_ubicacion,pg.id_propiedad,tu.nombre,um.simbolo
   )
   SELECT base.*,
     CASE WHEN base.total_animales>0 THEN 'OCUPADO' ELSE 'DESCANSO' END estado_ocupacion,
@@ -83,7 +100,8 @@ pasturesRouter.get('/', requirePermission('POTRERO_CONSULTAR'), asyncHandler(asy
 pasturesRouter.get('/:id/resumen', requirePermission('POTRERO_CONSULTAR'), asyncHandler(async (req, res) => {
     const id = routeParam(req.params.id, 'id');
     const pasture = (await pool.query(`
-    SELECT p.*,u.nombre,u.codigo,u.descripcion,u.activo,tu.nombre tipo_uso,um.simbolo unidad_area,
+    SELECT p.*,u.nombre,u.codigo,u.descripcion,u.activo,u.id_propiedad,
+      pg.nombre propiedad,pg.es_principal propiedad_principal,tu.nombre tipo_uso,um.simbolo unidad_area,
       (SELECT COUNT(*)::int FROM animal a
         WHERE a.id_ubicacion_actual=u.id_ubicacion AND a.deleted_at IS NULL AND a.estado='ACTIVO') total_animales,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
@@ -95,6 +113,7 @@ pasturesRouter.get('/:id/resumen', requirePermission('POTRERO_CONSULTAR'), async
       WHERE pp.id_potrero=p.id_potrero AND pp.deleted_at IS NULL),'[]') pastos
     FROM potrero p
     JOIN ubicacion u ON u.id_ubicacion=p.id_ubicacion
+    JOIN propiedad_ganadera pg ON pg.id_propiedad=u.id_propiedad
     JOIN tipo_uso_potrero tu ON tu.id_tipo_uso_potrero=p.id_tipo_uso_potrero
     LEFT JOIN unidad_medida um ON um.id_unidad=p.id_unidad_area
     WHERE p.id_potrero=$1 AND p.deleted_at IS NULL AND u.deleted_at IS NULL
@@ -159,19 +178,23 @@ pasturesRouter.get('/:id/resumen', requirePermission('POTRERO_CONSULTAR'), async
 }));
 pasturesRouter.post('/', requirePermission('POTRERO_ADMINISTRAR'), asyncHandler(async (req, res) => { const input = pastureSchema.parse(req.body); const result = await transaction(async (c) => { const u = (await c.query(buildInsert('ubicacion', { ...input.ubicacion, tipo: 'POTRERO' }))).rows[0]; const { ubicacion, pastos, ...rest } = input; const p = (await c.query(buildInsert('potrero', { ...rest, id_ubicacion: u.id_ubicacion }))).rows[0]; for (const item of pastos)
     await c.query(buildInsert('potrero_pasto', { ...item, id_potrero: p.id_potrero })); return { ...p, ubicacion: u, pastos }; }, req.user.id); return created(res, result); }));
-pasturesRouter.patch('/:id', requirePermission('POTRERO_ADMINISTRAR'), asyncHandler(async (req, res) => { const input = pastureSchema.partial().parse(req.body); const result = await transaction(async (c) => { const found = await c.query('SELECT id_ubicacion FROM potrero WHERE id_potrero=$1 AND deleted_at IS NULL', [routeParam(req.params.id, 'id')]); if (!found.rows[0])
-    throw new NotFoundError(); if (input.ubicacion)
-    await c.query(buildUpdate('ubicacion', 'id_ubicacion', found.rows[0].id_ubicacion, input.ubicacion)); const { ubicacion, pastos, ...rest } = input; if (Object.keys(rest).length)
-    await c.query(buildUpdate('potrero', 'id_potrero', routeParam(req.params.id, 'id'), rest)); if (pastos) {
-    await c.query('UPDATE potrero_pasto SET deleted_at=NOW() WHERE id_potrero=$1 AND deleted_at IS NULL', [routeParam(req.params.id, 'id')]);
+pasturesRouter.patch('/:id', requirePermission('POTRERO_ADMINISTRAR'), asyncHandler(async (req, res) => { const input = pastureSchema.partial().parse(req.body); const result = await transaction(async (c) => { const id = routeParam(req.params.id, 'id'); const found = await c.query('SELECT id_ubicacion FROM potrero WHERE id_potrero=$1 AND deleted_at IS NULL', [id]); if (!found.rows[0])
+    throw new NotFoundError(); if (input.ubicacion) {
+    await assertPropertyChangeAllowed(c, found.rows[0].id_ubicacion, input.ubicacion.id_propiedad);
+    await c.query(buildUpdate('ubicacion', 'id_ubicacion', found.rows[0].id_ubicacion, input.ubicacion));
+} const { ubicacion, pastos, ...rest } = input; if (Object.keys(rest).length)
+    await c.query(buildUpdate('potrero', 'id_potrero', id, rest)); if (pastos) {
+    await c.query('UPDATE potrero_pasto SET deleted_at=NOW() WHERE id_potrero=$1 AND deleted_at IS NULL', [id]);
     for (const item of pastos)
-        await c.query(buildInsert('potrero_pasto', { ...item, id_potrero: routeParam(req.params.id, 'id') }));
-} return { id_potrero: routeParam(req.params.id, 'id') }; }, req.user.id); return ok(res, result); }));
+        await c.query(buildInsert('potrero_pasto', { ...item, id_potrero: id }));
+} return { id_potrero: id }; }, req.user.id); return ok(res, result); }));
 export const corralsRouter = Router();
-corralsRouter.get('/', requirePermission('CORRAL_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(`SELECT c.*,u.nombre,u.codigo,u.descripcion,u.activo,tc.nombre tipo_corral FROM corral c JOIN ubicacion u ON u.id_ubicacion=c.id_ubicacion JOIN tipo_corral tc ON tc.id_tipo_corral=c.id_tipo_corral WHERE c.deleted_at IS NULL AND u.deleted_at IS NULL ORDER BY u.nombre`)).rows)));
+corralsRouter.get('/', requirePermission('CORRAL_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(`SELECT c.*,u.nombre,u.codigo,u.descripcion,u.activo,u.id_propiedad,pg.nombre propiedad,pg.es_principal propiedad_principal,tc.nombre tipo_corral FROM corral c JOIN ubicacion u ON u.id_ubicacion=c.id_ubicacion JOIN propiedad_ganadera pg ON pg.id_propiedad=u.id_propiedad JOIN tipo_corral tc ON tc.id_tipo_corral=c.id_tipo_corral WHERE c.deleted_at IS NULL AND u.deleted_at IS NULL ORDER BY pg.es_principal DESC,pg.nombre,u.nombre`)).rows)));
 corralsRouter.post('/', requirePermission('CORRAL_ADMINISTRAR'), asyncHandler(async (req, res) => { const input = corralSchema.parse(req.body); const result = await transaction(async (c) => { const u = (await c.query(buildInsert('ubicacion', { ...input.ubicacion, tipo: 'CORRAL' }))).rows[0]; const { ubicacion, ...rest } = input; const corral = (await c.query(buildInsert('corral', { ...rest, id_ubicacion: u.id_ubicacion }))).rows[0]; return { ...corral, ubicacion: u }; }, req.user.id); return created(res, result); }));
-corralsRouter.patch('/:id', requirePermission('CORRAL_ADMINISTRAR'), asyncHandler(async (req, res) => { const input = corralSchema.partial().parse(req.body); const result = await transaction(async (c) => { const found = await c.query('SELECT id_ubicacion FROM corral WHERE id_corral=$1 AND deleted_at IS NULL', [routeParam(req.params.id, 'id')]); if (!found.rows[0])
-    throw new NotFoundError(); if (input.ubicacion)
-    await c.query(buildUpdate('ubicacion', 'id_ubicacion', found.rows[0].id_ubicacion, input.ubicacion)); const { ubicacion, ...rest } = input; if (Object.keys(rest).length)
-    await c.query(buildUpdate('corral', 'id_corral', routeParam(req.params.id, 'id'), rest)); return { id_corral: routeParam(req.params.id, 'id') }; }, req.user.id); return ok(res, result); }));
+corralsRouter.patch('/:id', requirePermission('CORRAL_ADMINISTRAR'), asyncHandler(async (req, res) => { const input = corralSchema.partial().parse(req.body); const result = await transaction(async (c) => { const id = routeParam(req.params.id, 'id'); const found = await c.query('SELECT id_ubicacion FROM corral WHERE id_corral=$1 AND deleted_at IS NULL', [id]); if (!found.rows[0])
+    throw new NotFoundError(); if (input.ubicacion) {
+    await assertPropertyChangeAllowed(c, found.rows[0].id_ubicacion, input.ubicacion.id_propiedad);
+    await c.query(buildUpdate('ubicacion', 'id_ubicacion', found.rows[0].id_ubicacion, input.ubicacion));
+} const { ubicacion, ...rest } = input; if (Object.keys(rest).length)
+    await c.query(buildUpdate('corral', 'id_corral', id, rest)); return { id_corral: id }; }, req.user.id); return ok(res, result); }));
 //# sourceMappingURL=locations.routes.js.map
