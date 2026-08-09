@@ -57,11 +57,14 @@ selectionRouter.post('/animales/preview', requirePermission('ANIMAL_CONSULTAR'),
     if (input.filtros.situacion_propiedad === 'FUERA_PROPIEDAD')
         where.push("ca.codigo<>'EN_PROPIEDAD'");
     if (input.filtros.propiedad_origen === 'PROPIEDAD_PRINCIPAL') {
-        where.push("u.tipo<>'OTRO' AND u.id_propiedad_padre IS NULL");
+        where.push(`u.id_propiedad=(
+      SELECT id_propiedad FROM propiedad_ganadera
+      WHERE es_principal=TRUE AND activa=TRUE AND deleted_at IS NULL LIMIT 1
+    )`);
     }
     else if (input.filtros.propiedad_origen) {
         params.push(input.filtros.propiedad_origen);
-        where.push(`(u.id_ubicacion=$${params.length} OR u.id_propiedad_padre=$${params.length})`);
+        where.push(`u.id_propiedad=$${params.length}`);
     }
     if (input.filtros.estado)
         add('a.estado', input.filtros.estado);
@@ -78,7 +81,7 @@ selectionRouter.post('/animales/preview', requirePermission('ANIMAL_CONSULTAR'),
     }
     const rows = (await pool.query(`SELECT a.id_animal,a.codigo_arete,a.nombre,a.sexo,a.id_categoria_animal,
       ca.nombre categoria,ca.codigo categoria_codigo,a.id_grupo_actual,g.nombre grupo,
-      a.id_ubicacion_actual,u.nombre ubicacion,TRUE seleccionado
+      a.id_ubicacion_actual,u.nombre ubicacion,u.id_propiedad,TRUE seleccionado
      FROM animal a
      JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
