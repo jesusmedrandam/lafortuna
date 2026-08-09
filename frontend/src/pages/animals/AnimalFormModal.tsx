@@ -443,13 +443,13 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
               </Select>
             </Field>
             <Field label="Grupo actual">
-              <Select value={form.id_grupo_actual} onChange={(event) => setForm((current) => ({ ...current, id_grupo_actual: event.target.value }))}>
+              <Select value={form.id_grupo_actual} onChange={(event) => { const group = groups.data?.find((item) => item.id_grupo === event.target.value); setForm((current) => ({ ...current, id_grupo_actual: event.target.value, id_ubicacion_actual: group?.id_ubicacion_actual ?? current.id_ubicacion_actual })); }}>
                 <option value="">Sin grupo</option>
-                {groups.data?.filter((item) => !form.id_categoria_animal || item.id_categoria_animal === form.id_categoria_animal).map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre} · {item.categoria}</option>)}
+                {groups.data?.filter((item) => (!form.id_categoria_animal || item.id_categoria_animal === form.id_categoria_animal) && (!form.id_ubicacion_actual || item.id_ubicacion_actual === form.id_ubicacion_actual)).map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre} · {item.ubicacion || 'Sin ubicación'}</option>)}
               </Select>
             </Field>
             <Field label="Ubicación actual">
-              <Select value={form.id_ubicacion_actual} onChange={(event) => setForm((current) => ({ ...current, id_ubicacion_actual: event.target.value }))}>
+              <Select value={form.id_ubicacion_actual} onChange={(event) => setForm((current) => ({ ...current, id_ubicacion_actual: event.target.value, id_grupo_actual: '' }))}>
                 <option value="">Sin ubicación específica</option>
                 {availableLocations.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
               </Select>

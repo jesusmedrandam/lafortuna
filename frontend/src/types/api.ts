@@ -215,6 +215,9 @@ export interface Group {
   id_categoria_animal: string;
   categoria: string;
   categoria_codigo: string;
+  id_ubicacion_actual: string | null;
+  ubicacion: string | null;
+  ubicacion_tipo: Location['tipo'] | null;
   id_especie: string | null;
   especie: string | null;
   descripcion: string | null;
@@ -433,6 +436,7 @@ export interface SanitaryDetail {
   sexo?: 'MACHO' | 'HEMBRA';
   id_categoria_animal?: string;
   categoria?: string;
+  categoria_codigo?: string;
   id_grupo_actual?: string | null;
   grupo?: string | null;
   id_ubicacion_actual?: string | null;
@@ -533,6 +537,8 @@ export interface Birth {
   id_padre: string | null;
   madre: string;
   madre_arete: string | null;
+  categoria_codigo: string;
+  categoria: string;
   padre: string | null;
   padre_arete: string | null;
   fecha_parto: string;
@@ -553,6 +559,8 @@ export interface HeatRecord {
   fecha_fin: string | null;
   observaciones: string | null;
   tiene_prenez: boolean;
+  categoria_codigo: string;
+  categoria: string;
 }
 
 export interface PregnancyRecord {
@@ -564,6 +572,8 @@ export interface PregnancyRecord {
   codigo_arete: string | null;
   id_especie: string;
   id_categoria_animal: string;
+  categoria_codigo: string;
+  categoria: string;
   padre: string | null;
   celo_inicio: string | null;
   metodo_embarazo: string;
@@ -589,12 +599,16 @@ export interface UpcomingBirth {
   metodo_confirmacion: string;
   dias_gestacion_confirmacion: number | null;
   estado: 'PENDIENTE' | 'REGISTRADO' | 'CANCELADO';
+  categoria_codigo: string;
+  categoria: string;
 }
 
 export interface GenericRecord {
   [key: string]: unknown;
   animal?: string | null;
   codigo_arete?: string | null;
+  categoria_codigo?: string | null;
+  categoria?: string | null;
 }
 
 export interface SaleAnimalDetail {

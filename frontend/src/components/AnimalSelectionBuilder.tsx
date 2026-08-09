@@ -18,9 +18,11 @@ interface Props {
   allowDose?: boolean;
   doseUnitId?: string;
   operationCode?: string | string[];
+  excludeLocationId?: string;
+  ownershipScope?: 'EN_PROPIEDAD' | 'FUERA_PROPIEDAD';
 }
 
-export function AnimalSelectionBuilder({ value, onChange, allowDose = false, doseUnitId, operationCode }: Props) {
+export function AnimalSelectionBuilder({ value, onChange, allowDose = false, doseUnitId, operationCode, excludeLocationId, ownershipScope }: Props) {
   const toast = useToast();
   const [search, setSearch] = useState('');
   const groups = useQuery({
@@ -35,7 +37,10 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
           modo: value.mode === 'SELECCION_MANUAL' ? 'TODOS' : value.mode,
           id_grupo: value.mode === 'GRUPO' ? value.groupId || null : null,
           ids: [],
-          filtros: {},
+          filtros: {
+            excluir_id_ubicacion: excludeLocationId || undefined,
+            situacion_propiedad: ownershipScope,
+          },
           operaciones: operationCode ? (Array.isArray(operationCode) ? operationCode : [operationCode]) : [],
         },
       });
@@ -88,7 +93,12 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
         {value.mode === 'GRUPO' ? <Field label="Grupo" required>
           <Select value={value.groupId} onChange={(event) => onChange({ ...value, groupId: event.target.value, animals: [] })}>
             <option value="">Selecciona un grupo</option>
-            {groups.data?.map((group) => <option value={group.id_grupo} key={group.id_grupo}>{group.nombre} · {group.categoria} · {group.total_animales ?? 0} animales</option>)}
+            {groups.data?.filter((group) => {
+              if (excludeLocationId && group.id_ubicacion_actual === excludeLocationId) return false;
+              if (ownershipScope === 'EN_PROPIEDAD') return group.categoria_codigo === 'EN_PROPIEDAD';
+              if (ownershipScope === 'FUERA_PROPIEDAD') return group.categoria_codigo !== 'EN_PROPIEDAD';
+              return true;
+            }).map((group) => <option value={group.id_grupo} key={group.id_grupo}>{group.nombre} · {group.categoria} · {group.ubicacion || 'Sin ubicación'} · {group.total_animales ?? 0} animales</option>)}
           </Select>
         </Field> : <div className="selection-mode-note">
           {value.mode === 'TODOS'

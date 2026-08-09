@@ -7,7 +7,7 @@ import { useToast } from '../../components/ToastContext';
 import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, Input, LoadingState, Modal, PageHeader, SearchBox, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
-import type { Group } from '../../types/api';
+import type { Group, Location } from '../../types/api';
 import { nullIfEmpty, numberOrNull } from '../../utils';
 
 interface GroupForm {
@@ -15,6 +15,7 @@ interface GroupForm {
   nombre: string;
   id_tipo_grupo: string;
   id_categoria_animal: string;
+  id_ubicacion_actual: string;
   id_especie: string;
   descripcion: string;
   capacidad: string;
@@ -22,7 +23,7 @@ interface GroupForm {
 }
 
 const empty = (): GroupForm => ({
-  codigo: '', nombre: '', id_tipo_grupo: '', id_categoria_animal: '', id_especie: '', descripcion: '', capacidad: '', activo: true,
+  codigo: '', nombre: '', id_tipo_grupo: '', id_categoria_animal: '', id_ubicacion_actual: '', id_especie: '', descripcion: '', capacidad: '', activo: true,
 });
 
 function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => void }) {
@@ -31,6 +32,7 @@ function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => v
   const types = useCatalog('tipos-grupo');
   const categories = useCatalog('categorias-animales');
   const species = useCatalog('especies');
+  const locations = useQuery({ queryKey: ['locations', 'group-form'], queryFn: () => apiRequest<Location[]>('/ubicaciones') });
   const [form, setForm] = useState<GroupForm>(empty);
 
   useEffect(() => {
@@ -39,6 +41,7 @@ function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => v
       nombre: group.nombre,
       id_tipo_grupo: group.id_tipo_grupo,
       id_categoria_animal: group.id_categoria_animal,
+      id_ubicacion_actual: group.id_ubicacion_actual ?? '',
       id_especie: group.id_especie ?? '',
       descripcion: group.descripcion ?? '',
       capacidad: group.capacidad?.toString() ?? '',
@@ -67,6 +70,7 @@ function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => v
         nombre: form.nombre,
         id_tipo_grupo: form.id_tipo_grupo,
         id_categoria_animal: form.id_categoria_animal,
+        id_ubicacion_actual: form.id_ubicacion_actual || null,
         id_especie: form.id_especie || null,
         descripcion: nullIfEmpty(form.descripcion),
         capacidad: numberOrNull(form.capacidad),
@@ -96,7 +100,8 @@ function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => v
         <Field label="Nombre" required><Input value={form.nombre} onChange={(event) => setForm((current) => ({ ...current, nombre: event.target.value }))} required /></Field>
         <Field label="Código"><Input value={form.codigo} onChange={(event) => setForm((current) => ({ ...current, codigo: event.target.value }))} /></Field>
         <Field label="Tipo de grupo" required><Select value={form.id_tipo_grupo} onChange={(event) => setForm((current) => ({ ...current, id_tipo_grupo: event.target.value }))} required><option value="">Selecciona</option>{types.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>
-        <Field label="Situación de propiedad" hint="Define qué operaciones pueden realizarse con los animales del grupo." required><Select value={form.id_categoria_animal} onChange={(event) => setForm((current) => ({ ...current, id_categoria_animal: event.target.value }))} required><option value="">Selecciona</option>{categories.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>
+        <Field label="Situación de propiedad" hint={group?.total_animales ? 'Para cambiarla, traslada primero todos los animales.' : 'Define qué operaciones pueden realizarse con los animales del grupo.'} required><Select disabled={Boolean(group?.total_animales)} value={form.id_categoria_animal} onChange={(event) => setForm((current) => ({ ...current, id_categoria_animal: event.target.value, id_ubicacion_actual: '' }))} required><option value="">Selecciona</option>{categories.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>
+        <Field label="Potrero, corral o propiedad" hint={group?.total_animales ? 'La ubicación de un grupo ocupado se modifica desde Movimientos.' : 'Todos los animales del grupo compartirán esta ubicación.'} required><Select disabled={Boolean(group?.total_animales)} value={form.id_ubicacion_actual} onChange={(event) => setForm((current) => ({ ...current, id_ubicacion_actual: event.target.value }))} required><option value="">Selecciona</option>{locations.data?.filter((item) => item.activo && item.id_categoria_animal === form.id_categoria_animal).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.tipo === 'OTRO' ? item.categoria : item.tipo === 'POTRERO' ? 'Potrero' : 'Corral'}</option>)}</Select></Field>
         <Field label="Especie"><Select value={form.id_especie} onChange={(event) => setForm((current) => ({ ...current, id_especie: event.target.value }))}><option value="">Cualquier especie</option>{species.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>
         <Field label="Capacidad"><Input type="number" min="1" value={form.capacidad} onChange={(event) => setForm((current) => ({ ...current, capacidad: event.target.value }))} /></Field>
         <Field label="Estado"><Select value={String(form.activo)} onChange={(event) => setForm((current) => ({ ...current, activo: event.target.value === 'true' }))}><option value="true">Activo</option><option value="false">Inactivo</option></Select></Field>
@@ -136,6 +141,7 @@ export function GroupsPage() {
         <div className="record-card-header"><div className="record-icon"><Users size={22} /></div><div><h3>{group.nombre}</h3><span>{group.codigo || 'Sin código'}</span></div><Badge tone={group.activo ? 'success' : 'neutral'}>{group.activo ? 'Activo' : 'Inactivo'}</Badge></div>
         <div className="record-details">
           <span><small>Situación</small><strong>{group.categoria}</strong></span>
+          <span><small>Ubicación del grupo</small><strong>{group.ubicacion || 'Pendiente de asignar'}</strong></span>
           <span><small>Tipo</small><strong>{group.tipo_grupo}</strong></span>
           <span><small>Especie</small><strong>{group.especie || 'Todas'}</strong></span>
           <span><small>Animales</small><strong>{group.total_animales}</strong></span>
