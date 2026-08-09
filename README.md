@@ -54,3 +54,4 @@ El archivo `render.yaml` crea el Web Service. Configura manualmente las variable
 - Antes de producción conviene ejecutar pruebas de integración contra una copia de la base.
 - Para la versión 12 aplica `migrations/20260816_trazabilidad_condicion_y_costos_limpieza.sql` después de las migraciones anteriores.
 - Para la versión 13 aplica `migrations/20260817_grupos_politicas_operaciones.sql` después de la migración de la versión 12.
+- Para la versión 14 aplica `migrations/20260818_grupo_ubicacion_consistente.sql` después de la migración de la versión 13.

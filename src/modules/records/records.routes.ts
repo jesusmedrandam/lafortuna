@@ -49,9 +49,11 @@ recordsRouter.get('/:module', asyncHandler(async (req, res) => {
   const d = definition(routeParam(req.params.module, 'module'));
   assertPermission(req.user, d.read);
   const rows = (await pool.query(
-    `SELECT r.*, a.nombre animal, a.codigo_arete
+    `SELECT r.*, a.nombre animal, a.codigo_arete,a.id_categoria_animal,
+      ca.codigo categoria_codigo,ca.nombre categoria
      FROM ${d.table} r
      LEFT JOIN animal a ON a.id_animal = r.${d.animalColumn}
+     LEFT JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
      WHERE r.deleted_at IS NULL
      ORDER BY r.${d.order}`
   )).rows;
@@ -122,6 +124,7 @@ const birthImageUpload = multer({
 export const birthsRouter = Router();
 birthsRouter.get('/', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(
   `SELECT p.*, m.nombre madre,m.codigo_arete madre_arete,pa.nombre padre,pa.codigo_arete padre_arete,pr.fecha_confirmacion,pr.fecha_parto_tentativa,
+   ca.codigo categoria_codigo,ca.nombre categoria,
    COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id_parto_cria',pc.id_parto_cria,'id_cria',c.id_animal,'cria',c.nombre,
       'codigo_arete',c.codigo_arete,'sexo',c.sexo,'estado_nacimiento',pc.estado_nacimiento,
@@ -131,6 +134,7 @@ birthsRouter.get('/', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (
    FROM parto_cria pc JOIN animal c ON c.id_animal=pc.id_cria
    WHERE pc.id_parto=p.id_parto AND pc.deleted_at IS NULL),'[]') crias
    FROM parto p JOIN animal m ON m.id_animal=p.id_madre
+   JOIN categoria_animal ca ON ca.id_categoria_animal=m.id_categoria_animal
    LEFT JOIN animal pa ON pa.id_animal=p.id_padre
    LEFT JOIN prenez pr ON pr.id_prenez=p.id_prenez
    WHERE p.deleted_at IS NULL ORDER BY p.fecha_parto DESC`
@@ -223,15 +227,18 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
 
         if (item.animal.id_grupo_actual) {
           const group = (await client.query(
-            `SELECT id_especie,id_categoria_animal,activo FROM grupo WHERE id_grupo=$1 AND deleted_at IS NULL`,
+            `SELECT id_especie,id_categoria_animal,id_ubicacion_actual,activo FROM grupo WHERE id_grupo=$1 AND deleted_at IS NULL`,
             [item.animal.id_grupo_actual],
-          )).rows[0] as { id_especie: string | null; id_categoria_animal: string; activo: boolean } | undefined;
+          )).rows[0] as { id_especie: string | null; id_categoria_animal: string; id_ubicacion_actual: string | null; activo: boolean } | undefined;
           if (!group || !group.activo) throw new ValidationError(`El grupo de la cría ${order} no está disponible.`);
           if (group.id_especie && group.id_especie !== mother.id_especie) {
             throw new ValidationError(`El grupo de la cría ${order} no corresponde a su especie.`);
           }
           if (group.id_categoria_animal !== mother.id_categoria_animal) {
             throw new ValidationError(`El grupo de la cría ${order} no coincide con la situación de propiedad de la madre.`);
+          }
+          if (!group.id_ubicacion_actual || group.id_ubicacion_actual !== (item.animal.id_ubicacion_actual ?? null)) {
+            throw new ValidationError(`La ubicación de la cría ${order} debe coincidir con la ubicación de su grupo.`);
           }
         }
 

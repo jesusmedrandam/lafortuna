@@ -385,16 +385,18 @@ async function assertCategoryLocation(client: PoolClient, categoryId: string, lo
   }
 }
 
-async function assertCategoryGroup(client: PoolClient, categoryId: string, speciesId: string, groupId?: string | null) {
+async function assertCategoryGroup(client: PoolClient, categoryId: string, speciesId: string, groupId?: string | null, locationId?: string | null) {
   if (!groupId) return;
   const group = (await client.query(
-    `SELECT id_especie,id_categoria_animal FROM grupo
+    `SELECT id_especie,id_categoria_animal,id_ubicacion_actual FROM grupo
      WHERE id_grupo=$1 AND deleted_at IS NULL AND activo=TRUE`,
     [groupId],
-  )).rows[0] as { id_especie: string | null; id_categoria_animal: string } | undefined;
+  )).rows[0] as { id_especie: string | null; id_categoria_animal: string; id_ubicacion_actual: string | null } | undefined;
   if (!group) throw new ValidationError('El grupo seleccionado no está disponible.');
   if (group.id_especie && group.id_especie !== speciesId) throw new ValidationError('El grupo no corresponde a la especie del animal.');
   if (group.id_categoria_animal !== categoryId) throw new ValidationError('El grupo no corresponde a la situación de propiedad del animal.');
+  if (!group.id_ubicacion_actual) throw new ValidationError('El grupo todavía no tiene un potrero, corral o propiedad asignado.');
+  if (group.id_ubicacion_actual !== locationId) throw new ValidationError('La ubicación del animal debe coincidir con la ubicación de su grupo.');
 }
 
 async function assertAnimalCondition(client: PoolClient, code: string, allowInactive = false) {
@@ -485,7 +487,7 @@ animalsRouter.post(
           id_padre: animal.id_padre,
         });
         await assertCategoryLocation(client, animal.id_categoria_animal, animal.id_ubicacion_actual);
-        await assertCategoryGroup(client, animal.id_categoria_animal, animal.id_especie, animal.id_grupo_actual);
+        await assertCategoryGroup(client, animal.id_categoria_animal, animal.id_especie, animal.id_grupo_actual, animal.id_ubicacion_actual);
         await assertAnimalCondition(client, animal.estado ?? 'ACTIVO');
 
         const row = (await client.query(buildInsert('animal', {
@@ -607,7 +609,7 @@ animalsRouter.post('/:id/condicion', requirePermission('ANIMAL_MODIFICAR'), asyn
         if (!location) throw new ValidationError('La ubicación del hallazgo no está disponible.');
         nextCategory = location.id_categoria_animal;
       }
-      await assertCategoryGroup(client, nextCategory, current.id_especie, nextGroup);
+      await assertCategoryGroup(client, nextCategory, current.id_especie, nextGroup, nextLocation);
     }
 
     await client.query("SELECT set_config('app.fecha_movimiento', $1, true)", [input.fecha_evento]);
