@@ -108,6 +108,19 @@ async function completeGroupAnimals(database, groupId, provided, destinationLoca
         observaciones: observations.get(member.id_animal) ?? null,
     }));
 }
+function movementDateValue(value) {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return value.toISOString().slice(0, 10);
+    }
+    const text = String(value ?? '');
+    const iso = text.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+    if (iso)
+        return iso;
+    const parsed = new Date(text);
+    if (!Number.isNaN(parsed.getTime()))
+        return parsed.toISOString().slice(0, 10);
+    return text;
+}
 async function validateMovementSelection(database, input) {
     validateMovementMode(input.tipo_movimiento, input.modo_seleccion, input.id_grupo_filtro, input.id_grupo_destino);
     if (input.tipo_movimiento === 'UBICACION' && !input.id_grupo_filtro) {
@@ -231,7 +244,7 @@ async function loadMovementForValidation(database, id) {
     return movement.parse({
         ...head,
         propiedad_origen: head.id_propiedad_origen,
-        fecha_movimiento: String(head.fecha_movimiento).slice(0, 10),
+        fecha_movimiento: movementDateValue(head.fecha_movimiento),
         animales: animals,
     });
 }
