@@ -1,4 +1,4 @@
--- Ejecutar después de 20260822_propiedades_fuente_unica.sql.
+-- Ejecutar después de 20260822_propiedades_fuente_unica_CORREGIDA_v2.sql.
 -- Es una consulta de solo lectura: problemas=0 confirma las invariantes nuevas.
 
 WITH problemas AS (

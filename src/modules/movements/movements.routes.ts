@@ -147,6 +147,18 @@ async function completeGroupAnimals(
   }));
 }
 
+function movementDateValue(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  const text=String(value??'');
+  const iso=text.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+  if(iso)return iso;
+  const parsed=new Date(text);
+  if(!Number.isNaN(parsed.getTime()))return parsed.toISOString().slice(0,10);
+  return text;
+}
+
 async function validateMovementSelection(database: Queryable, input: MovementInput): Promise<MovementValidation> {
   validateMovementMode(input.tipo_movimiento, input.modo_seleccion, input.id_grupo_filtro, input.id_grupo_destino);
   if (input.tipo_movimiento === 'UBICACION' && !input.id_grupo_filtro) {
@@ -282,7 +294,7 @@ async function loadMovementForValidation(database: Queryable, id: string): Promi
   return movement.parse({
     ...head,
     propiedad_origen: head.id_propiedad_origen,
-    fecha_movimiento: String(head.fecha_movimiento).slice(0, 10),
+    fecha_movimiento: movementDateValue(head.fecha_movimiento),
     animales: animals,
   });
 }
