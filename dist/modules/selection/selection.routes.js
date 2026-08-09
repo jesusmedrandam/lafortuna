@@ -20,6 +20,7 @@ const schema = z.object({
         id_ubicacion: z.string().uuid().optional(),
         excluir_id_ubicacion: z.string().uuid().optional(),
         situacion_propiedad: z.enum(['EN_PROPIEDAD', 'FUERA_PROPIEDAD']).optional(),
+        propiedad_origen: z.union([z.literal('PROPIEDAD_PRINCIPAL'), z.string().uuid()]).optional(),
         estado: z.string().optional(),
     }).default({}),
 });
@@ -55,6 +56,13 @@ selectionRouter.post('/animales/preview', requirePermission('ANIMAL_CONSULTAR'),
         where.push("ca.codigo='EN_PROPIEDAD'");
     if (input.filtros.situacion_propiedad === 'FUERA_PROPIEDAD')
         where.push("ca.codigo<>'EN_PROPIEDAD'");
+    if (input.filtros.propiedad_origen === 'PROPIEDAD_PRINCIPAL') {
+        where.push("u.tipo<>'OTRO' AND u.id_propiedad_padre IS NULL");
+    }
+    else if (input.filtros.propiedad_origen) {
+        params.push(input.filtros.propiedad_origen);
+        where.push(`(u.id_ubicacion=$${params.length} OR u.id_propiedad_padre=$${params.length})`);
+    }
     if (input.filtros.estado)
         add('a.estado', input.filtros.estado);
     if (input.operaciones.length) {
