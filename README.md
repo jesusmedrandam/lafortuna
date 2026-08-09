@@ -59,3 +59,4 @@ El archivo `render.yaml` crea el Web Service. Configura manualmente las variable
 - Para la versión 16 aplica `migrations/20260820_propiedades_externas_estructuradas.sql` después de la migración de la versión 15.
 - La versión 17 no requiere una migración adicional; utiliza la estructura creada por `20260820_propiedades_externas_estructuradas.sql`.
 - La versión 18 no requiere una migración adicional; corrige el alta de grupos y mejora los mensajes de error de PostgreSQL.
+- Para la versión 19 aplica `migrations/20260821_movimientos_borradores_flexibles.sql` después de la migración de la versión 16. La versión 19 restaura el traslado exclusivo del grupo completo y permite guardar borradores incompletos.
