@@ -1,6 +1,6 @@
-# M&M Ganadería — servidor
+# SGB · Sistema de Gestión Bovina — servidor
 
-Servidor modular para la nueva base de datos. El nombre visible es **M&M Ganadería** y el nombre técnico es **MM**. Todas las rutas se publican bajo `/api`.
+Servidor modular para la nueva base de datos. El nombre visible es **SGB · Sistema de Gestión Bovina**. Todas las rutas se publican bajo `/api`.
 
 ## Instalación
 

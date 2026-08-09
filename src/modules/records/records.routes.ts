@@ -100,6 +100,11 @@ const partoSchema = z.object({
     observaciones: z.string().max(300).nullable().optional()
   })).min(1)
 });
+const partoUpdateSchema = z.object({
+  fecha_parto: z.string().datetime(),
+  tipo_parto: z.enum(['NORMAL','ASISTIDO','CESAREA','DESCONOCIDO']),
+  observaciones: z.string().nullable().optional(),
+});
 
 const birthImageUpload = multer({
   storage: multer.memoryStorage(),
@@ -111,11 +116,12 @@ const birthImageUpload = multer({
 
 export const birthsRouter = Router();
 birthsRouter.get('/', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(
-  `SELECT p.*, m.nombre madre, pa.nombre padre,pr.fecha_confirmacion,pr.fecha_parto_tentativa,
+  `SELECT p.*, m.nombre madre,m.codigo_arete madre_arete,pa.nombre padre,pa.codigo_arete padre_arete,pr.fecha_confirmacion,pr.fecha_parto_tentativa,
    COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id_parto_cria',pc.id_parto_cria,'id_cria',c.id_animal,'cria',c.nombre,
-      'sexo',c.sexo,'estado_nacimiento',pc.estado_nacimiento,
-      'peso_nacimiento_kg',pc.peso_nacimiento_kg,'orden_nacimiento',pc.orden_nacimiento
+      'codigo_arete',c.codigo_arete,'sexo',c.sexo,'estado_nacimiento',pc.estado_nacimiento,
+      'peso_nacimiento_kg',pc.peso_nacimiento_kg,'orden_nacimiento',pc.orden_nacimiento,
+      'foto_perfil',(SELECT ai.secure_url FROM animal_imagen ai WHERE ai.id_animal=c.id_animal AND ai.deleted_at IS NULL ORDER BY ai.es_perfil DESC,ai.created_at DESC LIMIT 1)
    ) ORDER BY pc.orden_nacimiento)
    FROM parto_cria pc JOIN animal c ON c.id_animal=pc.id_cria
    WHERE pc.id_parto=p.id_parto AND pc.deleted_at IS NULL),'[]') crias
@@ -124,6 +130,18 @@ birthsRouter.get('/', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (
    LEFT JOIN prenez pr ON pr.id_prenez=p.id_prenez
    WHERE p.deleted_at IS NULL ORDER BY p.fecha_parto DESC`
 )).rows)));
+
+birthsRouter.patch('/:id', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(async (req, res) => {
+  const id=routeParam(req.params.id,'id');
+  const input=partoUpdateSchema.parse(req.body);
+  const row=(await pool.query(
+    `UPDATE parto SET fecha_parto=$2,tipo_parto=$3,observaciones=$4,updated_at=NOW()
+     WHERE id_parto=$1 AND deleted_at IS NULL RETURNING *`,
+    [id,input.fecha_parto,input.tipo_parto,input.observaciones??null],
+  )).rows[0];
+  if(!row)throw new NotFoundError('Parto no encontrado.');
+  return ok(res,row);
+}));
 
 birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(async (req, res) => {
   const input = partoSchema.parse(req.body);
