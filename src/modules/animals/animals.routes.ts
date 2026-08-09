@@ -37,6 +37,7 @@ const schema = z.object({
   id_madre: z.string().uuid().nullable().optional(),
   id_padre: z.string().uuid().nullable().optional(),
   id_origen: z.string().uuid(),
+  id_categoria_animal: z.string().uuid(),
   id_marquilla: z.string().uuid().nullable().optional(),
   id_grupo_actual: z.string().uuid().nullable().optional(),
   id_ubicacion_actual: z.string().uuid().nullable().optional(),
@@ -96,6 +97,7 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
     id_grupo: z.string().uuid().optional(),
     id_ubicacion: z.string().uuid().optional(),
     id_especie: z.string().uuid().optional(),
+    id_categoria_animal: z.string().uuid().optional(),
     id_propietario: z.string().uuid().optional(),
     id_raza: z.string().uuid().optional(),
     id_color: z.string().uuid().optional(),
@@ -122,6 +124,7 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
   if (p.id_grupo) add('a.id_grupo_actual=?', p.id_grupo);
   if (p.id_ubicacion) add('a.id_ubicacion_actual=?', p.id_ubicacion);
   if (p.id_especie) add('a.id_especie=?', p.id_especie);
+  if (p.id_categoria_animal) add('a.id_categoria_animal=?', p.id_categoria_animal);
   if (p.id_propietario) add(`EXISTS (
     SELECT 1 FROM animal_propietario apf
     WHERE apf.id_animal=a.id_animal AND apf.id_usuario=?
@@ -142,7 +145,7 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
   const limitIndex = params.length - 1;
   const offsetIndex = params.length;
   const result = await pool.query(
-    `SELECT a.*,e.nombre especie,g.nombre grupo,u.nombre ubicacion,im.secure_url foto_perfil,
+    `SELECT a.*,e.nombre especie,ca.nombre categoria,ca.codigo categoria_codigo,g.nombre grupo,u.nombre ubicacion,im.secure_url foto_perfil,
       mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
       COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)
        FROM marquilla_usuario mu JOIN usuario mu_u ON mu_u.id_usuario=mu.id_usuario AND mu_u.deleted_at IS NULL
@@ -159,6 +162,7 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
       COUNT(*) OVER()::int total
      FROM animal a
      JOIN especie e ON e.id_especie=a.id_especie
+     JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
      LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
      LEFT JOIN marquilla mq ON mq.id_marquilla=a.id_marquilla AND mq.deleted_at IS NULL
@@ -172,10 +176,11 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
 }));
 
 animalsRouter.get('/opciones/filtros', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (_req, res) => {
-  const [especies, grupos, ubicaciones, propietarios, razas, colores, marquillas] = await Promise.all([
+  const [especies, categorias, grupos, ubicaciones, propietarios, razas, colores, marquillas] = await Promise.all([
     pool.query(`SELECT id_especie,nombre FROM especie WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
+    pool.query(`SELECT id_categoria_animal,codigo,nombre FROM categoria_animal WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
     pool.query(`SELECT id_grupo,nombre FROM grupo WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
-    pool.query(`SELECT id_ubicacion,nombre,tipo FROM ubicacion WHERE deleted_at IS NULL AND activo=TRUE ORDER BY tipo,nombre`),
+    pool.query(`SELECT id_ubicacion,nombre,tipo,id_categoria_animal FROM ubicacion WHERE deleted_at IS NULL AND activo=TRUE ORDER BY tipo,nombre`),
     pool.query(`SELECT DISTINCT u.id_usuario,TRIM(CONCAT(u.nombres,' ',u.apellidos)) nombre
       FROM animal_propietario ap
       JOIN usuario u ON u.id_usuario=ap.id_usuario
@@ -187,6 +192,7 @@ animalsRouter.get('/opciones/filtros', requirePermission('ANIMAL_CONSULTAR'), as
   ]);
   return ok(res, {
     especies: especies.rows,
+    categorias: categorias.rows,
     grupos: grupos.rows,
     ubicaciones: ubicaciones.rows,
     propietarios: propietarios.rows,
@@ -208,7 +214,7 @@ animalsRouter.get('/opciones/propietarios', requirePermission('ANIMAL_CONSULTAR'
 
 animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
   const result = await pool.query(
-    `SELECT a.*,e.nombre especie,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
+    `SELECT a.*,e.nombre especie,ca.nombre categoria,ca.codigo categoria_codigo,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
       mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
       COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)
        FROM marquilla_usuario mu JOIN usuario mu_u ON mu_u.id_usuario=mu.id_usuario AND mu_u.deleted_at IS NULL
@@ -282,6 +288,7 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
        ORDER BY COALESCE(md.aplicado_en,mv.aplicado_en,mv.fecha_movimiento) DESC LIMIT 1) ultimo_movimiento
      FROM animal a
      JOIN especie e ON e.id_especie=a.id_especie
+     JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
      LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
      LEFT JOIN animal m ON m.id_animal=a.id_madre
@@ -323,6 +330,24 @@ async function assertGenealogyRules(client: PoolClient, input: {
     )).rows[0] as { id_especie: string; sexo: string } | undefined;
     if (!mother || mother.sexo !== 'HEMBRA') throw new ValidationError('La madre seleccionada no existe o no es hembra.');
     if (mother.id_especie !== input.id_especie) throw new ValidationError('La madre debe pertenecer a la misma especie.');
+  }
+}
+
+async function assertCategoryLocation(client: PoolClient, categoryId: string, locationId?: string | null) {
+  const category = await client.query(
+    'SELECT 1 FROM categoria_animal WHERE id_categoria_animal=$1 AND deleted_at IS NULL AND activo=TRUE',
+    [categoryId],
+  );
+  if (!category.rowCount) throw new ValidationError('La categoría seleccionada no está disponible.');
+  if (!locationId) return;
+  const location = (await client.query(
+    `SELECT id_categoria_animal FROM ubicacion
+     WHERE id_ubicacion=$1 AND deleted_at IS NULL AND activo=TRUE`,
+    [locationId],
+  )).rows[0] as { id_categoria_animal: string } | undefined;
+  if (!location) throw new ValidationError('La ubicación seleccionada no está disponible.');
+  if (location.id_categoria_animal !== categoryId) {
+    throw new ValidationError('La ubicación no pertenece a la categoría seleccionada para el animal.');
   }
 }
 
@@ -404,6 +429,7 @@ animalsRouter.post(
           id_madre: animal.id_madre,
           id_padre: animal.id_padre,
         });
+        await assertCategoryLocation(client, animal.id_categoria_animal, animal.id_ubicacion_actual);
 
         const row = (await client.query(buildInsert('animal', {
           id_animal: idAnimal,
@@ -480,9 +506,9 @@ animalsRouter.patch('/:id', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(
   const result = await transaction(async (client) => {
     const { colores, razas, propietarios, ...animal } = input;
     const current = (await client.query(
-      'SELECT id_especie,id_madre,id_padre FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR UPDATE',
+      'SELECT id_especie,id_madre,id_padre,id_categoria_animal,id_ubicacion_actual FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR UPDATE',
       [id],
-    )).rows[0] as { id_especie: string; id_madre: string | null; id_padre: string | null } | undefined;
+    )).rows[0] as { id_especie: string; id_madre: string | null; id_padre: string | null; id_categoria_animal: string; id_ubicacion_actual: string | null } | undefined;
     if (!current) throw new NotFoundError();
     await assertGenealogyRules(client, {
       id_animal: id,
@@ -490,6 +516,11 @@ animalsRouter.patch('/:id', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(
       id_madre: Object.prototype.hasOwnProperty.call(animal, 'id_madre') ? animal.id_madre : current.id_madre,
       id_padre: Object.prototype.hasOwnProperty.call(animal, 'id_padre') ? animal.id_padre : current.id_padre,
     });
+    await assertCategoryLocation(
+      client,
+      animal.id_categoria_animal ?? current.id_categoria_animal,
+      Object.prototype.hasOwnProperty.call(animal, 'id_ubicacion_actual') ? animal.id_ubicacion_actual : current.id_ubicacion_actual,
+    );
     let row;
     if (Object.keys(animal).length) {
       row = (await client.query(buildUpdate('animal', 'id_animal', id, animal))).rows[0];

@@ -12,6 +12,7 @@ const definitions = {
   unidades: { table:'unidad_medida', id:'id_unidad', columns:['codigo','nombre','simbolo','magnitud','activo'], order:'nombre' },
   especies: { table:'especie', id:'id_especie', columns:['codigo','nombre','descripcion','activo'], order:'nombre' },
   origenes: { table:'origen_animal', id:'id_origen', columns:['codigo','nombre','descripcion','activo'], order:'nombre' },
+  'categorias-animales': { table:'categoria_animal', id:'id_categoria_animal', columns:['codigo','nombre','descripcion','activo'], order:'nombre' },
   colores: { table:'color_animal', id:'id_color', columns:['codigo','nombre','descripcion','activo'], order:'nombre' },
   razas: { table:'raza_animal', id:'id_raza', columns:['id_especie','codigo','nombre','descripcion','activo'], order:'nombre' },
   'tipos-grupo': { table:'tipo_grupo', id:'id_tipo_grupo', columns:['id_especie','codigo','nombre','descripcion','activo'], order:'nombre' },

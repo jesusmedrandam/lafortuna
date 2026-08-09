@@ -131,13 +131,13 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
     const result = await transaction(async (client) => {
       const pregnancy = (await client.query(
         `SELECT p.id_prenez,p.id_vaca,p.id_padre,p.estado,
-          v.id_animal,v.id_especie,v.sexo,v.estado animal_estado
+          v.id_animal,v.id_especie,v.id_categoria_animal,v.sexo,v.estado animal_estado
          FROM prenez p JOIN animal v ON v.id_animal=p.id_vaca AND v.deleted_at IS NULL
          WHERE p.id_prenez=$1 AND p.deleted_at IS NULL FOR UPDATE OF p`,
         [input.id_prenez],
       )).rows[0] as {
         id_prenez: string; id_vaca: string; id_padre: string | null; estado: string;
-        id_animal: string; id_especie: string; sexo: string; animal_estado: string;
+        id_animal: string; id_especie: string; id_categoria_animal: string; sexo: string; animal_estado: string;
       } | undefined;
       if (!pregnancy || pregnancy.estado !== 'CONFIRMADA') {
         throw new ValidationError('El parto debe registrarse desde una preñez confirmada y pendiente.');
@@ -145,6 +145,7 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
       const mother = {
         id_animal: pregnancy.id_animal,
         id_especie: pregnancy.id_especie,
+        id_categoria_animal: pregnancy.id_categoria_animal,
         sexo: pregnancy.sexo,
         estado: pregnancy.animal_estado,
       };
@@ -209,16 +210,18 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
 
         if (item.animal.id_ubicacion_actual) {
           const location = (await client.query(
-            `SELECT activo FROM ubicacion WHERE id_ubicacion=$1 AND deleted_at IS NULL`,
+            `SELECT activo,id_categoria_animal FROM ubicacion WHERE id_ubicacion=$1 AND deleted_at IS NULL`,
             [item.animal.id_ubicacion_actual],
-          )).rows[0] as { activo: boolean } | undefined;
+          )).rows[0] as { activo: boolean; id_categoria_animal: string } | undefined;
           if (!location || !location.activo) throw new ValidationError(`El corral o potrero de la cría ${order} no está disponible.`);
+          if (location.id_categoria_animal !== mother.id_categoria_animal) throw new ValidationError(`La ubicación de la cría ${order} no coincide con la categoría de la madre.`);
         }
 
         const childState = item.estado_nacimiento === 'MUERTA' ? 'MUERTO' : item.animal.estado;
         const cria = (await client.query(buildInsert('animal', {
           ...item.animal,
           id_especie: mother.id_especie,
+          id_categoria_animal: mother.id_categoria_animal,
           estado: childState,
           fecha_nacimiento: birthDay,
           fecha_ingreso: birthDay,
