@@ -103,7 +103,7 @@ export function AnimalDetailPage() {
     queryFn: () => apiRequest<Location[]>('/ubicaciones'),
     enabled: conditionAction === 'REGISTRAR_HALLAZGO',
   });
-  const hallazgoCategoryId = locations.data?.find((item) => item.id_ubicacion === conditionForm.id_ubicacion_actual)?.id_categoria_animal ?? query.data?.id_categoria_animal;
+  const hallazgoPropertyId = locations.data?.find((item) => item.id_ubicacion === conditionForm.id_ubicacion_actual)?.id_propiedad ?? query.data?.id_propiedad;
 
   const deleteAnimal = useMutation({
     mutationFn: () => apiRequest(`/animales/${id}`, { method: 'DELETE' }),
@@ -315,7 +315,7 @@ export function AnimalDetailPage() {
       title={animal.nombre}
       description={animal.codigo_arete ? `Arete ${animal.codigo_arete}` : 'Animal sin código de arete'}
       action={<div className="animal-detail-actions">
-        {animal.estado === 'ACTIVO' && hasPermission('MOVIMIENTO_CREAR') ? <IconButton label="Mover animal" onClick={() => navigate('/movimientos', { state: { initialAnimal: { id_animal: animal.id_animal, codigo_arete: animal.codigo_arete, nombre: animal.nombre, sexo: animal.sexo, id_grupo_actual: animal.id_grupo_actual, grupo: animal.grupo, id_ubicacion_actual: animal.id_ubicacion_actual, ubicacion: animal.ubicacion, seleccionado: true } } })}><ArrowRightLeft size={19} /></IconButton> : null}
+        {animal.estado === 'ACTIVO' && hasPermission('MOVIMIENTO_CREAR') ? <IconButton label="Mover animal" onClick={() => navigate('/movimientos', { state: { initialAnimal: { id_animal: animal.id_animal, codigo_arete: animal.codigo_arete, nombre: animal.nombre, sexo: animal.sexo, id_categoria_animal: animal.id_categoria_animal, categoria: animal.categoria ?? '', id_propiedad: animal.id_propiedad, id_grupo_actual: animal.id_grupo_actual, grupo: animal.grupo, id_ubicacion_actual: animal.id_ubicacion_actual, ubicacion: animal.ubicacion, seleccionado: true } } })}><ArrowRightLeft size={19} /></IconButton> : null}
         {animal.estado === 'ACTIVO' && hasPermission('ANIMAL_MODIFICAR') ? <IconButton label="Desactivar operaciones" onClick={() => openConditionAction('DESACTIVAR')}><Ban size={19} /></IconButton> : null}
         {animal.estado === 'ACTIVO' && hasPermission('ANIMAL_MODIFICAR') ? <IconButton label="Reportar desaparición" onClick={() => openConditionAction('REPORTAR_DESAPARICION')}><Search size={19} /></IconButton> : null}
         {animal.estado === 'INACTIVO' && hasPermission('ANIMAL_MODIFICAR') ? <IconButton label="Reactivar operaciones" onClick={() => openConditionAction('REACTIVAR')}><CheckCircle2 size={19} /></IconButton> : null}
@@ -367,7 +367,7 @@ export function AnimalDetailPage() {
             <CompactInfo icon={Beef} label="Especie / sexo" value={`${animal.especie} · ${animal.sexo === 'HEMBRA' ? 'Hembra' : 'Macho'}`} />
             <CompactInfo icon={Users} label="Grupo" value={animal.grupo || 'Sin grupo'} />
             <CompactInfo icon={MapPin} label="Ubicación actual" value={animal.ubicacion || 'Sin ubicación actual'} />
-            <CompactInfo icon={Tag} label="Categoría" value={animal.categoria || 'Sin categoría'} />
+            <CompactInfo icon={Tag} label="Propiedad" value={`${animal.propiedad || 'Sin propiedad'}${animal.propiedad_principal ? ' · Principal' : ''}`} />
             <CompactInfo icon={Weight} label="Último peso" value={animal.ultimo_pesaje ? `${formatNumber(animal.ultimo_pesaje.peso_kg)} kg · ${formatDate(animal.ultimo_pesaje.fecha)}` : 'Sin pesaje'} />
             <CompactInfo icon={UserRound} label="Propietario(s)" value={ownerText} wide />
             <CompactInfo icon={CalendarDays} label="Nacimiento / ingreso" value={`${formatDate(animal.fecha_nacimiento)} · ${formatDate(animal.fecha_ingreso)}`} />
@@ -491,8 +491,8 @@ export function AnimalDetailPage() {
         </div>
         <Field label="Fecha" required><Input type="date" value={conditionForm.fecha_evento} onChange={(event) => setConditionForm((current) => ({ ...current, fecha_evento: event.target.value }))} /></Field>
         {conditionAction === 'REGISTRAR_HALLAZGO' ? <div className="form-grid">
-          <Field label="Ubicación del hallazgo"><Select value={conditionForm.id_ubicacion_actual} onChange={(event) => setConditionForm((current) => ({ ...current, id_ubicacion_actual: event.target.value, id_grupo_actual: '' }))}><option value="">Sin ubicación específica</option>{locations.data?.filter((item) => item.activo).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.categoria}</option>)}</Select></Field>
-          <Field label="Grupo al reincorporarse"><Select value={conditionForm.id_grupo_actual} onChange={(event) => setConditionForm((current) => ({ ...current, id_grupo_actual: event.target.value }))}><option value="">Sin grupo</option>{groups.data?.filter((item) => item.activo && (!hallazgoCategoryId || item.id_categoria_animal === hallazgoCategoryId)).map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre} · {item.categoria}</option>)}</Select></Field>
+          <Field label="Ubicación del hallazgo"><Select value={conditionForm.id_ubicacion_actual} onChange={(event) => setConditionForm((current) => ({ ...current, id_ubicacion_actual: event.target.value, id_grupo_actual: '' }))}><option value="">Sin ubicación específica</option>{locations.data?.filter((item) => item.activo && item.tipo !== 'OTRO').map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.propiedad}</option>)}</Select></Field>
+          <Field label="Grupo al reincorporarse"><Select value={conditionForm.id_grupo_actual} onChange={(event) => { const group = groups.data?.find((item) => item.id_grupo === event.target.value); setConditionForm((current) => ({ ...current, id_grupo_actual: event.target.value, id_ubicacion_actual: group?.id_ubicacion_actual ?? current.id_ubicacion_actual })); }}><option value="">Sin grupo</option>{groups.data?.filter((item) => item.activo && (!hallazgoPropertyId || item.id_propiedad === hallazgoPropertyId)).map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre} · {item.propiedad} · {item.ubicacion}</option>)}</Select></Field>
         </div> : null}
         <Field label="Motivo u observaciones"><Textarea rows={3} value={conditionForm.observaciones} onChange={(event) => setConditionForm((current) => ({ ...current, observaciones: event.target.value }))} /></Field>
       </div>

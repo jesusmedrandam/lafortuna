@@ -20,9 +20,11 @@ interface Props {
   operationCode?: string | string[];
   excludeLocationId?: string;
   ownershipScope?: 'EN_PROPIEDAD' | 'FUERA_PROPIEDAD';
+  propertyId?: string;
+  allowedModes?: SelectionMode[];
 }
 
-export function AnimalSelectionBuilder({ value, onChange, allowDose = false, doseUnitId, operationCode, excludeLocationId, ownershipScope }: Props) {
+export function AnimalSelectionBuilder({ value, onChange, allowDose = false, doseUnitId, operationCode, excludeLocationId, ownershipScope, propertyId, allowedModes }: Props) {
   const toast = useToast();
   const [search, setSearch] = useState('');
   const groups = useQuery({
@@ -38,6 +40,7 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
           id_grupo: value.mode === 'GRUPO' ? value.groupId || null : null,
           ids: [],
           filtros: {
+            id_propiedad: propertyId || undefined,
             excluir_id_ubicacion: excludeLocationId || undefined,
             situacion_propiedad: ownershipScope,
           },
@@ -63,6 +66,7 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
   }, [search, value.animals]);
 
   const selectedCount = value.animals.filter((item) => item.seleccionado).length;
+  const visibleModes = allowedModes ?? (['TODOS', 'GRUPO', 'SELECCION_MANUAL'] as SelectionMode[]);
   const updateAnimal = (id: string, changes: Partial<SelectableAnimal>) => {
     onChange({ ...value, animals: value.animals.map((item) => item.id_animal === id ? { ...item, ...changes } : item) });
   };
@@ -77,7 +81,7 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
           ['TODOS', 'Todos los animales', CheckCheck],
           ['GRUPO', 'Un grupo completo', Users],
           ['SELECCION_MANUAL', 'Selección manual', ListChecks],
-        ] as const).map(([mode, label, Icon]) => (
+        ] as const).filter(([mode]) => visibleModes.includes(mode)).map(([mode, label, Icon]) => (
           <button
             type="button"
             key={mode}
@@ -95,15 +99,16 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
             <option value="">Selecciona un grupo</option>
             {groups.data?.filter((group) => {
               if (excludeLocationId && group.id_ubicacion_actual === excludeLocationId) return false;
+              if (propertyId && group.id_propiedad !== propertyId) return false;
               if (ownershipScope === 'EN_PROPIEDAD') return group.categoria_codigo === 'EN_PROPIEDAD';
               if (ownershipScope === 'FUERA_PROPIEDAD') return group.categoria_codigo !== 'EN_PROPIEDAD';
               return true;
-            }).map((group) => <option value={group.id_grupo} key={group.id_grupo}>{group.nombre} · {group.categoria} · {group.ubicacion || 'Sin ubicación'} · {group.total_animales ?? 0} animales</option>)}
+            }).map((group) => <option value={group.id_grupo} key={group.id_grupo}>{group.nombre} · {group.propiedad} · {group.ubicacion || 'Sin ubicación'} · {group.total_animales ?? 0} animales</option>)}
           </Select>
         </Field> : <div className="selection-mode-note">
           {value.mode === 'TODOS'
-            ? 'Se cargarán todos los animales activos. Luego podrás desmarcar excepciones.'
-            : 'Se cargará el listado completo sin marcar para que elijas uno o varios animales.'}
+            ? `Se cargarán todos los animales activos${propertyId ? ' de la propiedad seleccionada' : ''}. Luego podrás desmarcar excepciones.`
+            : `Se cargará el listado${propertyId ? ' de la propiedad seleccionada' : ' completo'} sin marcar para que elijas uno o varios animales.`}
         </div>}
         <Button
           type="button"

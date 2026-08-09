@@ -7,14 +7,14 @@ import { useToast } from '../../components/ToastContext';
 import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, Input, LoadingState, Modal, PageHeader, SearchBox, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
-import type { Group, Location } from '../../types/api';
+import type { Group, Location, Property } from '../../types/api';
 import { nullIfEmpty, numberOrNull } from '../../utils';
 
 interface GroupForm {
   codigo: string;
   nombre: string;
   id_tipo_grupo: string;
-  id_categoria_animal: string;
+  id_propiedad: string;
   id_ubicacion_actual: string;
   id_especie: string;
   descripcion: string;
@@ -23,15 +23,15 @@ interface GroupForm {
 }
 
 const empty = (): GroupForm => ({
-  codigo: '', nombre: '', id_tipo_grupo: '', id_categoria_animal: '', id_ubicacion_actual: '', id_especie: '', descripcion: '', capacidad: '', activo: true,
+  codigo: '', nombre: '', id_tipo_grupo: '', id_propiedad: '', id_ubicacion_actual: '', id_especie: '', descripcion: '', capacidad: '', activo: true,
 });
 
 function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => void }) {
   const toast = useToast();
   const client = useQueryClient();
   const types = useCatalog('tipos-grupo');
-  const categories = useCatalog('categorias-animales');
   const species = useCatalog('especies');
+  const properties = useQuery({ queryKey: ['properties', 'group-form'], queryFn: () => apiRequest<Property[]>('/propiedades') });
   const locations = useQuery({ queryKey: ['locations', 'group-form'], queryFn: () => apiRequest<Location[]>('/ubicaciones') });
   const [form, setForm] = useState<GroupForm>(empty);
 
@@ -40,7 +40,7 @@ function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => v
       codigo: group.codigo ?? '',
       nombre: group.nombre,
       id_tipo_grupo: group.id_tipo_grupo,
-      id_categoria_animal: group.id_categoria_animal,
+      id_propiedad: group.id_propiedad,
       id_ubicacion_actual: group.id_ubicacion_actual ?? '',
       id_especie: group.id_especie ?? '',
       descripcion: group.descripcion ?? '',
@@ -56,11 +56,11 @@ function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => v
   }, [types.data, form.id_tipo_grupo]);
 
   useEffect(() => {
-    if (!group && !form.id_categoria_animal && categories.data?.length) {
-      const owned = categories.data.find((item) => String(item.codigo) === 'EN_PROPIEDAD') ?? categories.data[0];
-      setForm((current) => ({ ...current, id_categoria_animal: itemId(owned) }));
+    if (!group && !form.id_propiedad && properties.data?.length) {
+      const preferred = properties.data.find((item) => item.es_principal && item.activa) ?? properties.data.find((item) => item.activa);
+      if (preferred) setForm((current) => ({ ...current, id_propiedad: preferred.id_propiedad }));
     }
-  }, [categories.data, form.id_categoria_animal, group]);
+  }, [properties.data, form.id_propiedad, group]);
 
   const mutation = useMutation({
     mutationFn: () => apiRequest(group ? `/grupos/${group.id_grupo}` : '/grupos', {
@@ -69,7 +69,7 @@ function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => v
         codigo: nullIfEmpty(form.codigo),
         nombre: form.nombre,
         id_tipo_grupo: form.id_tipo_grupo,
-        id_categoria_animal: form.id_categoria_animal,
+        id_propiedad: form.id_propiedad,
         id_ubicacion_actual: form.id_ubicacion_actual || null,
         id_especie: form.id_especie || null,
         descripcion: nullIfEmpty(form.descripcion),
@@ -100,8 +100,8 @@ function GroupModal({ group, onClose }: { group?: Group | null; onClose: () => v
         <Field label="Nombre" required><Input value={form.nombre} onChange={(event) => setForm((current) => ({ ...current, nombre: event.target.value }))} required /></Field>
         <Field label="Código"><Input value={form.codigo} onChange={(event) => setForm((current) => ({ ...current, codigo: event.target.value }))} /></Field>
         <Field label="Tipo de grupo" required><Select value={form.id_tipo_grupo} onChange={(event) => setForm((current) => ({ ...current, id_tipo_grupo: event.target.value }))} required><option value="">Selecciona</option>{types.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>
-        <Field label="Situación de propiedad" hint={group?.total_animales ? 'Para cambiarla, traslada primero todos los animales.' : 'Define qué operaciones pueden realizarse con los animales del grupo.'} required><Select disabled={Boolean(group?.total_animales)} value={form.id_categoria_animal} onChange={(event) => setForm((current) => ({ ...current, id_categoria_animal: event.target.value, id_ubicacion_actual: '' }))} required><option value="">Selecciona</option>{categories.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>
-        <Field label="Potrero, corral o propiedad" hint={group?.total_animales ? 'La ubicación de un grupo ocupado se modifica desde Movimientos.' : 'Todos los animales del grupo compartirán esta ubicación.'} required><Select disabled={Boolean(group?.total_animales)} value={form.id_ubicacion_actual} onChange={(event) => setForm((current) => ({ ...current, id_ubicacion_actual: event.target.value }))} required><option value="">Selecciona</option>{locations.data?.filter((item) => item.activo && item.id_categoria_animal === form.id_categoria_animal).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.tipo === 'OTRO' ? item.categoria : item.tipo === 'POTRERO' ? 'Potrero' : 'Corral'}</option>)}</Select></Field>
+        <Field label="Propiedad" hint={group?.total_animales ? 'Para cambiarla, traslada primero todos los animales.' : 'Determina a qué finca pertenece el grupo.'} required><Select disabled={Boolean(group?.total_animales)} value={form.id_propiedad} onChange={(event) => setForm((current) => ({ ...current, id_propiedad: event.target.value, id_ubicacion_actual: '' }))} required><option value="">Selecciona</option>{properties.data?.filter((item) => item.activa || item.id_propiedad === form.id_propiedad).map((item) => <option key={item.id_propiedad} value={item.id_propiedad}>{item.nombre}{item.es_principal ? ' · Principal' : ''}</option>)}</Select></Field>
+        <Field label="Potrero o corral" hint={group?.total_animales ? 'La ubicación de un grupo ocupado se modifica desde Movimientos.' : 'Todos los animales del grupo compartirán esta ubicación.'} required><Select disabled={Boolean(group?.total_animales)} value={form.id_ubicacion_actual} onChange={(event) => setForm((current) => ({ ...current, id_ubicacion_actual: event.target.value }))} required><option value="">Selecciona</option>{locations.data?.filter((item) => item.activo && item.id_propiedad === form.id_propiedad && (item.tipo !== 'OTRO' || item.id_ubicacion === form.id_ubicacion_actual)).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.tipo === 'POTRERO' ? 'Potrero' : item.tipo === 'CORRAL' ? 'Corral' : 'Ubicación histórica'}</option>)}</Select></Field>
         <Field label="Especie"><Select value={form.id_especie} onChange={(event) => setForm((current) => ({ ...current, id_especie: event.target.value }))}><option value="">Cualquier especie</option>{species.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>
         <Field label="Capacidad"><Input type="number" min="1" value={form.capacidad} onChange={(event) => setForm((current) => ({ ...current, capacidad: event.target.value }))} /></Field>
         <Field label="Estado"><Select value={String(form.activo)} onChange={(event) => setForm((current) => ({ ...current, activo: event.target.value === 'true' }))}><option value="true">Activo</option><option value="false">Inactivo</option></Select></Field>
@@ -134,13 +134,13 @@ export function GroupsPage() {
   });
 
   return <div>
-    <PageHeader title="Grupos" description="Organiza los animales y define si están dentro o fuera de la propiedad." action={hasPermission('GRUPO_ADMINISTRAR') ? <Button onClick={() => setEditing(null)}><Plus size={18} />Nuevo grupo</Button> : undefined} />
+    <PageHeader title="Grupos" description="Organiza los animales por propiedad. Cada grupo comparte un único potrero o corral." action={hasPermission('GRUPO_ADMINISTRAR') ? <Button onClick={() => setEditing(null)}><Plus size={18} />Nuevo grupo</Button> : undefined} />
     <div className="toolbar"><SearchBox value={search} onChange={setSearch} placeholder="Buscar grupo…" /></div>
     {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : query.data?.data.length === 0 ? <EmptyState icon={Users} title="Sin grupos" description="Crea un grupo para clasificar tus animales." /> : <div className="record-grid">
       {query.data?.data.map((group) => <Card key={group.id_grupo} className="record-card">
         <div className="record-card-header"><div className="record-icon"><Users size={22} /></div><div><h3>{group.nombre}</h3><span>{group.codigo || 'Sin código'}</span></div><Badge tone={group.activo ? 'success' : 'neutral'}>{group.activo ? 'Activo' : 'Inactivo'}</Badge></div>
         <div className="record-details">
-          <span><small>Situación</small><strong>{group.categoria}</strong></span>
+          <span><small>Propiedad</small><strong>{group.propiedad}{group.propiedad_principal ? ' · Principal' : ''}</strong></span>
           <span><small>Ubicación del grupo</small><strong>{group.ubicacion || 'Pendiente de asignar'}</strong></span>
           <span><small>Tipo</small><strong>{group.tipo_grupo}</strong></span>
           <span><small>Especie</small><strong>{group.especie || 'Todas'}</strong></span>
