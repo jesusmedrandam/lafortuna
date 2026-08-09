@@ -21,13 +21,14 @@ Antes de ejecutar `bootstrap:admin`, configura la nueva `DATABASE_URL`, las dos 
 - `GET /api/versiones`
 - `GET /api/dashboard/resumen`
 - CRUD `/api/animales`, `/api/grupos`, `/api/ubicaciones`
+- Fierros con varios usuarios y fotografía 4:3 `/api/marquillas`
 - CRUD compuesto `/api/potreros`, `/api/corrales`
 - Multimedia `/api/animales/:id/imagenes`, `/api/imagenes` y `/api/imagenes/:id`
 - Selección previa `/api/selecciones/animales/preview`
 - Movimientos `/api/movimientos`
 - Jornadas colectivas `/api/jornadas-sanitarias`
 - Limpiezas `/api/limpiezas-potrero`
-- Partos `/api/partos`
+- Reproducción `/api/reproduccion/{celos|preneces|proximos-partos}` y partos `/api/partos`
 - Registros simples `/api/registros/{abortos|lactancias|producciones|pesajes|muertes|tratamientos}`
 - Administración `/api/usuarios`, `/api/roles`, `/api/auditoria`
 

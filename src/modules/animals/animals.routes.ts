@@ -37,6 +37,7 @@ const schema = z.object({
   id_madre: z.string().uuid().nullable().optional(),
   id_padre: z.string().uuid().nullable().optional(),
   id_origen: z.string().uuid(),
+  id_marquilla: z.string().uuid().nullable().optional(),
   id_grupo_actual: z.string().uuid().nullable().optional(),
   id_ubicacion_actual: z.string().uuid().nullable().optional(),
   fecha_ingreso: z.string().date().nullable().optional(),
@@ -98,6 +99,7 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
     id_propietario: z.string().uuid().optional(),
     id_raza: z.string().uuid().optional(),
     id_color: z.string().uuid().optional(),
+    id_marquilla: z.string().uuid().optional(),
     nacimiento_desde: z.string().date().optional(),
     nacimiento_hasta: z.string().date().optional(),
   }).superRefine((filters, ctx) => {
@@ -133,6 +135,7 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
     SELECT 1 FROM animal_color acf
     WHERE acf.id_animal=a.id_animal AND acf.id_color=? AND acf.deleted_at IS NULL
   )`, p.id_color);
+  if (p.id_marquilla) add('a.id_marquilla=?', p.id_marquilla);
   if (p.nacimiento_desde) add('a.fecha_nacimiento>=?', p.nacimiento_desde);
   if (p.nacimiento_hasta) add('a.fecha_nacimiento<=?', p.nacimiento_hasta);
   params.push(p.limit, offset(p.page, p.limit));
@@ -140,6 +143,10 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
   const offsetIndex = params.length;
   const result = await pool.query(
     `SELECT a.*,e.nombre especie,g.nombre grupo,u.nombre ubicacion,im.secure_url foto_perfil,
+      mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
+      COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)
+       FROM marquilla_usuario mu JOIN usuario mu_u ON mu_u.id_usuario=mu.id_usuario AND mu_u.deleted_at IS NULL
+       WHERE mu.id_marquilla=mq.id_marquilla AND mu.deleted_at IS NULL),'') marquilla_usuario,
       (SELECT TRIM(CONCAT(up.nombres,' ',up.apellidos))
        FROM animal_propietario ap
        JOIN usuario up ON up.id_usuario=ap.id_usuario
@@ -154,6 +161,7 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
      JOIN especie e ON e.id_especie=a.id_especie
      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
      LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
+     LEFT JOIN marquilla mq ON mq.id_marquilla=a.id_marquilla AND mq.deleted_at IS NULL
      LEFT JOIN animal_imagen im ON im.id_animal=a.id_animal AND im.es_perfil AND im.deleted_at IS NULL
      WHERE ${where.join(' AND ')}
      ORDER BY a.nombre
@@ -164,7 +172,7 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
 }));
 
 animalsRouter.get('/opciones/filtros', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (_req, res) => {
-  const [especies, grupos, ubicaciones, propietarios, razas, colores] = await Promise.all([
+  const [especies, grupos, ubicaciones, propietarios, razas, colores, marquillas] = await Promise.all([
     pool.query(`SELECT id_especie,nombre FROM especie WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
     pool.query(`SELECT id_grupo,nombre FROM grupo WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
     pool.query(`SELECT id_ubicacion,nombre,tipo FROM ubicacion WHERE deleted_at IS NULL AND activo=TRUE ORDER BY tipo,nombre`),
@@ -175,6 +183,7 @@ animalsRouter.get('/opciones/filtros', requirePermission('ANIMAL_CONSULTAR'), as
       ORDER BY nombre`),
     pool.query(`SELECT id_raza,nombre,id_especie FROM raza_animal WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
     pool.query(`SELECT id_color,nombre FROM color_animal WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
+    pool.query(`SELECT id_marquilla,nombre,codigo FROM marquilla WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre,codigo`),
   ]);
   return ok(res, {
     especies: especies.rows,
@@ -183,6 +192,7 @@ animalsRouter.get('/opciones/filtros', requirePermission('ANIMAL_CONSULTAR'), as
     propietarios: propietarios.rows,
     razas: razas.rows,
     colores: colores.rows,
+    marquillas: marquillas.rows,
   });
 }));
 
@@ -199,6 +209,10 @@ animalsRouter.get('/opciones/propietarios', requirePermission('ANIMAL_CONSULTAR'
 animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
   const result = await pool.query(
     `SELECT a.*,e.nombre especie,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
+      mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
+      COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)
+       FROM marquilla_usuario mu JOIN usuario mu_u ON mu_u.id_usuario=mu.id_usuario AND mu_u.deleted_at IS NULL
+       WHERE mu.id_marquilla=mq.id_marquilla AND mu.deleted_at IS NULL),'') marquilla_usuario,
       (SELECT ip.secure_url FROM animal_imagen ip
        WHERE ip.id_animal=a.id_animal AND ip.es_perfil=TRUE AND ip.deleted_at IS NULL
        ORDER BY ip.created_at DESC LIMIT 1) foto_perfil,
@@ -272,12 +286,45 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
      LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
      LEFT JOIN animal m ON m.id_animal=a.id_madre
      LEFT JOIN animal p ON p.id_animal=a.id_padre
+     LEFT JOIN marquilla mq ON mq.id_marquilla=a.id_marquilla AND mq.deleted_at IS NULL
      WHERE a.id_animal=$1 AND a.deleted_at IS NULL`,
     [routeParam(req.params.id, 'id')],
   );
   if (!result.rows[0]) throw new NotFoundError();
   return ok(res, result.rows[0]);
 }));
+
+async function assertGenealogyRules(client: PoolClient, input: {
+  id_animal?: string;
+  id_especie: string;
+  id_madre?: string | null;
+  id_padre?: string | null;
+}) {
+  if (input.id_padre) {
+    if (input.id_padre === input.id_animal) throw new ValidationError('Un animal no puede registrarse como su propio padre.');
+    const father = (await client.query(
+      `SELECT id_especie,sexo,fecha_nacimiento
+       FROM animal
+       WHERE id_animal=$1 AND deleted_at IS NULL AND estado='ACTIVO'`,
+      [input.id_padre],
+    )).rows[0] as { id_especie: string; sexo: string; fecha_nacimiento: string | null } | undefined;
+    if (!father || father.sexo !== 'MACHO') throw new ValidationError('El padre seleccionado no existe o no es un macho activo.');
+    if (father.id_especie !== input.id_especie) throw new ValidationError('El padre debe pertenecer a la misma especie.');
+    if (father.fecha_nacimiento) {
+      const age = await client.query(`SELECT $1::date <= CURRENT_DATE - INTERVAL '1 year' AS valido`, [father.fecha_nacimiento]);
+      if (!age.rows[0]?.valido) throw new ValidationError('El padre debe tener al menos un año de edad.');
+    }
+  }
+  if (input.id_madre) {
+    if (input.id_madre === input.id_animal) throw new ValidationError('Un animal no puede registrarse como su propia madre.');
+    const mother = (await client.query(
+      `SELECT id_especie,sexo FROM animal WHERE id_animal=$1 AND deleted_at IS NULL`,
+      [input.id_madre],
+    )).rows[0] as { id_especie: string; sexo: string } | undefined;
+    if (!mother || mother.sexo !== 'HEMBRA') throw new ValidationError('La madre seleccionada no existe o no es hembra.');
+    if (mother.id_especie !== input.id_especie) throw new ValidationError('La madre debe pertenecer a la misma especie.');
+  }
+}
 
 async function saveRelations(client: PoolClient, id: string, input: {
   colores?: Array<z.infer<typeof relation>>;
@@ -350,6 +397,13 @@ animalsRouter.post(
           descripcion_foto_perfil,
           ...animal
         } = input;
+
+        await assertGenealogyRules(client, {
+          id_animal: idAnimal,
+          id_especie: animal.id_especie,
+          id_madre: animal.id_madre,
+          id_padre: animal.id_padre,
+        });
 
         const row = (await client.query(buildInsert('animal', {
           id_animal: idAnimal,
@@ -425,6 +479,17 @@ animalsRouter.patch('/:id', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(
   const id = routeParam(req.params.id, 'id');
   const result = await transaction(async (client) => {
     const { colores, razas, propietarios, ...animal } = input;
+    const current = (await client.query(
+      'SELECT id_especie,id_madre,id_padre FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR UPDATE',
+      [id],
+    )).rows[0] as { id_especie: string; id_madre: string | null; id_padre: string | null } | undefined;
+    if (!current) throw new NotFoundError();
+    await assertGenealogyRules(client, {
+      id_animal: id,
+      id_especie: animal.id_especie ?? current.id_especie,
+      id_madre: Object.prototype.hasOwnProperty.call(animal, 'id_madre') ? animal.id_madre : current.id_madre,
+      id_padre: Object.prototype.hasOwnProperty.call(animal, 'id_padre') ? animal.id_padre : current.id_padre,
+    });
     let row;
     if (Object.keys(animal).length) {
       row = (await client.query(buildUpdate('animal', 'id_animal', id, animal))).rows[0];

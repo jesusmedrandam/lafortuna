@@ -79,9 +79,9 @@ recordsRouter.delete('/:module/:id', asyncHandler(async (req, res) => {
 }));
 
 const partoSchema = z.object({
-  id_madre: z.string().uuid(),
-  id_padre: z.string().uuid().nullable().optional(),
+  id_prenez: z.string().uuid(),
   fecha_parto: z.string().datetime(),
+  fecha_parto_local: z.string().date().optional(),
   tipo_parto: z.enum(['NORMAL','ASISTIDO','CESAREA','DESCONOCIDO']).default('NORMAL'),
   observaciones: z.string().nullable().optional(),
   crias: z.array(z.object({
@@ -111,7 +111,7 @@ const birthImageUpload = multer({
 
 export const birthsRouter = Router();
 birthsRouter.get('/', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(
-  `SELECT p.*, m.nombre madre, pa.nombre padre,
+  `SELECT p.*, m.nombre madre, pa.nombre padre,pr.fecha_confirmacion,pr.fecha_parto_tentativa,
    COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id_parto_cria',pc.id_parto_cria,'id_cria',c.id_animal,'cria',c.nombre,
       'sexo',c.sexo,'estado_nacimiento',pc.estado_nacimiento,
@@ -121,6 +121,7 @@ birthsRouter.get('/', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (
    WHERE pc.id_parto=p.id_parto AND pc.deleted_at IS NULL),'[]') crias
    FROM parto p JOIN animal m ON m.id_animal=p.id_madre
    LEFT JOIN animal pa ON pa.id_animal=p.id_padre
+   LEFT JOIN prenez pr ON pr.id_prenez=p.id_prenez
    WHERE p.deleted_at IS NULL ORDER BY p.fecha_parto DESC`
 )).rows)));
 
@@ -128,13 +129,27 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
   const input = partoSchema.parse(req.body);
   try {
     const result = await transaction(async (client) => {
-      const mother = (await client.query(
-        `SELECT id_animal,id_especie,sexo,estado
-         FROM animal
-         WHERE id_animal=$1 AND deleted_at IS NULL
-         FOR SHARE`,
-        [input.id_madre],
-      )).rows[0] as { id_animal: string; id_especie: string; sexo: string; estado: string } | undefined;
+      const pregnancy = (await client.query(
+        `SELECT p.id_prenez,p.id_vaca,p.id_padre,p.estado,
+          v.id_animal,v.id_especie,v.sexo,v.estado animal_estado
+         FROM prenez p JOIN animal v ON v.id_animal=p.id_vaca AND v.deleted_at IS NULL
+         WHERE p.id_prenez=$1 AND p.deleted_at IS NULL FOR UPDATE OF p`,
+        [input.id_prenez],
+      )).rows[0] as {
+        id_prenez: string; id_vaca: string; id_padre: string | null; estado: string;
+        id_animal: string; id_especie: string; sexo: string; animal_estado: string;
+      } | undefined;
+      if (!pregnancy || pregnancy.estado !== 'CONFIRMADA') {
+        throw new ValidationError('El parto debe registrarse desde una preñez confirmada y pendiente.');
+      }
+      const mother = {
+        id_animal: pregnancy.id_animal,
+        id_especie: pregnancy.id_especie,
+        sexo: pregnancy.sexo,
+        estado: pregnancy.animal_estado,
+      };
+      const motherId = pregnancy.id_vaca;
+      const fatherId = pregnancy.id_padre;
 
       if (!mother || mother.sexo !== 'HEMBRA') {
         throw new ValidationError('La madre seleccionada no existe o no es hembra.');
@@ -143,13 +158,13 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
         throw new ValidationError('La madre debe estar activa para registrar el parto.');
       }
 
-      if (input.id_padre) {
+      if (fatherId) {
         const father = (await client.query(
           `SELECT id_animal,id_especie,sexo,estado
            FROM animal
            WHERE id_animal=$1 AND deleted_at IS NULL
            FOR SHARE`,
-          [input.id_padre],
+          [fatherId],
         )).rows[0] as { id_animal: string; id_especie: string; sexo: string; estado: string } | undefined;
         if (!father || father.sexo !== 'MACHO') {
           throw new ValidationError('El padre seleccionado no existe o no es macho.');
@@ -161,12 +176,16 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
 
       const birthDate = new Date(input.fecha_parto);
       if (Number.isNaN(birthDate.getTime())) throw new ValidationError('La fecha del parto no es válida.');
-      const birthDay = birthDate.toISOString().slice(0, 10);
+      const birthDay = input.fecha_parto_local ?? new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Guayaquil', year: 'numeric', month: '2-digit', day: '2-digit',
+      }).format(birthDate);
       await client.query("SELECT set_config('app.fecha_movimiento', $1, true)", [input.fecha_parto]);
       await client.query("SELECT set_config('app.motivo_cambio', 'Nacimiento', true)");
-      const { crias, ...head } = input;
+      const { crias, fecha_parto_local: _fechaPartoLocal, ...head } = input;
       const parto = (await client.query(buildInsert('parto', {
         ...head,
+        id_madre: motherId,
+        id_padre: fatherId,
         registrado_por: req.user!.id,
       }))).rows[0];
 
@@ -203,8 +222,8 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
           estado: childState,
           fecha_nacimiento: birthDay,
           fecha_ingreso: birthDay,
-          id_madre: input.id_madre,
-          id_padre: input.id_padre ?? null,
+          id_madre: motherId,
+          id_padre: fatherId,
           registrado_por: req.user!.id,
         }))).rows[0];
 
@@ -241,6 +260,16 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
         });
         order += 1;
       }
+
+      await client.query(
+        `UPDATE prenez SET estado='FINALIZADA',updated_at=NOW() WHERE id_prenez=$1`,
+        [pregnancy.id_prenez],
+      );
+      await client.query(
+        `UPDATE proximo_parto SET estado='REGISTRADO',updated_at=NOW()
+         WHERE id_prenez=$1 AND deleted_at IS NULL`,
+        [pregnancy.id_prenez],
+      );
 
       return { ...parto, crias: createdChildren };
     }, req.user!.id);

@@ -90,6 +90,16 @@ export function uploadAnimalMedia(buffer: Buffer, animalId: string): Promise<Upl
   });
 }
 
+export function uploadMarkImage(buffer: Buffer, markId: string): Promise<UploadApiResponse> {
+  return uploadBuffer(buffer, {
+    public_id: `${rootFolder}/fierros/${markId}-${Date.now()}`,
+    resource_type: 'image',
+    overwrite: true,
+    invalidate: true,
+    transformation: [{ width: 1200, height: 900, crop: 'fill', gravity: 'auto' }],
+  });
+}
+
 export function uploadUserProfileImage(buffer: Buffer, userId: string): Promise<UploadApiResponse> {
   return uploadBuffer(buffer, {
     public_id: `${rootFolder}/usuarios/${userId}/perfil`,
