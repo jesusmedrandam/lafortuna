@@ -120,10 +120,22 @@ export interface Animal {
     grupo_destino: string | null;
     motivo: string | null;
   } | null;
+  eventos_condicion?: AnimalConditionEvent[];
   imagenes?: AnimalImage[];
   colores?: { id_color: string; nombre: string; es_principal: boolean }[];
   razas?: { id_raza: string; nombre: string; porcentaje: number | null }[];
   total?: number;
+}
+
+export interface AnimalConditionEvent {
+  id_evento: string;
+  tipo_evento: 'DESACTIVAR' | 'REACTIVAR' | 'REPORTAR_DESAPARICION' | 'REGISTRAR_HALLAZGO';
+  estado_anterior: string;
+  estado_nuevo: string;
+  fecha_evento: string;
+  observaciones: string | null;
+  ubicacion: string | null;
+  grupo: string | null;
 }
 
 export interface Mark {
@@ -449,6 +461,8 @@ export interface CleaningProduct {
   id_unidad: string;
   unidad: string;
   cantidad_por_tanque: number | string | null;
+  valor_unitario: number | string | null;
+  valor_total: number | string | null;
   observaciones: string | null;
 }
 

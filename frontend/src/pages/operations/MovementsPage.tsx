@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftRight, Ban, CheckCircle2, ChevronRight, Edit3, Plus } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { AnimalSelectionBuilder, type AnimalSelectionValue } from '../../components/AnimalSelectionBuilder';
 import { useToast } from '../../components/ToastContext';
 import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, ListToolbar, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
 import { useListControls } from '../../hooks/useListControls';
-import type { Group, Location, Movement } from '../../types/api';
+import type { Group, Location, Movement, SelectableAnimal } from '../../types/api';
 import { formatDateTime, humanizeCode } from '../../utils';
 
 const nowLocal = () => {
@@ -16,7 +17,10 @@ const nowLocal = () => {
   return date.toISOString().slice(0, 16);
 };
 
+type MovementKind = 'UBICACION' | 'GRUPO' | 'PROPIEDAD' | 'COMBINADO';
+
 interface MovementForm {
+  kind: MovementKind;
   selection: AnimalSelectionValue;
   id_ubicacion_destino: string;
   id_grupo_destino: string;
@@ -26,6 +30,7 @@ interface MovementForm {
 }
 
 const emptyForm = (): MovementForm => ({
+  kind: 'UBICACION',
   selection: { mode: 'GRUPO', groupId: '', animals: [] },
   id_ubicacion_destino: '',
   id_grupo_destino: '',
@@ -42,6 +47,9 @@ function movementTone(status: string): 'success' | 'warning' | 'danger' | 'info'
 }
 
 export function MovementsPage() {
+  const route = useLocation();
+  const navigate = useNavigate();
+  const consumedInitialAnimal = useRef(false);
   const { hasPermission } = useAuth();
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -53,12 +61,24 @@ export function MovementsPage() {
   const groups = useQuery({ queryKey: ['groups', 'movement'], queryFn: () => apiRequest<Group[]>('/grupos?limit=100') });
   const locations = useQuery({ queryKey: ['locations', 'movement'], queryFn: () => apiRequest<Location[]>('/ubicaciones') });
 
+  useEffect(() => {
+    if (consumedInitialAnimal.current) return;
+    const initialAnimal = (route.state as { initialAnimal?: SelectableAnimal } | null)?.initialAnimal;
+    if (!initialAnimal) return;
+    consumedInitialAnimal.current = true;
+    setForm({ ...emptyForm(), selection: { mode: 'SELECCION_MANUAL', groupId: '', animals: [{ ...initialAnimal, seleccionado: true }] } });
+    setCreating(true);
+    navigate(route.pathname, { replace: true, state: null });
+  }, [navigate, route.pathname, route.state]);
+
   const save = useMutation({
     mutationFn: async () => {
       const canChangeRoute = !editing || editing.estado === 'BORRADOR';
       const selected = form.selection.animals.filter((animal) => animal.seleccionado);
       if (canChangeRoute && !selected.length) throw new Error('Selecciona al menos un animal.');
-      if (canChangeRoute && !form.id_ubicacion_destino && !form.id_grupo_destino) throw new Error('Selecciona una ubicación o grupo de destino.');
+      if (canChangeRoute && form.kind === 'GRUPO' && !form.id_grupo_destino) throw new Error('Selecciona el grupo de destino.');
+      if (canChangeRoute && ['UBICACION', 'PROPIEDAD'].includes(form.kind) && !form.id_ubicacion_destino) throw new Error(form.kind === 'PROPIEDAD' ? 'Selecciona la propiedad de destino.' : 'Selecciona la ubicación de destino.');
+      if (canChangeRoute && form.kind === 'COMBINADO' && !form.id_ubicacion_destino && !form.id_grupo_destino) throw new Error('Selecciona una ubicación o grupo de destino.');
       const body = {
           modo_seleccion: form.selection.mode,
           id_grupo_filtro: form.selection.mode === 'GRUPO' ? form.selection.groupId : null,
@@ -94,7 +114,9 @@ export function MovementsPage() {
   const list = useListControls({ items: movements.data ?? [], storageKey: 'movements', searchText: (item) => `${item.motivo ?? ''} ${item.ubicacion_origen ?? ''} ${item.ubicacion_destino ?? ''} ${item.grupo_origen ?? ''} ${item.grupo_destino ?? ''} ${item.detalles.map((detail) => `${detail.animal} ${detail.arete ?? ''}`).join(' ')}`, dateValue: (item) => item.fecha_movimiento, nameValue: (item) => item.motivo || item.ubicacion_destino || item.grupo_destino || '' });
   const editMovement = (item: Movement) => {
     const date = new Date(item.fecha_movimiento); date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-    setForm({ selection: { mode: item.modo_seleccion, groupId: item.id_grupo_filtro ?? '', animals: item.detalles.map((detail) => ({ id_animal: detail.id_animal, nombre: detail.nombre ?? detail.animal, codigo_arete: detail.codigo_arete ?? detail.arete, sexo: detail.sexo ?? 'HEMBRA', id_grupo_actual: detail.id_grupo_actual ?? null, grupo: detail.grupo ?? null, id_ubicacion_actual: detail.id_ubicacion_actual ?? null, ubicacion: detail.ubicacion ?? null, seleccionado: detail.seleccionado, observaciones: detail.observaciones ?? null })) }, id_ubicacion_destino: item.id_ubicacion_destino ?? '', id_grupo_destino: item.id_grupo_destino ?? '', fecha_movimiento: date.toISOString().slice(0, 16), motivo: item.motivo ?? '', observaciones: item.observaciones ?? '' });
+    const destination = locations.data?.find((location) => location.id_ubicacion === item.id_ubicacion_destino);
+    const kind: MovementKind = item.id_ubicacion_destino && item.id_grupo_destino ? 'COMBINADO' : item.id_grupo_destino ? 'GRUPO' : destination?.tipo === 'OTRO' ? 'PROPIEDAD' : 'UBICACION';
+    setForm({ kind, selection: { mode: item.modo_seleccion, groupId: item.id_grupo_filtro ?? '', animals: item.detalles.map((detail) => ({ id_animal: detail.id_animal, nombre: detail.nombre ?? detail.animal, codigo_arete: detail.codigo_arete ?? detail.arete, sexo: detail.sexo ?? 'HEMBRA', id_grupo_actual: detail.id_grupo_actual ?? null, grupo: detail.grupo ?? null, id_ubicacion_actual: detail.id_ubicacion_actual ?? null, ubicacion: detail.ubicacion ?? null, seleccionado: detail.seleccionado, observaciones: detail.observaciones ?? null })) }, id_ubicacion_destino: item.id_ubicacion_destino ?? '', id_grupo_destino: item.id_grupo_destino ?? '', fecha_movimiento: date.toISOString().slice(0, 16), motivo: item.motivo ?? '', observaciones: item.observaciones ?? '' });
     setEditing(item); setSelected(null); setCreating(true);
   };
 
@@ -125,19 +147,30 @@ export function MovementsPage() {
       <div className="form-stack">
         <div className="form-section">
           <h3>Destino y fecha</h3>
+          <Field label="Tipo de movimiento" required hint="La propiedad se gestiona mediante las ubicaciones externas registradas en Catálogos.">
+            <Select disabled={Boolean(editing && editing.estado !== 'BORRADOR')} value={form.kind} onChange={(event) => setForm((current) => {
+              const kind = event.target.value as MovementKind;
+              return { ...current, kind, id_ubicacion_destino: kind === 'GRUPO' ? '' : current.id_ubicacion_destino, id_grupo_destino: ['UBICACION', 'PROPIEDAD'].includes(kind) ? '' : current.id_grupo_destino };
+            })}>
+              <option value="UBICACION">Cambiar ubicación (potrero o corral)</option>
+              <option value="GRUPO">Cambiar de grupo</option>
+              <option value="PROPIEDAD">Trasladar a otra propiedad</option>
+              <option value="COMBINADO">Cambiar ubicación y grupo</option>
+            </Select>
+          </Field>
           <div className="form-grid">
-            <Field label="Ubicación de destino" hint={editing && editing.estado !== 'BORRADOR' ? 'Se conserva porque el movimiento ya fue aplicado.' : undefined}>
+            {form.kind !== 'GRUPO' ? <Field label={form.kind === 'PROPIEDAD' ? 'Propiedad de destino' : 'Ubicación de destino'} hint={editing && editing.estado !== 'BORRADOR' ? 'Se conserva porque el movimiento ya fue aplicado.' : undefined}>
               <Select disabled={Boolean(editing && editing.estado !== 'BORRADOR')} value={form.id_ubicacion_destino} onChange={(event) => setForm((current) => ({ ...current, id_ubicacion_destino: event.target.value }))}>
-                <option value="">No cambiar ubicación</option>
-                {locations.data?.filter((item) => item.activo).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.tipo}</option>)}
+                <option value="">Selecciona</option>
+                {locations.data?.filter((item) => item.activo && (item.id_ubicacion === form.id_ubicacion_destino || (form.kind === 'PROPIEDAD' ? item.tipo === 'OTRO' : form.kind === 'UBICACION' ? item.tipo !== 'OTRO' : true))).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.tipo === 'OTRO' ? item.categoria : humanizeCode(item.tipo)}</option>)}
               </Select>
-            </Field>
-            <Field label="Grupo de destino">
+            </Field> : null}
+            {form.kind === 'GRUPO' || form.kind === 'COMBINADO' ? <Field label="Grupo de destino">
               <Select disabled={Boolean(editing && editing.estado !== 'BORRADOR')} value={form.id_grupo_destino} onChange={(event) => setForm((current) => ({ ...current, id_grupo_destino: event.target.value }))}>
-                <option value="">No cambiar grupo</option>
+                <option value="">Selecciona</option>
                 {groups.data?.filter((item) => item.activo).map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre}</option>)}
               </Select>
-            </Field>
+            </Field> : null}
             <Field label="Fecha y hora" required><Input type="datetime-local" value={form.fecha_movimiento} onChange={(event) => setForm((current) => ({ ...current, fecha_movimiento: event.target.value }))} /></Field>
             <Field label="Motivo"><Input value={form.motivo} onChange={(event) => setForm((current) => ({ ...current, motivo: event.target.value }))} placeholder="Rotación de potrero, cambio de lote…" /></Field>
           </div>

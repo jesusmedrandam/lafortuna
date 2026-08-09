@@ -1042,6 +1042,9 @@ body, .shell-main, .page-content, .topbar, .card, .input, .modal { transition: b
 .animal-compact-info-wide { grid-column: 1 / -1; }
 .animal-compact-tags { display: flex; flex-wrap: wrap; gap: 8px 18px; padding-top: 11px; color: var(--muted); font-size: .82rem; }
 .animal-compact-tags strong { color: var(--text); }
+.animal-condition-history { margin-top: 12px; padding: 14px 16px; }
+.animal-condition-history h2 { margin: 0; font-size: 1rem; }
+.animal-condition-history .section-heading-inline { margin-bottom: 9px; }
 .animal-gallery-compact-section { margin-top: 20px; }
 .animal-gallery-compact-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .animal-gallery-compact-header h2 { margin: 0; font-size: 1.15rem; }

@@ -141,6 +141,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
   }, [profilePreview]);
 
   useEffect(() => {
+    if (animal) return;
     if (!form.id_especie && species.data?.length) {
       setForm((current) => ({ ...current, id_especie: itemId(species.data![0]) }));
     }
@@ -151,7 +152,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
       const preferred = categories.data.find((item) => item.codigo === 'EN_PROPIEDAD' && item.activo !== false) ?? categories.data.find((item) => item.activo !== false);
       if (preferred) setForm((current) => ({ ...current, id_categoria_animal: itemId(preferred) }));
     }
-  }, [species.data, origins.data, categories.data, form.id_especie, form.id_origen, form.id_categoria_animal]);
+  }, [animal, species.data, origins.data, categories.data, form.id_especie, form.id_origen, form.id_categoria_animal]);
 
   const filteredBreeds = useMemo(
     () => breeds.data?.filter((item) => !item.id_especie || item.id_especie === form.id_especie) ?? [],
@@ -186,12 +187,24 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
     };
   }
 
+  function editableBody() {
+    const {
+      id_categoria_animal: _category,
+      id_grupo_actual: _group,
+      id_ubicacion_actual: _location,
+      fecha_ingreso: _entryDate,
+      estado: _condition,
+      ...editable
+    } = baseBody();
+    return editable;
+  }
+
   const mutation = useMutation({
     mutationFn: async () => {
       if (animal) {
         return apiRequest<Animal>(`/animales/${animal.id_animal}`, {
           method: 'PATCH',
-          body: baseBody(),
+          body: editableBody(),
         });
       }
 
@@ -420,7 +433,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
           </Field>
         </div>
 
-        <div className="form-section">
+        {!animal ? <div className="form-section">
           <h3>Clasificación y lugar actual</h3>
           <div className="form-grid">
             <Field label="Situación de propiedad" required hint="Indica si el animal está dentro de la finca o en otra propiedad.">
@@ -444,13 +457,13 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
             <Field label="Fecha de ingreso">
               <Input type="date" value={form.fecha_ingreso} onChange={(event) => setForm((current) => ({ ...current, fecha_ingreso: event.target.value }))} />
             </Field>
-            <Field label="Condición del animal" hint="Inactivo significa que el registro no está operativo; no significa que el animal esté fuera de la propiedad.">
+            <Field label="Actividad del animal" hint="Un animal inactivo no estará disponible para movimientos, ventas, sanidad ni reproducción.">
               <Select value={form.estado} onChange={(event) => setForm((current) => ({ ...current, estado: event.target.value as Animal['estado'] }))}>
-                {conditions.data?.filter((item) => item.activo !== false || item.codigo === form.estado).map((item) => <option key={String(item.codigo)} value={String(item.codigo)}>{itemLabel(item)}</option>)}
+                {conditions.data?.filter((item) => item.activo !== false && ['ACTIVO', 'INACTIVO'].includes(String(item.codigo))).map((item) => <option key={String(item.codigo)} value={String(item.codigo)}>{itemLabel(item)}</option>)}
               </Select>
             </Field>
           </div>
-        </div>
+        </div> : null}
 
         <div className="form-section">
           <h3>Genealogía</h3>
