@@ -1,16 +1,17 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { pool } from '../../database/pool.js';
+import { transaction } from '../../database/transaction.js';
 import { asyncHandler } from '../../core/async-handler.js';
 import { routeParam } from '../../core/route-param.js';
 import { created, noContent, ok } from '../../core/http.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../core/errors.js';
 import { requirePermission } from '../../middleware/permission.js';
 import { paginationSchema, offset } from '../../core/pagination.js';
-import { buildInsert, buildUpdate, pick } from '../shared/sql.js';
+import { buildInsert, buildUpdate, pick, type Queryable } from '../shared/sql.js';
 
 const schema = z.object({
-  codigo: z.string().max(50).nullable().optional(),
+  codigo: z.string().trim().max(50).nullable().optional(),
   nombre: z.string().trim().min(2).max(120),
   id_tipo_grupo: z.string().uuid(),
   id_categoria_animal: z.string().uuid(),
@@ -23,9 +24,9 @@ const schema = z.object({
 
 const columns = ['codigo', 'nombre', 'id_tipo_grupo', 'id_categoria_animal', 'id_ubicacion_actual', 'id_especie', 'descripcion', 'capacidad', 'activo'] as const;
 
-async function validateGroupLocation(categoryId: string, locationId?: string | null) {
+async function validateGroupLocation(database: Queryable, categoryId: string, locationId?: string | null) {
   if (!locationId) throw new ValidationError('Seleccione el potrero, corral o propiedad donde permanece el grupo.');
-  const location = (await pool.query(
+  const location = (await database.query(
     `SELECT id_categoria_animal FROM ubicacion
      WHERE id_ubicacion=$1 AND deleted_at IS NULL AND activo=TRUE`,
     [locationId],
@@ -34,6 +35,36 @@ async function validateGroupLocation(categoryId: string, locationId?: string | n
   if (location.id_categoria_animal !== categoryId) {
     throw new ValidationError('La ubicación del grupo debe pertenecer a su misma situación de propiedad.');
   }
+}
+
+function groupCodeBase(name: string) {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 50) || 'GRUPO';
+}
+
+async function completeGroupCode(database: Queryable, code: string | null | undefined, name: string, excludeId?: string) {
+  const explicit = code?.trim();
+  if (explicit) return explicit;
+
+  const base = groupCodeBase(name);
+  for (let attempt = 1; attempt <= 999; attempt += 1) {
+    const suffix = attempt === 1 ? '' : `_${attempt}`;
+    const candidate = `${base.slice(0, 50 - suffix.length)}${suffix}`;
+    const existing = await database.query(
+      `SELECT 1 FROM grupo
+       WHERE UPPER(codigo)=UPPER($1)
+         AND ($2::uuid IS NULL OR id_grupo<>$2)
+       LIMIT 1`,
+      [candidate, excludeId ?? null],
+    );
+    if (!existing.rowCount) return candidate;
+  }
+  throw new ConflictError('No fue posible generar un código único para el grupo. Ingrese uno manualmente.');
 }
 
 export const groupsRouter = Router();
@@ -77,8 +108,12 @@ groupsRouter.get('/', requirePermission('GRUPO_CONSULTAR'), asyncHandler(async (
 
 groupsRouter.post('/', requirePermission('GRUPO_ADMINISTRAR'), asyncHandler(async (req, res) => {
   const data = schema.parse(req.body);
-  await validateGroupLocation(data.id_categoria_animal, data.id_ubicacion_actual);
-  return created(res, (await pool.query(buildInsert('grupo', data))).rows[0]);
+  const row = await transaction(async (client) => {
+    await validateGroupLocation(client, data.id_categoria_animal, data.id_ubicacion_actual);
+    const codigo = await completeGroupCode(client, data.codigo, data.nombre);
+    return (await client.query(buildInsert('grupo', { ...data, codigo }))).rows[0];
+  }, req.user!.id);
+  return created(res, row);
 }));
 
 groupsRouter.patch('/:id', requirePermission('GRUPO_ADMINISTRAR'), asyncHandler(async (req, res) => {
@@ -92,7 +127,7 @@ groupsRouter.patch('/:id', requirePermission('GRUPO_ADMINISTRAR'), asyncHandler(
   if (!current) throw new NotFoundError();
   const nextCategory = data.id_categoria_animal ?? current.id_categoria_animal;
   const nextLocation = data.id_ubicacion_actual === undefined ? current.id_ubicacion_actual : data.id_ubicacion_actual;
-  await validateGroupLocation(nextCategory, nextLocation);
+  await validateGroupLocation(pool, nextCategory, nextLocation);
   if (nextLocation !== current.id_ubicacion_actual) {
     const members = await pool.query(
       `SELECT 1 FROM animal WHERE id_grupo_actual=$1 AND estado='ACTIVO' AND deleted_at IS NULL LIMIT 1`,

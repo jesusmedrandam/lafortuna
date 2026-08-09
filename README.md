@@ -58,3 +58,4 @@ El archivo `render.yaml` crea el Web Service. Configura manualmente las variable
 - Para la versión 15 aplica `migrations/20260819_motivos_movimiento_y_consumo_limpieza.sql` después de la migración de la versión 14.
 - Para la versión 16 aplica `migrations/20260820_propiedades_externas_estructuradas.sql` después de la migración de la versión 15.
 - La versión 17 no requiere una migración adicional; utiliza la estructura creada por `20260820_propiedades_externas_estructuradas.sql`.
+- La versión 18 no requiere una migración adicional; corrige el alta de grupos y mejora los mensajes de error de PostgreSQL.
