@@ -31,6 +31,16 @@ const movement = z.object({
     observaciones: z.string().nullable().optional(),
     animales: z.array(movementAnimal).default([]),
 });
+function validateMovementMode(kind, mode, groupFilterId, destinationGroupId) {
+    if (kind !== 'UBICACION')
+        return;
+    if (mode !== 'GRUPO') {
+        throw new ValidationError('El cambio de potrero o corral se realiza únicamente con un grupo completo.');
+    }
+    if (groupFilterId && destinationGroupId && groupFilterId !== destinationGroupId) {
+        throw new ValidationError('El grupo debe conservarse al cambiar de potrero o corral.');
+    }
+}
 function defaultReasonCode(kind) {
     if (kind === 'UBICACION')
         return 'ROTACION_POTRERO';
@@ -50,7 +60,24 @@ async function movementReason(database, id, kind) {
         throw new ValidationError('El motivo de movimiento seleccionado no está disponible.');
     return reason;
 }
+async function completeGroupAnimals(database, groupId, provided, destinationLocationId, destinationGroupId) {
+    const observations = new Map(provided.map((item) => [item.id_animal, item.observaciones ?? null]));
+    const members = (await database.query(`SELECT id_animal FROM animal
+     WHERE id_grupo_actual=$1 AND estado='ACTIVO' AND deleted_at IS NULL
+     ORDER BY nombre,id_animal`, [groupId])).rows;
+    return members.map((member) => ({
+        id_animal: member.id_animal,
+        seleccionado: true,
+        id_ubicacion_destino: destinationLocationId ?? null,
+        id_grupo_destino: destinationGroupId ?? groupId,
+        observaciones: observations.get(member.id_animal) ?? null,
+    }));
+}
 async function validateMovementSelection(database, input) {
+    validateMovementMode(input.tipo_movimiento, input.modo_seleccion, input.id_grupo_filtro, input.id_grupo_destino);
+    if (input.tipo_movimiento === 'UBICACION' && !input.id_grupo_filtro) {
+        throw new ValidationError('Seleccione el grupo completo que cambiará de potrero o corral.');
+    }
     const selected = input.animales.filter((item) => item.seleccionado);
     if (!selected.length)
         throw new ValidationError('Seleccione al menos un animal.');
@@ -162,23 +189,32 @@ movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler
    WHERE m.deleted_at IS NULL ORDER BY m.fecha_movimiento DESC`)).rows)));
 movementsRouter.post('/', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(async (req, res) => {
     const input = movement.parse(req.body);
+    validateMovementMode(input.tipo_movimiento, input.modo_seleccion, input.id_grupo_filtro, input.id_grupo_destino);
     const result = await transaction(async (client) => {
-        const reason = await movementReason(client, input.id_motivo_movimiento);
-        const { animales, ...head } = input;
+        const reason = await movementReason(client, input.id_motivo_movimiento, input.tipo_movimiento);
+        const destinationGroupId = input.tipo_movimiento === 'UBICACION' && input.id_grupo_filtro
+            ? input.id_grupo_filtro
+            : input.id_grupo_destino;
+        const animals = input.tipo_movimiento === 'UBICACION' && input.id_grupo_filtro
+            ? await completeGroupAnimals(client, input.id_grupo_filtro, input.animales, input.id_ubicacion_destino, destinationGroupId)
+            : input.animales;
+        const { animales: _animals, ...head } = input;
         const row = (await client.query(buildInsert('movimiento_animal', {
             ...head,
+            id_grupo_origen: input.tipo_movimiento === 'UBICACION' ? input.id_grupo_filtro ?? null : input.id_grupo_origen ?? null,
+            id_grupo_destino: destinationGroupId ?? null,
             id_motivo_movimiento: reason.id_motivo_movimiento,
             motivo: reason.nombre,
             estado: 'BORRADOR',
-            total_candidatos: animales.length,
-            total_seleccionados: animales.filter((animal) => animal.seleccionado).length,
+            total_candidatos: animals.length,
+            total_seleccionados: animals.filter((animal) => animal.seleccionado).length,
             registrado_por: req.user.id,
         }))).rows[0];
-        for (const animal of animales)
+        for (const animal of animals)
             await client.query(buildInsert('movimiento_animal_detalle', {
                 ...animal,
                 id_ubicacion_destino: input.id_ubicacion_destino ?? null,
-                id_grupo_destino: input.id_grupo_destino ?? null,
+                id_grupo_destino: destinationGroupId ?? null,
                 id_movimiento: row.id_movimiento,
             }));
         return row;
@@ -197,15 +233,21 @@ movementsRouter.patch('/:id', requirePermission('MOVIMIENTO_CREAR'), asyncHandle
         const nextReasonId = input.id_motivo_movimiento ?? found.id_motivo_movimiento;
         const reason = await movementReason(client, nextReasonId);
         if (found.estado === 'BORRADOR') {
+            const nextKind = input.tipo_movimiento ?? found.tipo_movimiento;
+            const nextMode = input.modo_seleccion ?? found.modo_seleccion;
+            const nextGroupFilter = input.id_grupo_filtro === undefined ? found.id_grupo_filtro : input.id_grupo_filtro;
+            const requestedDestinationGroup = input.id_grupo_destino === undefined ? found.id_grupo_destino : input.id_grupo_destino;
+            const nextDestinationGroup = nextKind === 'UBICACION' && nextGroupFilter ? nextGroupFilter : requestedDestinationGroup;
+            validateMovementMode(nextKind, nextMode, nextGroupFilter, nextDestinationGroup);
             return (await client.query(`UPDATE movimiento_animal SET tipo_movimiento=$2,modo_seleccion=$3,id_grupo_filtro=$4,id_ubicacion_origen=$5,
           id_ubicacion_destino=$6,id_grupo_origen=$7,id_grupo_destino=$8,fecha_movimiento=$9,
           id_motivo_movimiento=$10,motivo=$11,observaciones=$12,updated_at=NOW()
-         WHERE id_movimiento=$1 RETURNING *`, [id, input.tipo_movimiento ?? found.tipo_movimiento, input.modo_seleccion ?? found.modo_seleccion,
-                input.id_grupo_filtro === undefined ? found.id_grupo_filtro : input.id_grupo_filtro,
+         WHERE id_movimiento=$1 RETURNING *`, [id, nextKind, nextMode,
+                nextGroupFilter,
                 input.id_ubicacion_origen === undefined ? found.id_ubicacion_origen : input.id_ubicacion_origen,
                 input.id_ubicacion_destino === undefined ? found.id_ubicacion_destino : input.id_ubicacion_destino,
-                input.id_grupo_origen === undefined ? found.id_grupo_origen : input.id_grupo_origen,
-                input.id_grupo_destino === undefined ? found.id_grupo_destino : input.id_grupo_destino,
+                nextKind === 'UBICACION' && nextGroupFilter ? nextGroupFilter : input.id_grupo_origen === undefined ? found.id_grupo_origen : input.id_grupo_origen,
+                nextDestinationGroup,
                 input.fecha_movimiento ?? found.fecha_movimiento, nextReasonId, reason.nombre,
                 input.observaciones === undefined ? found.observaciones : input.observaciones])).rows[0];
         }
@@ -217,13 +259,17 @@ movementsRouter.patch('/:id', requirePermission('MOVIMIENTO_CREAR'), asyncHandle
 }));
 movementsRouter.put('/:id/seleccion', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(async (req, res) => {
     const id = routeParam(req.params.id, 'id');
-    const items = z.array(movementAnimal).parse(req.body.animales);
+    const requestedItems = z.array(movementAnimal).parse(req.body.animales);
     await transaction(async (client) => {
         const found = (await client.query('SELECT * FROM movimiento_animal WHERE id_movimiento=$1 AND deleted_at IS NULL FOR UPDATE', [id])).rows[0];
         if (!found)
             throw new NotFoundError();
         if (found.estado !== 'BORRADOR')
             throw new ConflictError('Solo puede editarse un movimiento en borrador.');
+        validateMovementMode(found.tipo_movimiento, found.modo_seleccion, found.id_grupo_filtro, found.id_grupo_destino);
+        const items = found.tipo_movimiento === 'UBICACION' && found.id_grupo_filtro
+            ? await completeGroupAnimals(client, found.id_grupo_filtro, requestedItems, found.id_ubicacion_destino, found.id_grupo_destino)
+            : requestedItems;
         await client.query('DELETE FROM movimiento_animal_detalle WHERE id_movimiento=$1', [id]);
         for (const animal of items)
             await client.query(buildInsert('movimiento_animal_detalle', {
