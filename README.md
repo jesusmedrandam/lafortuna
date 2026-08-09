@@ -21,6 +21,7 @@ Antes de ejecutar `bootstrap:admin`, configura la nueva `DATABASE_URL`, las dos 
 - `GET /api/versiones`
 - `GET /api/dashboard/resumen`
 - CRUD `/api/animales`, `/api/grupos`, `/api/ubicaciones`
+- Categorías de animales y ubicaciones externas mediante `/api/catalogos/categorias-animales` y `/api/ubicaciones`
 - Fierros con varios usuarios y fotografía 4:3 `/api/marquillas`
 - CRUD compuesto `/api/potreros`, `/api/corrales`
 - Multimedia `/api/animales/:id/imagenes`, `/api/imagenes` y `/api/imagenes/:id`
@@ -48,4 +49,5 @@ El archivo `render.yaml` crea el Web Service. Configura manualmente las variable
 
 - El proyecto apunta exclusivamente a la base nueva.
 - El sistema anterior no necesita cambios.
+- Para la versión 7 consulta `ACTUALIZACION_CATEGORIAS_UBICACIONES_PANEL_V7.md` y aplica las migraciones indicadas antes de desplegar.
 - Antes de producción conviene ejecutar pruebas de integración contra una copia de la base.
