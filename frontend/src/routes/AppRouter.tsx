@@ -73,8 +73,7 @@ export function AppRouter() {
           <Route path="grupos" element={<PermissionRoute permissions={['GRUPO_CONSULTAR']}><GroupsPage /></PermissionRoute>} />
           <Route path="potreros" element={<PermissionRoute permissions={['POTRERO_CONSULTAR']}><PasturesPage /></PermissionRoute>} />
           <Route path="corrales" element={<PermissionRoute permissions={['CORRAL_CONSULTAR']}><CorralsPage /></PermissionRoute>} />
-          <Route path="propiedades" element={<PermissionRoute permissions={['UBICACION_CONSULTAR']}><LocationsPage /></PermissionRoute>} />
-          <Route path="ubicaciones" element={<Navigate to="/propiedades" replace />} />
+          <Route path="ubicaciones" element={<PermissionRoute permissions={['UBICACION_CONSULTAR']}><LocationsPage /></PermissionRoute>} />
           <Route path="perfil" element={<ProfilePage />} />
           <Route path="movimientos" element={<PermissionRoute permissions={['MOVIMIENTO_CONSULTAR']}><MovementsPage /></PermissionRoute>} />
           <Route path="sanidad" element={<PermissionRoute permissions={['SANIDAD_CONSULTAR']}><SanitaryPage /></PermissionRoute>} />

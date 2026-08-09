@@ -52,9 +52,7 @@ export function SettingsPage() {
         configuracion: (query.data?.categorias ?? []).flatMap((category) => (query.data?.operaciones ?? []).map((operation) => ({
           id_categoria_animal: category.id_categoria_animal,
           codigo_operacion: operation.codigo,
-          permitido: category.codigo === 'FUERA_PROPIEDAD' && ['LACTANCIA', 'PRODUCCION_LECHE'].includes(operation.codigo)
-            ? false
-            : draft[settingKey(category.id_categoria_animal, operation.codigo)] ?? true,
+          permitido: draft[settingKey(category.id_categoria_animal, operation.codigo)] ?? true,
         }))),
       },
     }),
@@ -69,14 +67,14 @@ export function SettingsPage() {
   return <div>
     <PageHeader
       title="Configuración"
-      description="Define operaciones adicionales para la propiedad principal y las demás propiedades."
+      description="Define las operaciones permitidas según la situación de propiedad de los animales."
       action={canEdit ? <Button onClick={() => save.mutate()} loading={save.isPending}><Save size={18} />Guardar cambios</Button> : undefined}
     />
     {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : !query.data?.categorias.length ? <EmptyState icon={Settings2} title="Sin categorías" description="Crea primero las categorías de animales desde Catálogos." /> : <Card>
-      <div className="form-alert"><ShieldCheck size={18} /><span>La propiedad principal se selecciona en Propiedades. Lactancias y ordeño están reservados para esa propiedad; en las demás sí se permiten los cambios de grupo, potrero y los traslados.</span></div>
+      <div className="form-alert"><ShieldCheck size={18} /><span>La configuración inicial permite todas las operaciones. Para animales fuera de la propiedad se bloquean los cambios de potrero o corral, las lactancias y el ordeño.</span></div>
       <div className="table-responsive">
         <table className="data-table">
-          <thead><tr><th>Operación</th>{query.data.categorias.map((category) => <th key={category.id_categoria_animal}>{category.codigo === 'EN_PROPIEDAD' ? 'Propiedad principal' : category.codigo === 'FUERA_PROPIEDAD' ? 'Otras propiedades' : category.nombre}</th>)}</tr></thead>
+          <thead><tr><th>Operación</th>{query.data.categorias.map((category) => <th key={category.id_categoria_animal}>{category.nombre}</th>)}</tr></thead>
           <tbody>{groupedOperations.flatMap(([group, operations]) => [
             <tr key={`group-${group}`}><td colSpan={query.data!.categorias.length + 1}><Badge tone="info">{group}</Badge></td></tr>,
             ...operations.map((operation) => <tr key={operation.codigo}>
@@ -84,9 +82,8 @@ export function SettingsPage() {
               {query.data!.categorias.map((category) => {
                 const key = settingKey(category.id_categoria_animal, operation.codigo);
                 const allowed = draft[key] ?? true;
-                const fixedByProperty = category.codigo === 'FUERA_PROPIEDAD' && ['LACTANCIA', 'PRODUCCION_LECHE'].includes(operation.codigo);
                 return <td key={category.id_categoria_animal}>
-                  <label className="checkbox-field"><input type="checkbox" checked={fixedByProperty ? false : allowed} disabled={!canEdit || fixedByProperty} onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.checked }))} /><span>{fixedByProperty ? 'Solo principal' : allowed ? 'Permitido' : 'Bloqueado'}</span></label>
+                  <label className="checkbox-field"><input type="checkbox" checked={allowed} disabled={!canEdit} onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.checked }))} /><span>{allowed ? 'Permitido' : 'Bloqueado'}</span></label>
                 </td>;
               })}
             </tr>),

@@ -84,9 +84,6 @@ export interface Animal {
   id_categoria_animal: string;
   categoria?: string;
   categoria_codigo?: string;
-  id_propiedad?: string | null;
-  propiedad?: string | null;
-  propiedad_principal?: boolean;
   id_marquilla: string | null;
   marquilla?: string | null;
   marquilla_codigo?: string | null;
@@ -175,9 +172,8 @@ export interface AnimalFilterOptions {
   especies: { id_especie: string; nombre: string }[];
   categorias: { id_categoria_animal: string; codigo: string; nombre: string }[];
   condiciones: { id_condicion_animal: string; codigo: string; nombre: string; activo: boolean }[];
-  propiedades: { id_propiedad: string; nombre: string; es_principal: boolean }[];
-  grupos: { id_grupo: string; nombre: string; id_propiedad: string }[];
-  ubicaciones: { id_ubicacion: string; nombre: string; tipo: Location['tipo']; id_categoria_animal: string; id_propiedad: string }[];
+  grupos: { id_grupo: string; nombre: string }[];
+  ubicaciones: { id_ubicacion: string; nombre: string; tipo: Location['tipo']; id_categoria_animal: string }[];
   propietarios: { id_usuario: string; nombre: string }[];
   razas: { id_raza: string; nombre: string; id_especie: string | null }[];
   colores: { id_color: string; nombre: string }[];
@@ -219,12 +215,12 @@ export interface Group {
   id_categoria_animal: string;
   categoria: string;
   categoria_codigo: string;
-  id_propiedad: string;
-  propiedad: string;
-  propiedad_principal: boolean;
   id_ubicacion_actual: string | null;
   ubicacion: string | null;
   ubicacion_tipo: Location['tipo'] | null;
+  id_propiedad_padre: string | null;
+  id_propiedad: string | null;
+  propiedad: string | null;
   id_especie: string | null;
   especie: string | null;
   descripcion: string | null;
@@ -240,30 +236,14 @@ export interface Location {
   nombre: string;
   tipo: 'POTRERO' | 'CORRAL' | 'OTRO';
   id_categoria_animal: string;
+  id_propiedad_padre: string | null;
+  propiedad: string | null;
   categoria: string;
   categoria_codigo: string;
-  id_propiedad: string;
-  propiedad: string;
-  propiedad_principal: boolean;
   descripcion: string | null;
   latitud: number | null;
   longitud: number | null;
   activo: boolean;
-  total_animales: number;
-}
-
-export interface Property {
-  id_propiedad: string;
-  codigo: string | null;
-  nombre: string;
-  descripcion: string | null;
-  latitud: number | null;
-  longitud: number | null;
-  es_principal: boolean;
-  activa: boolean;
-  total_grupos: number;
-  total_potreros: number;
-  total_corrales: number;
   total_animales: number;
 }
 
@@ -281,13 +261,13 @@ export interface PastureGrass {
 export interface Pasture {
   id_potrero: string;
   id_ubicacion: string;
+  id_categoria_animal: string;
+  id_propiedad_padre: string | null;
+  propiedad: string | null;
   nombre: string;
   codigo: string | null;
   descripcion: string | null;
   activo: boolean;
-  id_propiedad: string;
-  propiedad: string;
-  propiedad_principal: boolean;
   area: number | null;
   id_unidad_area: string | null;
   id_tipo_uso_potrero: string;
@@ -329,13 +309,13 @@ export interface PastureDetail extends Pasture {
 export interface Corral {
   id_corral: string;
   id_ubicacion: string;
+  id_categoria_animal: string;
+  id_propiedad_padre: string | null;
+  propiedad: string | null;
   nombre: string;
   codigo: string | null;
   descripcion: string | null;
   activo: boolean;
-  id_propiedad: string;
-  propiedad: string;
-  propiedad_principal: boolean;
   id_tipo_corral: string;
   tipo_corral: string;
   area: number | null;
@@ -345,6 +325,7 @@ export interface Corral {
   cubierto: boolean | null;
   disponibilidad_agua: boolean | null;
   observaciones: string | null;
+  total_animales: number;
 }
 
 export interface DataVersion {
@@ -402,7 +383,6 @@ export interface SelectableAnimal {
   sexo: 'MACHO' | 'HEMBRA';
   id_categoria_animal: string;
   categoria: string;
-  id_propiedad?: string | null;
   id_grupo_actual: string | null;
   grupo: string | null;
   id_ubicacion_actual: string | null;
@@ -426,7 +406,6 @@ export interface MovementDetail {
   sexo?: 'MACHO' | 'HEMBRA';
   id_categoria_animal?: string;
   categoria?: string;
-  id_propiedad?: string | null;
   id_grupo_actual?: string | null;
   grupo?: string | null;
   id_ubicacion_actual?: string | null;
@@ -438,10 +417,6 @@ export interface Movement {
   id_movimiento: string;
   tipo_movimiento: 'UBICACION' | 'GRUPO' | 'PROPIEDAD' | 'COMBINADO';
   modo_seleccion: SelectionMode;
-  id_propiedad_origen: string;
-  id_propiedad_destino: string;
-  propiedad_origen: string;
-  propiedad_destino: string;
   id_grupo_filtro: string | null;
   id_ubicacion_origen: string | null;
   id_ubicacion_destino: string | null;
@@ -609,7 +584,6 @@ export interface PregnancyRecord {
   codigo_arete: string | null;
   id_especie: string;
   id_categoria_animal: string;
-  id_propiedad: string | null;
   categoria_codigo: string;
   categoria: string;
   padre: string | null;
