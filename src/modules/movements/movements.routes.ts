@@ -4,11 +4,13 @@ import { pool } from '../../database/pool.js';
 import { transaction } from '../../database/transaction.js';
 import { asyncHandler } from '../../core/async-handler.js';
 import { routeParam } from '../../core/route-param.js';
-import { created, ok } from '../../core/http.js';
+import { created, noContent, ok } from '../../core/http.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../core/errors.js';
 import { requirePermission } from '../../middleware/permission.js';
 import { assertAnimalOperationAllowed, type AnimalOperationCode } from '../../services/animal-operation-policy.js';
 import { buildInsert, type Queryable } from '../shared/sql.js';
+import { deleteCloudinaryImage } from '../../services/cloudinary.service.js';
+import { deleteRecordImage, recordImageUpload, requestFiles, saveRecordImages } from '../shared/record-images.js';
 
 const movementKind = z.enum(['UBICACION', 'GRUPO', 'PROPIEDAD', 'COMBINADO']);
 const MAIN_PROPERTY = 'PROPIEDAD_PRINCIPAL';
@@ -346,6 +348,7 @@ async function applyValidatedMovement(
 }
 
 export const movementsRouter = Router();
+const movementImageDefinition={table:'movimiento_imagen',idColumn:'id_movimiento_imagen',parentColumn:'id_movimiento',parentTable:'movimiento_animal',parentIdColumn:'id_movimiento',moduleName:'movimientos'};
 
 movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(
   `SELECT m.*,COALESCE(mm.nombre,m.motivo) motivo_catalogo,
@@ -363,7 +366,11 @@ movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler
       JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
       LEFT JOIN grupo ga ON ga.id_grupo=a.id_grupo_actual
       LEFT JOIN ubicacion ua ON ua.id_ubicacion=a.id_ubicacion_actual
-      WHERE d.id_movimiento=m.id_movimiento AND d.deleted_at IS NULL),'[]') detalles
+      WHERE d.id_movimiento=m.id_movimiento AND d.deleted_at IS NULL),'[]') detalles,
+    COALESCE((SELECT jsonb_agg(to_jsonb(mi) ORDER BY mi.created_at)
+      FROM movimiento_imagen mi WHERE mi.id_movimiento=m.id_movimiento AND mi.lado='ORIGEN' AND mi.deleted_at IS NULL),'[]') fotos_origen,
+    COALESCE((SELECT jsonb_agg(to_jsonb(mi) ORDER BY mi.created_at)
+      FROM movimiento_imagen mi WHERE mi.id_movimiento=m.id_movimiento AND mi.lado='DESTINO' AND mi.deleted_at IS NULL),'[]') fotos_destino
    FROM movimiento_animal m
    LEFT JOIN ubicacion u1 ON u1.id_ubicacion=m.id_ubicacion_origen
    LEFT JOIN ubicacion u2 ON u2.id_ubicacion=m.id_ubicacion_destino
@@ -532,4 +539,24 @@ movementsRouter.post('/:id/cancelar', requirePermission('MOVIMIENTO_ANULAR'), as
   )).rows[0];
   if (!row) throw new NotFoundError();
   return ok(res, row);
+}));
+
+movementsRouter.post('/:id/imagenes/:lado',requirePermission('MOVIMIENTO_CREAR'),recordImageUpload.array('imagenes',3),asyncHandler(async(req,res)=>{
+  const id=routeParam(req.params.id,'id');
+  const side=z.enum(['ORIGEN','DESTINO']).parse(routeParam(req.params.lado,'lado').toUpperCase());
+  const rows=await transaction(async client=>{
+    const movement=(await client.query(
+      `SELECT tipo_movimiento FROM movimiento_animal WHERE id_movimiento=$1 AND deleted_at IS NULL FOR SHARE`,[id],
+    )).rows[0] as {tipo_movimiento:string}|undefined;
+    if(!movement)throw new NotFoundError('Movimiento no encontrado.');
+    if(movement.tipo_movimiento!=='UBICACION')throw new ValidationError('Las fotografías de origen y destino corresponden únicamente a cambios de potrero o corral.');
+    return saveRecordImages(client,movementImageDefinition,id,requestFiles(req),req.user!.id,{lado:side});
+  },req.user!.id);
+  return created(res,rows);
+}));
+
+movementsRouter.delete('/imagenes/:imageId',requirePermission('MOVIMIENTO_CREAR'),asyncHandler(async(req,res)=>{
+  const image=await transaction(client=>deleteRecordImage(client,movementImageDefinition,routeParam(req.params.imageId,'imageId')),req.user!.id);
+  await deleteCloudinaryImage(image.public_id);
+  return noContent(res);
 }));

@@ -50,6 +50,9 @@ const modules: ModuleDefinition[] = [
   { key: 'ingresos', label: 'Ingresos', description: 'Totales facturados', icon: CircleDollarSign, route: '/ventas', permission: 'VENTA_CONSULTAR', tone: 'lime', metrics: [
     { key: 'semana', label: 'Esta semana', format: 'money' }, { key: 'mes', label: 'Este mes', format: 'money' }, { key: 'anio', label: 'Este año', format: 'money' },
   ] },
+  { key: 'egresos', label: 'Egresos', description: 'Compras registradas', icon: CircleDollarSign, route: '/compras', permission: 'COMPRA_CONSULTAR', tone: 'red', metrics: [
+    { key: 'semana', label: 'Esta semana', format: 'money' }, { key: 'mes', label: 'Este mes', format: 'money' }, { key: 'anio', label: 'Este año', format: 'money' },
+  ] },
   { key: 'ventas', label: 'Ventas', description: 'Operaciones completadas', icon: ShoppingCart, route: '/ventas', permission: 'VENTA_CONSULTAR', tone: 'orange', metrics: [
     { key: 'semana', label: 'Esta semana' }, { key: 'mes', label: 'Este mes' }, { key: 'anio', label: 'Este año' },
   ] },

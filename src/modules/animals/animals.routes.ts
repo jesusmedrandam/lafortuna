@@ -45,7 +45,6 @@ const schema = z.object({
   id_marquilla: z.string().uuid().nullable().optional(),
   id_grupo_actual: z.string().uuid().nullable().optional(),
   id_ubicacion_actual: z.string().uuid().nullable().optional(),
-  fecha_ingreso: z.string().date().nullable().optional(),
   estado: animalConditionSchema.optional(),
   colores: z.array(relation).default([]),
   razas: z.array(relation).default([]),
@@ -70,7 +69,6 @@ const animalUpdateSchema = schema.omit({
   id_categoria_animal: true,
   id_grupo_actual: true,
   id_ubicacion_actual: true,
-  fecha_ingreso: true,
   estado: true,
 }).partial();
 
@@ -247,14 +245,19 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
        ORDER BY ip.created_at DESC LIMIT 1) foto_perfil,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_imagen',i.id_imagen,'secure_url',i.secure_url,'url',i.url,'public_id',i.public_id,
-        'es_perfil',i.es_perfil,'descripcion',i.descripcion,'orden',i.orden,'created_at',i.created_at,
+        'es_perfil',i.es_perfil,'descripcion',i.descripcion,'orden',i.orden,'created_at',i.created_at,'fecha_toma',i.fecha_toma,
         'tipo_archivo',i.tipo_archivo,'mime_type',i.mime_type,'nombre_original',i.nombre_original,
+        'etiquetas',COALESCE((SELECT jsonb_agg(jsonb_build_object(
+          'id_etiqueta',em.id_etiqueta,'codigo',em.codigo,'nombre',em.nombre
+        ) ORDER BY em.nombre)
+        FROM animal_imagen_etiqueta aie JOIN etiqueta_multimedia em ON em.id_etiqueta=aie.id_etiqueta AND em.deleted_at IS NULL
+        WHERE aie.id_imagen=i.id_imagen AND aie.deleted_at IS NULL),'[]'::jsonb),
         'animales',COALESCE((SELECT jsonb_agg(jsonb_build_object(
           'id_animal',ar_a.id_animal,'nombre',ar_a.nombre,'codigo_arete',ar_a.codigo_arete
         ) ORDER BY ar_a.nombre)
         FROM animal_imagen_relacion ar JOIN animal ar_a ON ar_a.id_animal=ar.id_animal AND ar_a.deleted_at IS NULL
         WHERE ar.id_imagen=i.id_imagen AND ar.deleted_at IS NULL),'[]'::jsonb)
-      ) ORDER BY i.es_perfil DESC,i.created_at DESC,i.orden DESC)
+      ) ORDER BY i.es_perfil DESC,i.fecha_toma DESC,i.created_at DESC,i.orden DESC)
       FROM animal_imagen i WHERE i.deleted_at IS NULL AND (i.id_animal=a.id_animal OR EXISTS(
         SELECT 1 FROM animal_imagen_relacion air
         WHERE air.id_imagen=i.id_imagen AND air.id_animal=a.id_animal AND air.deleted_at IS NULL
@@ -530,6 +533,7 @@ animalsRouter.post(
             mime_type: profilePhoto?.mimetype ?? 'image/jpeg',
             nombre_original: profilePhoto?.originalname ?? null,
             es_perfil: true,
+            fecha_toma: new Date().toISOString().slice(0,10),
             descripcion: descripcion_foto_perfil || 'Foto de perfil registrada al crear el animal.',
             registrado_por: req.user!.id,
           }))).rows[0];

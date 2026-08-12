@@ -34,6 +34,8 @@ import { SalesPage } from '../pages/sales/SalesPage';
 import { MultimediaPage } from '../pages/multimedia/MultimediaPage';
 import { MarksPage } from '../pages/marks/MarksPage';
 import { SettingsPage } from '../pages/admin/SettingsPage';
+import { PurchasesPage } from '../pages/purchases/PurchasesPage';
+import { ActivitiesPage } from '../pages/activities/ActivitiesPage';
 
 function ProtectedRoot() {
   const { user, ready } = useAuth();
@@ -83,6 +85,8 @@ export function AppRouter() {
           <Route path="pesajes" element={<PermissionRoute permissions={['PESAJE_CONSULTAR']}><AnimalRecordsPage mode="pesajes" /></PermissionRoute>} />
           <Route path="muertes" element={<PermissionRoute permissions={['MUERTE_CONSULTAR']}><AnimalRecordsPage mode="muertes" /></PermissionRoute>} />
           <Route path="ventas" element={<PermissionRoute permissions={['VENTA_CONSULTAR']}><SalesPage /></PermissionRoute>} />
+          <Route path="compras" element={<PermissionRoute permissions={['COMPRA_CONSULTAR']}><PurchasesPage /></PermissionRoute>} />
+          <Route path="actividades" element={<PermissionRoute permissions={['ACTIVIDAD_CONSULTAR']}><ActivitiesPage /></PermissionRoute>} />
           <Route path="catalogos" element={<PermissionRoute permissions={['CATALOGO_CONSULTAR']}><CatalogsPage /></PermissionRoute>} />
           <Route path="configuracion" element={<PermissionRoute permissions={['CATALOGO_CONSULTAR']}><SettingsPage /></PermissionRoute>} />
           <Route path="marquillas" element={<PermissionRoute permissions={['CATALOGO_CONSULTAR']}><MarksPage /></PermissionRoute>} />

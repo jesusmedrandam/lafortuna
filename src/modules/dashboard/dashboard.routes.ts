@@ -11,6 +11,7 @@ export const dashboardRouter = Router();
 const dashboardConfigurationSchema = z.object({
   animales: z.array(z.enum(['en_propiedad', 'fuera_propiedad', 'activos', 'inactivos'])).max(4).optional(),
   ingresos: z.array(z.enum(['semana', 'mes', 'anio'])).max(3).optional(),
+  egresos: z.array(z.enum(['semana', 'mes', 'anio'])).max(3).optional(),
   ventas: z.array(z.enum(['semana', 'mes', 'anio'])).max(3).optional(),
   produccion: z.array(z.enum(['hoy', 'semana', 'mes'])).max(3).optional(),
   tratamientos: z.array(z.enum(['hoy', 'semana', 'mes'])).max(3).optional(),
@@ -43,7 +44,7 @@ dashboardRouter.patch('/preferencias', requirePermission('DASHBOARD_CONSULTAR'),
 }));
 
 dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, await cache.rememberComposite(
-  ['animales', 'produccion', 'sanidad', 'grupos', 'ubicaciones', 'ventas', 'reproduccion'],
+  ['animales', 'produccion', 'sanidad', 'grupos', 'ubicaciones', 'ventas', 'compras', 'reproduccion'],
   'dashboard-resumen-v2',
   60,
   async () => {
@@ -59,6 +60,10 @@ dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncH
        (SELECT COALESCE(SUM(precio_total),0) FROM venta_producto WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('month',CURRENT_DATE)))::numeric ingresos_mes,
       ((SELECT COALESCE(SUM(precio_total),0) FROM venta_animal WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('year',CURRENT_DATE))+
        (SELECT COALESCE(SUM(precio_total),0) FROM venta_producto WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('year',CURRENT_DATE)))::numeric ingresos_anio,
+
+      (SELECT COALESCE(SUM(valor_total),0)::numeric FROM compra WHERE deleted_at IS NULL AND fecha_compra>=date_trunc('week',CURRENT_DATE)::date) egresos_semana,
+      (SELECT COALESCE(SUM(valor_total),0)::numeric FROM compra WHERE deleted_at IS NULL AND fecha_compra>=date_trunc('month',CURRENT_DATE)::date) egresos_mes,
+      (SELECT COALESCE(SUM(valor_total),0)::numeric FROM compra WHERE deleted_at IS NULL AND fecha_compra>=date_trunc('year',CURRENT_DATE)::date) egresos_anio,
 
       ((SELECT COUNT(*) FROM venta_animal WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('week',CURRENT_DATE))+
        (SELECT COUNT(*) FROM venta_producto WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('week',CURRENT_DATE)))::int ventas_semana,
@@ -99,6 +104,7 @@ dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncH
     return {
       animales: { en_propiedad: row.animales_en_propiedad, fuera_propiedad: row.animales_fuera_propiedad, activos: row.animales_activos, inactivos: row.animales_inactivos },
       ingresos: { semana: row.ingresos_semana, mes: row.ingresos_mes, anio: row.ingresos_anio },
+      egresos: { semana: row.egresos_semana, mes: row.egresos_mes, anio: row.egresos_anio },
       ventas: { semana: row.ventas_semana, mes: row.ventas_mes, anio: row.ventas_anio },
       produccion: { hoy: row.produccion_hoy, semana: row.produccion_semana, mes: row.produccion_mes },
       tratamientos: { hoy: row.tratamientos_hoy, semana: row.tratamientos_semana, mes: row.tratamientos_mes },

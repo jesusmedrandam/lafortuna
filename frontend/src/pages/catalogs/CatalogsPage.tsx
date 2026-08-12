@@ -11,10 +11,11 @@ import type { CatalogItem } from '../../types/api';
 
 const catalogDefinitions = [
   ['compradores', 'Compradores'], ['productos-venta', 'Productos de venta'], ['unidades', 'Unidades de medida'],
+  ['tipos-producto-compra', 'Tipos de producto de compra'], ['tipos-actividad', 'Tipos de actividad'], ['etiquetas-multimedia', 'Etiquetas de fotografías'],
   ['categorias-animales', 'Categorías de animales'], ['condiciones-animales', 'Condiciones del animal'], ['especies', 'Especies'], ['origenes', 'Orígenes'], ['colores', 'Colores'], ['razas', 'Razas'],
   ['tipos-grupo', 'Tipos de grupo'], ['pastos', 'Tipos de pasto'], ['usos-potrero', 'Usos de potrero'], ['tipos-corral', 'Tipos de corral'],
   ['motivos-movimiento', 'Motivos de movimiento'], ['tipos-limpieza', 'Tipos de limpieza'], ['categorias-agroquimicos', 'Categorías agroquímicas'], ['agroquimicos', 'Productos agroquímicos'],
-  ['tipos-tratamiento', 'Tipos de tratamiento'], ['vias', 'Vías de administración'], ['medicamentos', 'Medicamentos'],
+  ['tipos-tratamiento', 'Tipos de tratamiento'], ['tipos-condicion-salud', 'Problemas de salud'], ['vias', 'Vías de administración'], ['medicamentos', 'Medicamentos'],
 ] as const;
 type CatalogName = typeof catalogDefinitions[number][0];
 const isCatalogName = (value: string | null): value is CatalogName => catalogDefinitions.some(([name]) => name === value);
@@ -51,6 +52,7 @@ export function CatalogsPage() {
     if (catalog === 'medicamentos') return ['nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','dias_retiro_leche','dias_retiro_carne'];
     if (catalog === 'productos-venta') return ['codigo','nombre','id_unidad_venta','descripcion'];
     if (catalog === 'compradores') return ['codigo','nombre','contacto','destino','descripcion'];
+    if (catalog === 'tipos-producto-compra') return ['codigo','nombre','es_animal','descripcion'];
     return ['codigo','nombre','descripcion'];
   }, [catalog]);
 
@@ -59,7 +61,7 @@ export function CatalogsPage() {
       const body: Record<string, unknown> = { activo: form.activo };
       for (const field of fields) {
         const value = form[field];
-        if (field === 'requiere_productos') body[field] = Boolean(value);
+        if (field === 'requiere_productos' || field === 'es_animal') body[field] = Boolean(value);
         else if (field.startsWith('dias_')) body[field] = value === '' || value == null ? null : Number(value);
         else body[field] = typeof value === 'string' && !value.trim() ? null : value;
       }
@@ -82,7 +84,7 @@ export function CatalogsPage() {
 
   const openEdit = (item: CatalogItem) => {
     const next = emptyForm();
-    for (const field of fields) next[field] = field === 'requiere_productos' ? Boolean(item[field]) : String(item[field] ?? '');
+    for (const field of fields) next[field] = field === 'requiere_productos' || field === 'es_animal' ? Boolean(item[field]) : String(item[field] ?? '');
     next.activo = item.activo !== false;
     next.es_sistema = Boolean(item.es_sistema);
     setForm(next); setEditingId(itemId(item)); setOpen(true);
@@ -93,6 +95,7 @@ export function CatalogsPage() {
     if (field === 'id_categoria_producto') return itemLabel(categories.data?.find((value) => itemId(value) === String(item[field])) ?? { nombre: '—' });
     if (field === 'id_unidad_predeterminada' || field === 'id_unidad_venta') return itemLabel(units.data?.find((value) => itemId(value) === String(item[field])) ?? { nombre: '—' });
     if (field === 'requiere_productos') return item[field] ? 'Sí' : 'No';
+    if (field === 'es_animal') return item[field] ? 'Crea un animal' : 'Producto o insumo';
     return String(item[field] ?? '—');
   };
 
@@ -112,6 +115,7 @@ export function CatalogsPage() {
       if (field === 'id_categoria_producto') return <Field key={field} label="Categoría" required><Select value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">Selecciona</option>{categories.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>;
       if (field === 'id_unidad_predeterminada' || field === 'id_unidad_venta') return <Field key={field} label={field === 'id_unidad_venta' ? 'Unidad de venta' : 'Unidad predeterminada'} required={field === 'id_unidad_venta'}><Select required={field === 'id_unidad_venta'} value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">{field === 'id_unidad_venta' ? 'Selecciona una unidad' : 'Sin unidad'}</option>{units.data?.filter((item) => item.activo !== false).map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)} {item.simbolo ? `(${item.simbolo})` : ''}</option>)}</Select></Field>;
       if (field === 'requiere_productos') return <label key={field} className="checkbox"><input type="checkbox" checked={Boolean(form[field])} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.checked }))} />Requiere registrar productos aplicados</label>;
+      if (field === 'es_animal') return <label key={field} className="checkbox"><input type="checkbox" checked={Boolean(form[field])} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.checked }))} />Esta compra crea un nuevo animal</label>;
       if (field === 'descripcion' || field === 'instrucciones') return <Field key={field} label={label}><Textarea value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))} /></Field>;
       return <Field key={field} label={label} required={['codigo','nombre','nombre_comercial'].includes(field)}><Input disabled={catalog === 'condiciones-animales' && Boolean(form.es_sistema) && field === 'codigo'} type={field.startsWith('dias_') ? 'number' : 'text'} min={field.startsWith('dias_') ? 0 : undefined} value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))} /></Field>;
     })}<label className="checkbox"><input type="checkbox" disabled={catalog === 'condiciones-animales' && Boolean(form.es_sistema)} checked={form.activo} onChange={(event) => setForm((current) => ({ ...current, activo: event.target.checked }))} />Activo</label></div></Modal> : null}

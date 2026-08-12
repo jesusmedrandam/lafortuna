@@ -27,10 +27,10 @@ type Def = {
 const defs: Record<string, Def> = {
   abortos: { table: 'aborto', id: 'id_aborto', animalColumn: 'id_vaca', read: 'ABORTO_CONSULTAR', write: 'ABORTO_ADMINISTRAR', operation: 'ABORTO', columns: ['id_vaca','fecha','causa','meses_gestacion','descripcion'], order: 'fecha DESC NULLS LAST' },
   lactancias: { table: 'lactancia', id: 'id_lactancia', animalColumn: 'id_vaca', read: 'LACTANCIA_CONSULTAR', write: 'LACTANCIA_ADMINISTRAR', operation: 'LACTANCIA', columns: ['id_vaca','id_parto','fecha_inicio','fecha_fin','activa','observaciones'], order: 'fecha_inicio DESC' },
-  producciones: { table: 'produccion_leche', id: 'id_produccion', animalColumn: 'id_vaca', read: 'PRODUCCION_CONSULTAR', write: 'PRODUCCION_ADMINISTRAR', operation: 'PRODUCCION_LECHE', columns: ['id_vaca','id_lactancia','fecha_produccion','turno','litros','observaciones'], order: 'fecha_produccion DESC' },
+  producciones: { table: 'produccion_leche', id: 'id_produccion', animalColumn: 'id_vaca', read: 'PRODUCCION_CONSULTAR', write: 'PRODUCCION_ADMINISTRAR', operation: 'PRODUCCION_LECHE', columns: ['id_vaca','fecha_produccion','turno','litros','observaciones','fuente','referencia_externa'], order: 'fecha_produccion DESC' },
   pesajes: { table: 'pesaje', id: 'id_pesaje', animalColumn: 'id_animal', read: 'PESAJE_CONSULTAR', write: 'PESAJE_ADMINISTRAR', operation: 'PESAJE', columns: ['id_animal','fecha_pesaje','peso_kg','metodo','observaciones'], order: 'fecha_pesaje DESC' },
   muertes: { table: 'muerte', id: 'id_muerte', animalColumn: 'id_animal', read: 'MUERTE_CONSULTAR', write: 'MUERTE_ADMINISTRAR', operation: 'MUERTE', columns: ['id_animal','fecha','causa','descripcion'], order: 'fecha DESC' },
-  tratamientos: { table: 'tratamiento_animal', id: 'id_tratamiento', animalColumn: 'id_animal', read: 'SANIDAD_CONSULTAR', write: 'SANIDAD_ADMINISTRAR', operation: 'TRATAMIENTO', columns: ['id_animal','id_tipo_tratamiento','id_medicamento','id_via_administracion','dosis','id_unidad_dosis','fecha_aplicacion','proxima_aplicacion','aplicado_por','descripcion','observaciones'], order: 'fecha_aplicacion DESC' }
+  tratamientos: { table: 'tratamiento_animal', id: 'id_tratamiento', animalColumn: 'id_animal', read: 'SANIDAD_CONSULTAR', write: 'SANIDAD_ADMINISTRAR', operation: 'TRATAMIENTO', columns: ['id_animal','id_condicion_salud','id_tipo_tratamiento','id_medicamento','id_via_administracion','dosis','id_unidad_dosis','fecha_aplicacion','proxima_aplicacion','aplicado_por','descripcion','observaciones'], order: 'fecha_aplicacion DESC' }
 };
 
 function definition(moduleName: string | undefined) {
@@ -45,15 +45,95 @@ function allowedBody(body: Record<string, unknown>, columns: string[]) {
 }
 
 export const recordsRouter = Router();
+
+async function activeLactation(client:Parameters<Parameters<typeof transaction>[0]>[0],animalId:string,date:string) {
+  const rows=(await client.query(
+    `SELECT id_lactancia FROM lactancia
+     WHERE id_vaca=$1 AND deleted_at IS NULL
+       AND fecha_inicio<=$2::date AND (fecha_fin IS NULL OR fecha_fin>=$2::date)
+     ORDER BY fecha_inicio DESC FOR SHARE`,[animalId,date],
+  )).rows as Array<{id_lactancia:string}>;
+  if(!rows.length)throw new ValidationError('La vaca debe tener una lactancia activa en la fecha seleccionada.');
+  if(rows.length>1)throw new ValidationError('La vaca tiene más de una lactancia activa. Cierra el registro duplicado antes de continuar.');
+  return rows[0].id_lactancia;
+}
+
+async function linkedHealthCondition(client:Parameters<Parameters<typeof transaction>[0]>[0],conditionId:string|null|undefined,animalId:string) {
+  if(!conditionId)return null;
+  const row=(await client.query(
+    `SELECT id_condicion_salud,estado FROM condicion_salud
+     WHERE id_condicion_salud=$1 AND id_animal=$2 AND deleted_at IS NULL AND estado<>'RESUELTA' FOR UPDATE`,
+    [conditionId,animalId],
+  )).rows[0] as {id_condicion_salud:string;estado:string}|undefined;
+  if(!row)throw new ValidationError('La condición seleccionada no pertenece al animal o ya está resuelta.');
+  return row;
+}
+
+const tankSchema=z.object({
+  fecha_produccion:z.string().date(),turno:z.enum(['MANANA','TARDE','NOCHE','UNICO']).default('UNICO'),
+  litros:z.number().min(0),fuente:z.enum(['MANUAL','SENSOR']).default('MANUAL'),
+  referencia_externa:z.string().trim().max(160).nullable().optional(),observaciones:z.string().nullable().optional(),
+});
+
+recordsRouter.get('/producciones/vacas-activas',requirePermission('PRODUCCION_CONSULTAR'),asyncHandler(async(req,res)=>{
+  const date=z.string().date().catch(new Date().toISOString().slice(0,10)).parse(req.query.fecha);
+  return ok(res,(await pool.query(
+    `SELECT a.id_animal,a.nombre,a.codigo_arete,l.id_lactancia,l.fecha_inicio
+     FROM lactancia l JOIN animal a ON a.id_animal=l.id_vaca AND a.deleted_at IS NULL AND a.estado='ACTIVO'
+     WHERE l.deleted_at IS NULL AND l.fecha_inicio<=$1::date AND (l.fecha_fin IS NULL OR l.fecha_fin>=$1::date)
+     ORDER BY a.nombre,a.codigo_arete`,[date],
+  )).rows);
+}));
+
+recordsRouter.get('/producciones/resumen/diario',requirePermission('PRODUCCION_CONSULTAR'),asyncHandler(async(req,res)=>{
+  const date=z.string().date().catch(new Date().toISOString().slice(0,10)).parse(req.query.fecha);
+  const row=(await pool.query(
+    `SELECT
+      (SELECT COALESCE(SUM(litros),0) FROM produccion_leche WHERE fecha_produccion=$1::date AND deleted_at IS NULL) total_vacas,
+      (SELECT COALESCE(SUM(litros),0) FROM produccion_tanque WHERE fecha_produccion=$1::date AND deleted_at IS NULL) total_tanque,
+      (SELECT COUNT(DISTINCT id_vaca)::int FROM produccion_leche WHERE fecha_produccion=$1::date AND deleted_at IS NULL) vacas_registradas`,
+    [date],
+  )).rows[0];
+  return ok(res,{fecha:date,total_vacas:row.total_vacas,total_tanque:row.total_tanque,
+    diferencia:Number(row.total_tanque)-Number(row.total_vacas),vacas_registradas:row.vacas_registradas});
+}));
+
+recordsRouter.get('/produccion-tanque',requirePermission('PRODUCCION_CONSULTAR'),asyncHandler(async(_req,res)=>ok(res,(await pool.query(
+  `SELECT * FROM produccion_tanque WHERE deleted_at IS NULL ORDER BY fecha_produccion DESC,created_at DESC`
+)).rows)));
+
+recordsRouter.post('/produccion-tanque',requirePermission('PRODUCCION_ADMINISTRAR'),asyncHandler(async(req,res)=>{
+  const input=tankSchema.parse(req.body);
+  return created(res,(await pool.query(buildInsert('produccion_tanque',{...input,referencia_externa:input.referencia_externa??null,observaciones:input.observaciones??null,registrado_por:req.user!.id}))).rows[0]);
+}));
+
+recordsRouter.patch('/produccion-tanque/:id',requirePermission('PRODUCCION_ADMINISTRAR'),asyncHandler(async(req,res)=>{
+  const input=tankSchema.parse(req.body);
+  const row=(await pool.query(buildUpdate('produccion_tanque','id_produccion_tanque',routeParam(req.params.id,'id'),input))).rows[0];
+  if(!row)throw new NotFoundError('Medición del tanque no encontrada.');
+  return ok(res,row);
+}));
+
+recordsRouter.delete('/produccion-tanque/:id',requirePermission('PRODUCCION_ADMINISTRAR'),asyncHandler(async(req,res)=>{
+  const result=await pool.query('UPDATE produccion_tanque SET deleted_at=NOW(),updated_at=NOW() WHERE id_produccion_tanque=$1 AND deleted_at IS NULL',[routeParam(req.params.id,'id')]);
+  if(!result.rowCount)throw new NotFoundError('Medición del tanque no encontrada.');
+  return noContent(res);
+}));
+
 recordsRouter.get('/:module', asyncHandler(async (req, res) => {
   const d = definition(routeParam(req.params.module, 'module'));
   assertPermission(req.user, d.read);
+  const treatmentSelect=d.table==='tratamiento_animal' ? ',cs.estado condicion_estado,cs.descripcion condicion_descripcion,tcs.nombre condicion_tipo' : '';
+  const treatmentJoins=d.table==='tratamiento_animal'
+    ? 'LEFT JOIN condicion_salud cs ON cs.id_condicion_salud=r.id_condicion_salud LEFT JOIN tipo_condicion_salud tcs ON tcs.id_tipo_condicion_salud=cs.id_tipo_condicion_salud'
+    : '';
   const rows = (await pool.query(
     `SELECT r.*, a.nombre animal, a.codigo_arete,a.id_categoria_animal,
-      ca.codigo categoria_codigo,ca.nombre categoria
+      ca.codigo categoria_codigo,ca.nombre categoria ${treatmentSelect}
      FROM ${d.table} r
      LEFT JOIN animal a ON a.id_animal = r.${d.animalColumn}
      LEFT JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
+     ${treatmentJoins}
      WHERE r.deleted_at IS NULL
      ORDER BY r.${d.order}`
   )).rows;
@@ -66,6 +146,24 @@ recordsRouter.post('/:module', asyncHandler(async (req, res) => {
   const animalId = data[d.animalColumn];
   if (typeof animalId !== 'string') throw new ValidationError('Selecciona un animal.');
   await assertAnimalOperationAllowed(pool, animalId, d.operation);
+  if(d.table==='produccion_leche') {
+    const date=String(data.fecha_produccion??'');
+    if(!date)throw new ValidationError('Selecciona la fecha de producción.');
+    const row=await transaction(async client=>{
+      const lactationId=await activeLactation(client,animalId,date);
+      return (await client.query(buildInsert(d.table,{...data,id_lactancia:lactationId,fuente:data.fuente??'MANUAL',registrado_por:req.user!.id}))).rows[0];
+    },req.user!.id);
+    return created(res,row);
+  }
+  if(d.table==='tratamiento_animal') {
+    const row=await transaction(async client=>{
+      const condition=await linkedHealthCondition(client,data.id_condicion_salud as string|null|undefined,animalId);
+      const saved=(await client.query(buildInsert(d.table,{...data,id_condicion_salud:data.id_condicion_salud??null,registrado_por:req.user!.id}))).rows[0];
+      if(condition)await client.query("UPDATE condicion_salud SET estado='EN_TRATAMIENTO',updated_at=NOW() WHERE id_condicion_salud=$1",[condition.id_condicion_salud]);
+      return saved;
+    },req.user!.id);
+    return created(res,row);
+  }
   const row = (await pool.query(buildInsert(d.table, { ...data, registrado_por: req.user!.id }))).rows[0];
   return created(res, row);
 }));
@@ -73,6 +171,34 @@ recordsRouter.patch('/:module/:id', asyncHandler(async (req, res) => {
   const d = definition(routeParam(req.params.module, 'module'));
   assertPermission(req.user, d.write);
   const data = allowedBody(req.body as Record<string, unknown>, d.columns);
+  if(d.table==='produccion_leche') {
+    const id=routeParam(req.params.id,'id');
+    const row=await transaction(async client=>{
+      const current=(await client.query('SELECT * FROM produccion_leche WHERE id_produccion=$1 AND deleted_at IS NULL FOR UPDATE',[id])).rows[0];
+      if(!current)throw new NotFoundError();
+      const animalId=String(data.id_vaca??current.id_vaca);
+      const date=String(data.fecha_produccion??current.fecha_produccion).slice(0,10);
+      await assertAnimalOperationAllowed(client,animalId,d.operation);
+      const lactationId=await activeLactation(client,animalId,date);
+      return (await client.query(buildUpdate(d.table,d.id,id,{...data,id_vaca:animalId,id_lactancia:lactationId}))).rows[0];
+    },req.user!.id);
+    return ok(res,row);
+  }
+  if(d.table==='tratamiento_animal') {
+    const id=routeParam(req.params.id,'id');
+    const row=await transaction(async client=>{
+      const current=(await client.query('SELECT * FROM tratamiento_animal WHERE id_tratamiento=$1 AND deleted_at IS NULL FOR UPDATE',[id])).rows[0];
+      if(!current)throw new NotFoundError();
+      const animalId=String(data.id_animal??current.id_animal);
+      const conditionId=(Object.prototype.hasOwnProperty.call(data,'id_condicion_salud')?data.id_condicion_salud:current.id_condicion_salud) as string|null|undefined;
+      await assertAnimalOperationAllowed(client,animalId,d.operation);
+      const condition=await linkedHealthCondition(client,conditionId,animalId);
+      const saved=(await client.query(buildUpdate(d.table,d.id,id,{...data,id_animal:animalId,id_condicion_salud:conditionId??null}))).rows[0];
+      if(condition)await client.query("UPDATE condicion_salud SET estado='EN_TRATAMIENTO',updated_at=NOW() WHERE id_condicion_salud=$1",[condition.id_condicion_salud]);
+      return saved;
+    },req.user!.id);
+    return ok(res,row);
+  }
   const row = (await pool.query(buildUpdate(d.table, d.id, routeParam(req.params.id, 'id'), data))).rows[0];
   if (!row) throw new NotFoundError();
   return ok(res, row);
@@ -258,7 +384,6 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
           id_categoria_animal: mother.id_categoria_animal,
           estado: childState,
           fecha_nacimiento: birthDay,
-          fecha_ingreso: birthDay,
           id_madre: motherId,
           id_padre: fatherId,
           registrado_por: req.user!.id,
@@ -329,7 +454,7 @@ birthsRouter.post(
     const birthId = routeParam(req.params.id, 'id');
     const childId = routeParam(req.params.childId, 'childId');
     const relation = await pool.query(
-      `SELECT p.id_madre
+      `SELECT p.id_madre,p.fecha_parto
        FROM parto_cria pc
        JOIN parto p ON p.id_parto=pc.id_parto AND p.deleted_at IS NULL
        JOIN animal a ON a.id_animal=pc.id_cria AND a.deleted_at IS NULL
@@ -361,6 +486,7 @@ birthsRouter.post(
           mime_type: req.file!.mimetype,
           nombre_original: req.file!.originalname,
           es_perfil: profile,
+          fecha_toma: String(relation.rows[0].fecha_parto).slice(0,10),
           descripcion: req.body.descripcion || null,
           registrado_por: req.user!.id,
         }))).rows[0];

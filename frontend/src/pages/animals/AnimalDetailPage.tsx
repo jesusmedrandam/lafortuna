@@ -370,7 +370,7 @@ export function AnimalDetailPage() {
             <CompactInfo icon={Tag} label="Categoría" value={animal.categoria || 'Sin categoría'} />
             <CompactInfo icon={Weight} label="Último peso" value={animal.ultimo_pesaje ? `${formatNumber(animal.ultimo_pesaje.peso_kg)} kg · ${formatDate(animal.ultimo_pesaje.fecha)}` : 'Sin pesaje'} />
             <CompactInfo icon={UserRound} label="Propietario(s)" value={ownerText} wide />
-            <CompactInfo icon={CalendarDays} label="Nacimiento / ingreso" value={`${formatDate(animal.fecha_nacimiento)} · ${formatDate(animal.fecha_ingreso)}`} />
+            <CompactInfo icon={CalendarDays} label="Fecha de nacimiento" value={formatDate(animal.fecha_nacimiento)} />
             {animal.fecha_nacimiento ? <CompactInfo icon={CalendarDays} label="Edad" value={formatAge(animal.fecha_nacimiento)} /> : null}
             {animal.marquilla ? <CompactInfo icon={Tag} label="Fierro" value={<span className="animal-mark-inline"><span>{animal.marquilla_codigo || animal.marquilla}</span>{animal.marquilla_foto ? <button type="button" className="animal-mark-thumb" onClick={openMarkViewer} aria-label="Ver imagen del fierro en grande"><img src={animal.marquilla_foto} alt={`Fierro ${animal.marquilla_codigo || animal.marquilla}`} /></button> : null}</span>} /> : null}
             <CompactInfo icon={UserRound} label="Padres" value={`Madre: ${animal.madre || '—'} · Padre: ${animal.padre || '—'}`} wide />

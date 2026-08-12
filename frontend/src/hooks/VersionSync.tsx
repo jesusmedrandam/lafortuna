@@ -12,7 +12,10 @@ const queryKeys: Record<string, string[]> = {
   movimientos: ['movements'],
   sanidad: ['sanitary', 'treatments'],
   produccion: ['dashboard', 'productions', 'lactations'],
-  imagenes: ['animal'],
+  imagenes: ['animal', 'multimedia'],
+  limpiezas: ['cleanings'],
+  compras: ['purchases', 'dashboard'],
+  actividades: ['activities'],
 };
 
 export function VersionSync() {

@@ -28,7 +28,11 @@ const definitions = {
   vias: { table:'via_administracion', id:'id_via_administracion', columns:['codigo','nombre','descripcion','activo'], order:'nombre' },
   medicamentos: { table:'medicamento', id:'id_medicamento', columns:['nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','dias_retiro_leche','dias_retiro_carne','activo'], order:'nombre_comercial' },
   'productos-venta': { table:'producto_venta', id:'id_producto_venta', columns:['codigo','nombre','id_unidad_venta','descripcion','activo'], order:'nombre' },
-  compradores: { table:'comprador', id:'id_comprador', columns:['codigo','nombre','contacto','destino','descripcion','activo'], order:'nombre' }
+  compradores: { table:'comprador', id:'id_comprador', columns:['codigo','nombre','contacto','destino','descripcion','activo'], order:'nombre' },
+  'etiquetas-multimedia': { table:'etiqueta_multimedia', id:'id_etiqueta', columns:['codigo','nombre','descripcion','activo'], order:'nombre' },
+  'tipos-producto-compra': { table:'tipo_producto_compra', id:'id_tipo_producto_compra', columns:['codigo','nombre','es_animal','descripcion','activo'], order:'nombre' },
+  'tipos-actividad': { table:'tipo_actividad', id:'id_tipo_actividad', columns:['codigo','nombre','descripcion','activo'], order:'nombre' },
+  'tipos-condicion-salud': { table:'tipo_condicion_salud', id:'id_tipo_condicion_salud', columns:['codigo','nombre','descripcion','activo'], order:'nombre' }
 } as const;
 type CatalogName=keyof typeof definitions;
 const nameSchema=z.enum(Object.keys(definitions) as [CatalogName,...CatalogName[]]);

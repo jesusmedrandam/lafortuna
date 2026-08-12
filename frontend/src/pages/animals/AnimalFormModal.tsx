@@ -28,7 +28,6 @@ interface FormState {
   id_marquilla: string;
   id_grupo_actual: string;
   id_ubicacion_actual: string;
-  fecha_ingreso: string;
   estado: Animal['estado'];
   colores: { id: string; principal: boolean }[];
   razas: { id: string; porcentaje: string }[];
@@ -59,7 +58,6 @@ function emptyForm(): FormState {
     id_marquilla: '',
     id_grupo_actual: '',
     id_ubicacion_actual: '',
-    fecha_ingreso: '',
     estado: 'ACTIVO',
     colores: [],
     razas: [],
@@ -124,7 +122,6 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
       id_marquilla: animal.id_marquilla ?? '',
       id_grupo_actual: animal.id_grupo_actual ?? '',
       id_ubicacion_actual: animal.id_ubicacion_actual ?? '',
-      fecha_ingreso: dateInputValue(animal.fecha_ingreso),
       estado: animal.estado,
       colores: animal.colores?.map((item) => ({ id: item.id_color, principal: item.es_principal })) ?? [],
       razas: animal.razas?.map((item) => ({ id: item.id_raza, porcentaje: item.porcentaje?.toString() ?? '' })) ?? [],
@@ -179,7 +176,6 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
       id_marquilla: form.id_marquilla || null,
       id_grupo_actual: form.id_grupo_actual || null,
       id_ubicacion_actual: form.id_ubicacion_actual || null,
-      fecha_ingreso: form.fecha_ingreso || null,
       estado: form.estado,
       colores: form.colores.map((item) => ({ id: item.id, principal: item.principal })),
       razas: form.razas.map((item) => ({ id: item.id, porcentaje: numberOrNull(item.porcentaje) })),
@@ -192,7 +188,6 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
       id_categoria_animal: _category,
       id_grupo_actual: _group,
       id_ubicacion_actual: _location,
-      fecha_ingreso: _entryDate,
       estado: _condition,
       ...editable
     } = baseBody();
@@ -453,9 +448,6 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
                 <option value="">Sin ubicación específica</option>
                 {availableLocations.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
               </Select>
-            </Field>
-            <Field label="Fecha de ingreso">
-              <Input type="date" value={form.fecha_ingreso} onChange={(event) => setForm((current) => ({ ...current, fecha_ingreso: event.target.value }))} />
             </Field>
             <Field label="Actividad del animal" hint="Un animal inactivo no estará disponible para movimientos, ventas, sanidad ni reproducción.">
               <Select value={form.estado} onChange={(event) => setForm((current) => ({ ...current, estado: event.target.value as Animal['estado'] }))}>

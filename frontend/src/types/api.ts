@@ -48,6 +48,7 @@ export interface Profile {
 export interface DashboardSummary {
   animales: { en_propiedad: number; fuera_propiedad: number; activos: number; inactivos: number };
   ingresos: { semana: string | number; mes: string | number; anio: string | number };
+  egresos: { semana: string | number; mes: string | number; anio: string | number };
   ventas: { semana: number; mes: number; anio: number };
   produccion: { hoy: string | number; semana: string | number; mes: string | number };
   tratamientos: { hoy: number; semana: number; mes: number };
@@ -93,7 +94,6 @@ export interface Animal {
   grupo: string | null;
   id_ubicacion_actual: string | null;
   ubicacion: string | null;
-  fecha_ingreso: string | null;
   estado: string;
   condicion?: string;
   foto_perfil: string | null;
@@ -190,9 +190,11 @@ export interface AnimalImage {
   descripcion: string | null;
   orden: number | null;
   created_at?: string;
+  fecha_toma: string;
   tipo_archivo?: 'IMAGEN' | 'VIDEO';
   mime_type?: string | null;
   nombre_original?: string | null;
+  etiquetas: Array<{ id_etiqueta: string; codigo: string; nombre: string }>;
   animales?: Array<{
     id_animal: string;
     nombre: string;
@@ -204,6 +206,18 @@ export interface AnimalImage {
     ubicacion?: string | null;
   }>;
   total?: number;
+}
+
+export interface RecordImage {
+  id_movimiento_imagen?: string;
+  id_limpieza_imagen?: string;
+  id_actividad_imagen?: string;
+  secure_url: string;
+  public_id: string;
+  nombre_original: string | null;
+  descripcion: string | null;
+  created_at: string;
+  lado?: 'ORIGEN' | 'DESTINO';
 }
 
 export interface Group {
@@ -449,6 +463,8 @@ export interface Movement {
   total_seleccionados: number;
   aplicado_en: string | null;
   detalles: MovementDetail[];
+  fotos_origen: RecordImage[];
+  fotos_destino: RecordImage[];
 }
 
 export interface SanitaryDetail {
@@ -516,6 +532,7 @@ export interface PastureCleaning {
   id_limpieza: string;
   id_potrero: string;
   id_tipo_limpieza: string;
+  tipos_limpieza: Array<{ id_tipo_limpieza: string; nombre: string }>;
   potrero: string;
   tipo_limpieza: string;
   fecha_inicio: string;
@@ -531,6 +548,83 @@ export interface PastureCleaning {
   observaciones: string | null;
   productos: CleaningProduct[];
   operadores: CleaningOperator[];
+  imagenes: RecordImage[];
+}
+
+export interface Purchase {
+  id_compra: string;
+  id_tipo_producto_compra: string;
+  tipo_producto: string;
+  tipo_producto_codigo: string;
+  es_animal: boolean;
+  id_animal: string | null;
+  animal: string | null;
+  codigo_arete: string | null;
+  fecha_compra: string;
+  proveedor: string;
+  producto: string | null;
+  cantidad: number | string;
+  id_unidad: string | null;
+  unidad: string | null;
+  simbolo: string | null;
+  valor_unitario: number | string;
+  valor_total: number | string;
+  moneda: string;
+  observaciones: string | null;
+  registrado_por_nombre: string | null;
+}
+
+export interface Activity {
+  id_actividad: string;
+  id_tipo_actividad: string;
+  tipo_actividad: string;
+  tipo_actividad_codigo: string;
+  fecha: string;
+  descripcion: string | null;
+  animales: Array<{ id_animal: string; nombre: string; codigo_arete: string | null }>;
+  imagenes: RecordImage[];
+}
+
+export interface HealthCondition {
+  id_condicion_salud: string;
+  id_animal: string;
+  animal: string;
+  codigo_arete: string | null;
+  categoria_codigo: string;
+  categoria: string;
+  id_tipo_condicion_salud: string | null;
+  tipo_condicion: string | null;
+  fecha_deteccion: string;
+  estado: 'POR_RESOLVER' | 'EN_TRATAMIENTO' | 'RESUELTA';
+  descripcion: string;
+  fecha_resolucion: string | null;
+  total_tratamientos: number;
+}
+
+export interface ActiveLactationCow {
+  id_animal: string;
+  nombre: string;
+  codigo_arete: string | null;
+  id_lactancia: string;
+  fecha_inicio: string;
+}
+
+export interface TankProduction {
+  id_produccion_tanque: string;
+  fecha_produccion: string;
+  turno: string;
+  litros: number | string;
+  fuente: 'MANUAL' | 'SENSOR';
+  referencia_externa: string | null;
+  observaciones: string | null;
+}
+
+export interface DailyProductionSummary {
+  fecha: string;
+  total_vacas: number | string;
+  total_tanque: number | string;
+  diferencia: number;
+  vacas_registradas: number;
 }
 
 export interface Operator {

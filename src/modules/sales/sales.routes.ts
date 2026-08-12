@@ -20,7 +20,6 @@ const detailSchema = z.object({
 const saleSchema = z.object({
   fecha_venta: z.string().date(),
   id_comprador: z.string().uuid(),
-  destino: z.string().trim().max(220).nullable().optional(),
   precio_total: z.number().min(0).nullable().optional(),
   moneda: z.string().trim().length(3).default('USD'),
   observaciones: z.string().trim().max(2000).nullable().optional(),
@@ -38,7 +37,6 @@ const productSaleSchema = z.object({
   fecha_venta: z.string().date(),
   periodicidad: z.enum(['DIARIA', 'SEMANAL']),
   id_comprador: z.string().uuid(),
-  destino: z.string().trim().max(220).nullable().optional(),
   moneda: z.string().trim().length(3).default('USD'),
   observaciones: z.string().trim().max(2000).nullable().optional(),
   productos: z.array(productDetailSchema).min(1),
@@ -134,7 +132,7 @@ salesRouter.post('/', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async
       ...header,
       comprador_nombre: buyer.nombre,
       comprador_contacto: buyer.contacto ?? null,
-      destino: header.destino ?? buyer.destino ?? null,
+      destino: buyer.destino ?? null,
       moneda: header.moneda.toUpperCase(),
       registrado_por: req.user!.id,
     }))).rows[0];
@@ -229,7 +227,7 @@ salesRouter.post('/productos', requirePermission('VENTA_ADMINISTRAR'), asyncHand
       id_comprador: input.id_comprador,
       comprador_nombre: buyer.nombre,
       comprador_contacto: buyer.contacto ?? null,
-      destino: input.destino ?? buyer.destino ?? null,
+      destino: buyer.destino ?? null,
       precio_total: total,
       moneda: input.moneda.toUpperCase(),
       observaciones: input.observaciones ?? null,
@@ -281,7 +279,7 @@ salesRouter.patch('/productos/:id', requirePermission('VENTA_ADMINISTRAR'), asyn
        comprador_contacto=$6,destino=$7,precio_total=$8,moneda=$9,observaciones=$10,updated_at=NOW()
        WHERE id_venta_producto=$1 RETURNING *`,
       [id, input.fecha_venta, input.periodicidad, input.id_comprador, buyer.nombre, buyer.contacto ?? null,
-        input.destino ?? buyer.destino ?? null, total, input.moneda.toUpperCase(), input.observaciones ?? null],
+        buyer.destino ?? null, total, input.moneda.toUpperCase(), input.observaciones ?? null],
     )).rows[0];
     await client.query(`DELETE FROM venta_producto_detalle WHERE id_venta_producto=$1`, [id]);
     for (const detail of details) {
@@ -312,7 +310,7 @@ salesRouter.patch('/:id', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(a
        destino=$6,precio_total=$7,moneda=$8,observaciones=$9,updated_at=NOW()
        WHERE id_venta=$1 RETURNING *`,
       [id, input.fecha_venta, input.id_comprador, buyer.nombre, buyer.contacto ?? null,
-        input.destino ?? buyer.destino ?? null, input.precio_total ?? null, input.moneda.toUpperCase(), input.observaciones ?? null],
+        buyer.destino ?? null, input.precio_total ?? null, input.moneda.toUpperCase(), input.observaciones ?? null],
     )).rows[0];
   }, req.user!.id);
   cache.forgetModuleVersion('ventas');

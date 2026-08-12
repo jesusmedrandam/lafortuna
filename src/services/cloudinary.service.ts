@@ -109,6 +109,17 @@ export function uploadUserProfileImage(buffer: Buffer, userId: string): Promise<
   });
 }
 
+export function uploadRecordImage(buffer: Buffer, moduleName: string, recordId: string): Promise<UploadApiResponse> {
+  const safeModule=moduleName.toLowerCase().replace(/[^a-z0-9_-]/g,'');
+  return uploadBuffer(buffer, {
+    folder: `${rootFolder}/${safeModule}/${recordId}`,
+    resource_type: 'image',
+    overwrite: false,
+    unique_filename: true,
+    use_filename: false,
+  });
+}
+
 export async function deleteCloudinaryImage(publicId: string) {
   if (!enabled || !publicId) return;
   try {
