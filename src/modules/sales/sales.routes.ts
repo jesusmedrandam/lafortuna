@@ -36,7 +36,7 @@ const productDetailSchema = z.object({
 
 const productSaleSchema = z.object({
   fecha_venta: z.string().date(),
-  periodicidad: z.enum(['DIARIA', 'SEMANAL']),
+  periodicidad: z.enum(['DIARIA', 'SEMANAL', 'OCASIONAL']),
   id_comprador: z.string().uuid(),
   moneda: z.string().trim().length(3).default('USD'),
   observaciones: z.string().trim().max(2000).nullable().optional(),

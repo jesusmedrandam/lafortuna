@@ -887,7 +887,7 @@ export interface ProductSale {
   id_venta_producto: string;
   id_comprador: string | null;
   fecha_venta: string;
-  periodicidad: 'DIARIA' | 'SEMANAL';
+  periodicidad: 'DIARIA' | 'SEMANAL' | 'OCASIONAL';
   comprador_nombre: string;
   comprador_contacto: string | null;
   destino: string | null;
