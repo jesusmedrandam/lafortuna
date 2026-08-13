@@ -122,6 +122,12 @@ export interface Animal {
   } | null;
   eventos_condicion?: AnimalConditionEvent[];
   total_partos?: number;
+  total_crias?: number;
+  crias_registradas?: AnimalRegisteredChild[];
+  historial_partos?: AnimalReproductiveBirth[];
+  historial_celos?: AnimalReproductiveHeat[];
+  historial_preneces?: AnimalReproductivePregnancy[];
+  historial_abortos?: AnimalReproductiveAbortion[];
   historial_actividades?: AnimalActivityHistory[];
   historial_movimientos?: AnimalMovementHistory[];
   historial_tratamientos?: AnimalTreatmentHistory[];
@@ -130,6 +136,12 @@ export interface Animal {
   razas?: { id_raza: string; nombre: string; porcentaje: number | null }[];
   total?: number;
 }
+
+export interface AnimalRegisteredChild { id_animal:string;nombre:string;codigo_arete:string|null;sexo:'MACHO'|'HEMBRA';id_parto:string;fecha_parto:string;parentesco:'MADRE'|'PADRE' }
+export interface AnimalReproductiveBirth { id_parto:string;fecha:string;tipo:string;rol:'MADRE'|'PADRE';contraparte:string|null;total_crias:number }
+export interface AnimalReproductiveHeat { id_celo:string;fecha_inicio:string;fecha_fin:string|null;rol:'VACA'|'TORO';contraparte:string|null;observaciones:string|null }
+export interface AnimalReproductivePregnancy { id_prenez:string;fecha:string;estado:string;metodo:string;rol:'VACA'|'PADRE';contraparte:string|null;fecha_parto_tentativa:string|null }
+export interface AnimalReproductiveAbortion { id_aborto:string;fecha:string;causa:string|null;meses_gestacion:number|string|null;descripcion:string|null;id_prenez:string|null }
 
 export interface AnimalActivityHistory {
   id_actividad: string;
@@ -765,6 +777,7 @@ export interface Birth {
   tipo_parto: string;
   observaciones: string | null;
   crias: BirthChild[];
+  imagenes: AnimalImage[];
 }
 
 export interface HeatRecord {

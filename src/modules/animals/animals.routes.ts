@@ -324,6 +324,50 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       WHERE ace.id_animal=a.id_animal AND ace.deleted_at IS NULL),'[]'::jsonb) eventos_condicion,
       CASE WHEN a.sexo='HEMBRA' THEN (SELECT COUNT(*)::int FROM parto hp
         WHERE hp.id_madre=a.id_animal AND hp.deleted_at IS NULL) ELSE 0 END total_partos,
+      (SELECT COUNT(*)::int
+       FROM parto rp JOIN parto_cria rpc ON rpc.id_parto=rp.id_parto AND rpc.deleted_at IS NULL
+       WHERE rp.deleted_at IS NULL AND (rp.id_madre=a.id_animal OR rp.id_padre=a.id_animal)) total_crias,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_animal',rc.id_animal,'nombre',rc.nombre,'codigo_arete',rc.codigo_arete,'sexo',rc.sexo,
+        'id_parto',rp.id_parto,'fecha_parto',rp.fecha_parto,
+        'parentesco',CASE WHEN rp.id_madre=a.id_animal THEN 'MADRE' ELSE 'PADRE' END
+      ) ORDER BY rp.fecha_parto DESC,rc.nombre)
+      FROM parto rp JOIN parto_cria rpc ON rpc.id_parto=rp.id_parto AND rpc.deleted_at IS NULL
+      JOIN animal rc ON rc.id_animal=rpc.id_cria AND rc.deleted_at IS NULL
+      WHERE rp.deleted_at IS NULL AND (rp.id_madre=a.id_animal OR rp.id_padre=a.id_animal)),'[]'::jsonb) crias_registradas,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_parto',rp.id_parto,'fecha',rp.fecha_parto,'tipo',rp.tipo_parto,
+        'rol',CASE WHEN rp.id_madre=a.id_animal THEN 'MADRE' ELSE 'PADRE' END,
+        'contraparte',CASE WHEN rp.id_madre=a.id_animal THEN rf.nombre ELSE rm.nombre END,
+        'total_crias',(SELECT COUNT(*)::int FROM parto_cria rpc WHERE rpc.id_parto=rp.id_parto AND rpc.deleted_at IS NULL)
+      ) ORDER BY rp.fecha_parto DESC)
+      FROM parto rp
+      JOIN animal rm ON rm.id_animal=rp.id_madre
+      LEFT JOIN animal rf ON rf.id_animal=rp.id_padre
+      WHERE rp.deleted_at IS NULL AND (rp.id_madre=a.id_animal OR rp.id_padre=a.id_animal)),'[]'::jsonb) historial_partos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_celo',rc.id_celo,'fecha_inicio',rc.fecha_inicio,'fecha_fin',rc.fecha_fin,
+        'rol',CASE WHEN rc.id_vaca=a.id_animal THEN 'VACA' ELSE 'TORO' END,
+        'contraparte',CASE WHEN rc.id_vaca=a.id_animal THEN rct.nombre ELSE rcv.nombre END,
+        'observaciones',rc.observaciones
+      ) ORDER BY rc.fecha_inicio DESC)
+      FROM celo rc JOIN animal rcv ON rcv.id_animal=rc.id_vaca
+      LEFT JOIN animal rct ON rct.id_animal=rc.id_toro
+      WHERE rc.deleted_at IS NULL AND (rc.id_vaca=a.id_animal OR rc.id_toro=a.id_animal)),'[]'::jsonb) historial_celos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_prenez',rp.id_prenez,'fecha',rp.fecha_confirmacion,'estado',rp.estado,
+        'metodo',rp.metodo_embarazo,'rol',CASE WHEN rp.id_vaca=a.id_animal THEN 'VACA' ELSE 'PADRE' END,
+        'contraparte',CASE WHEN rp.id_vaca=a.id_animal THEN rpf.nombre ELSE rpv.nombre END,
+        'fecha_parto_tentativa',rp.fecha_parto_tentativa
+      ) ORDER BY rp.fecha_confirmacion DESC)
+      FROM prenez rp JOIN animal rpv ON rpv.id_animal=rp.id_vaca
+      LEFT JOIN animal rpf ON rpf.id_animal=rp.id_padre
+      WHERE rp.deleted_at IS NULL AND (rp.id_vaca=a.id_animal OR rp.id_padre=a.id_animal)),'[]'::jsonb) historial_preneces,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_aborto',ra.id_aborto,'fecha',ra.fecha,'causa',ra.causa,
+        'meses_gestacion',ra.meses_gestacion,'descripcion',ra.descripcion,'id_prenez',ra.id_prenez
+      ) ORDER BY ra.fecha DESC)
+      FROM aborto ra WHERE ra.id_vaca=a.id_animal AND ra.deleted_at IS NULL),'[]'::jsonb) historial_abortos,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_actividad',ha.id_actividad,'fecha',ha.fecha,'tipo',hta.nombre,'codigo',hta.codigo,
         'descripcion',ha.descripcion,'fierro',hm.nombre,'fierro_codigo',hm.codigo

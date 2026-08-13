@@ -28,6 +28,12 @@ function safeFilename(item:LightboxMedia) {
   return base.includes('.')?base:`${base||'archivo'}.${extension}`;
 }
 
+function attachmentUrl(item:LightboxMedia) {
+  if(!item.url.includes('/upload/'))return item.url;
+  const name=safeFilename(item).replace(/\.[^.]+$/,'').replace(/[^a-zA-Z0-9_-]/g,'-').slice(0,80)||'archivo';
+  return item.url.replace('/upload/',`/upload/fl_attachment:${name}/`);
+}
+
 async function downloadMedia(item:LightboxMedia) {
   try {
     const response=await fetch(item.url);
@@ -38,7 +44,7 @@ async function downloadMedia(item:LightboxMedia) {
     setTimeout(()=>URL.revokeObjectURL(objectUrl),1000);
   } catch {
     const link=document.createElement('a');
-    link.href=item.url;link.download=safeFilename(item);document.body.appendChild(link);link.click();link.remove();
+    link.href=attachmentUrl(item);link.download=safeFilename(item);document.body.appendChild(link);link.click();link.remove();
   }
 }
 

@@ -1018,6 +1018,36 @@ body, .shell-main, .page-content, .topbar, .card, .input, .modal { transition: b
 :root[data-theme='dark'] .birth-photo-thumbnails > div { background: var(--surface-alt); border-color: var(--border); }
 .lightbox-arrow-left { left: 20px; right: auto; }
 .lightbox-arrow-right { right: 20px; left: auto; }
+
+/* Visor unificado: el archivo siempre se centra y cada control conserva una
+   zona propia, incluso en pantallas estrechas. */
+.image-lightbox.image-lightbox { display: flex; align-items: center; justify-content: center; padding: 64px 84px 22px; overflow: hidden; }
+.image-lightbox .image-lightbox-content { width: min(1180px,100%); height: calc(100vh - 86px); display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 12px; min-width: 0; }
+.image-lightbox .image-lightbox-content > img,
+.image-lightbox .image-lightbox-content > video { display: block; width: auto; height: auto; max-width: 100%; max-height: calc(100vh - 170px); margin: auto; object-fit: contain; object-position: center; }
+.image-lightbox > button.lightbox-download { position: fixed; top: 16px; left: 18px; right: auto; z-index: 510; }
+.image-lightbox > button.lightbox-close { position: fixed; top: 16px; right: 18px; left: auto; z-index: 510; }
+.image-lightbox > button.lightbox-arrow { position: fixed; top: 50%; z-index: 509; }
+.image-lightbox > button.lightbox-arrow-left { left: 18px; right: auto; }
+.image-lightbox > button.lightbox-arrow-right { right: 18px; left: auto; }
+.image-lightbox .image-lightbox-details { width: 100%; flex: 0 0 auto; }
+
+.birth-child-link { width: 100%; padding: 0; border: 1px solid var(--border); border-radius: 13px; background: var(--surface-alt); color: inherit; display: grid; grid-template-columns: 74px minmax(0,1fr); gap: 11px; overflow: hidden; text-align: left; cursor: pointer; }
+.birth-child-link:hover { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
+.birth-child-link > img,.birth-child-link > .birth-detail-placeholder { width: 74px; height: 74px; border-radius: 0; }
+.birth-child-link > span:last-child { align-self: center; display: grid; gap: 2px; padding-right: 9px; }
+.birth-child-link small { color: var(--muted); }
+.history-entry-link { width: 100%; border: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.history-entry-link:hover { background: var(--primary-soft); }
+
+@media(max-width:760px){
+  .image-lightbox.image-lightbox { padding: 62px 12px 14px; }
+  .image-lightbox .image-lightbox-content { height: calc(100vh - 76px); }
+  .image-lightbox .image-lightbox-content > img,.image-lightbox .image-lightbox-content > video { max-height: calc(100vh - 210px); }
+  .image-lightbox > button.lightbox-arrow { width: 44px; height: 44px; background: rgba(7,12,10,.74); }
+  .image-lightbox > button.lightbox-arrow-left { left: 8px; }
+  .image-lightbox > button.lightbox-arrow-right { right: 8px; }
+}
 @media (max-width: 760px) {
   .lightbox-arrow-left { left: 8px; right: auto; }
   .lightbox-arrow-right { right: 8px; left: auto; }
