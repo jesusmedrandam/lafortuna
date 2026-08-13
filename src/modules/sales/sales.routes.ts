@@ -29,6 +29,7 @@ const saleSchema = z.object({
 const productDetailSchema = z.object({
   id_producto_venta: z.string().uuid(),
   cantidad: z.number().positive(),
+  cantidad_complementaria: z.number().positive().nullable().optional(),
   precio_unitario: z.number().min(0),
   observaciones: z.string().trim().max(300).nullable().optional(),
 });
@@ -81,7 +82,10 @@ salesRouter.get('/productos', requirePermission('VENTA_CONSULTAR'), asyncHandler
           'id_producto_venta', p.id_producto_venta,
           'producto', p.nombre,
           'unidad', COALESCE(um.simbolo,um.nombre,p.unidad,'Sin unidad'),
+          'id_unidad_complementaria', p.id_unidad_complementaria,
+          'unidad_complementaria', COALESCE(umc.simbolo,umc.nombre),
           'cantidad', d.cantidad,
+          'cantidad_complementaria', d.cantidad_complementaria,
           'precio_unitario', d.precio_unitario,
           'subtotal', d.subtotal,
           'observaciones', d.observaciones
@@ -89,6 +93,7 @@ salesRouter.get('/productos', requirePermission('VENTA_CONSULTAR'), asyncHandler
         FROM venta_producto_detalle d
         JOIN producto_venta p ON p.id_producto_venta=d.id_producto_venta
         LEFT JOIN unidad_medida um ON um.id_unidad=p.id_unidad_venta
+        LEFT JOIN unidad_medida umc ON umc.id_unidad=p.id_unidad_complementaria
         WHERE d.id_venta_producto=v.id_venta_producto AND d.deleted_at IS NULL
       ), '[]'::jsonb) productos
      FROM venta_producto v
@@ -209,17 +214,21 @@ salesRouter.post('/productos', requirePermission('VENTA_ADMINISTRAR'), asyncHand
     if (!buyer) throw new NotFoundError('El comprador no existe o está inactivo.');
 
     const products = (await client.query(
-      `SELECT id_producto_venta,nombre
+      `SELECT id_producto_venta,nombre,id_unidad_complementaria
        FROM producto_venta
        WHERE id_producto_venta=ANY($1::uuid[]) AND deleted_at IS NULL AND activo=TRUE`,
       [[...uniqueIds]],
     )).rows;
     if (products.length !== uniqueIds.size) throw new NotFoundError('Uno o más productos no existen o están inactivos.');
 
-    const details = input.productos.map((item) => ({
-      ...item,
-      subtotal: Number((item.cantidad * item.precio_unitario).toFixed(2)),
-    }));
+    const details = input.productos.map((item) => {
+      const product=products.find((value)=>value.id_producto_venta===item.id_producto_venta)!;
+      if(product.id_unidad_complementaria&&!item.cantidad_complementaria) {
+        throw new ValidationError(`Ingresa la cantidad complementaria de ${product.nombre}.`);
+      }
+      return {...item,cantidad_complementaria:product.id_unidad_complementaria?item.cantidad_complementaria:null,
+        subtotal:Number((item.cantidad*item.precio_unitario).toFixed(2))};
+    });
     const total = Number(details.reduce((sum, item) => sum + item.subtotal, 0).toFixed(2));
     const row = (await client.query(buildInsert('venta_producto', {
       fecha_venta: input.fecha_venta,
@@ -239,6 +248,7 @@ salesRouter.post('/productos', requirePermission('VENTA_ADMINISTRAR'), asyncHand
         id_venta_producto: row.id_venta_producto,
         id_producto_venta: detail.id_producto_venta,
         cantidad: detail.cantidad,
+        cantidad_complementaria: detail.cantidad_complementaria,
         precio_unitario: detail.precio_unitario,
         subtotal: detail.subtotal,
         observaciones: detail.observaciones ?? null,
@@ -268,11 +278,18 @@ salesRouter.patch('/productos/:id', requirePermission('VENTA_ADMINISTRAR'), asyn
     )).rows[0];
     if (!buyer) throw new NotFoundError('El comprador no existe o está inactivo.');
     const products = (await client.query(
-      `SELECT id_producto_venta FROM producto_venta WHERE id_producto_venta=ANY($1::uuid[]) AND deleted_at IS NULL AND activo=TRUE`,
+      `SELECT id_producto_venta,nombre,id_unidad_complementaria FROM producto_venta WHERE id_producto_venta=ANY($1::uuid[]) AND deleted_at IS NULL AND activo=TRUE`,
       [[...uniqueIds]],
     )).rows;
     if (products.length !== uniqueIds.size) throw new NotFoundError('Uno o más productos no existen o están inactivos.');
-    const details = input.productos.map((item) => ({ ...item, subtotal: Number((item.cantidad * item.precio_unitario).toFixed(2)) }));
+    const details = input.productos.map((item) => {
+      const product=products.find((value)=>value.id_producto_venta===item.id_producto_venta)!;
+      if(product.id_unidad_complementaria&&!item.cantidad_complementaria) {
+        throw new ValidationError(`Ingresa la cantidad complementaria de ${product.nombre}.`);
+      }
+      return {...item,cantidad_complementaria:product.id_unidad_complementaria?item.cantidad_complementaria:null,
+        subtotal:Number((item.cantidad*item.precio_unitario).toFixed(2))};
+    });
     const total = Number(details.reduce((sum, item) => sum + item.subtotal, 0).toFixed(2));
     const row = (await client.query(
       `UPDATE venta_producto SET fecha_venta=$2,periodicidad=$3,id_comprador=$4,comprador_nombre=$5,

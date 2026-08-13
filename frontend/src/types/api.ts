@@ -609,6 +609,20 @@ export interface ActiveLactationCow {
   fecha_inicio: string;
 }
 
+export interface LactationCowOption {
+  id_animal: string;
+  nombre: string;
+  codigo_arete: string | null;
+  tiene_lactancia_actual: boolean;
+}
+
+export interface LactationBirthOption {
+  id_parto: string;
+  fecha_parto: string;
+  total_crias: number;
+  ya_relacionado: boolean;
+}
+
 export interface TankProduction {
   id_produccion_tanque: string;
   fecha_produccion: string;
@@ -761,6 +775,9 @@ export interface SaleProductDetail {
   producto: string;
   unidad: string;
   cantidad: number | string;
+  id_unidad_complementaria: string | null;
+  unidad_complementaria: string | null;
+  cantidad_complementaria: number | string | null;
   precio_unitario: number | string;
   subtotal: number | string;
   observaciones: string | null;
