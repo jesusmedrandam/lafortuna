@@ -100,6 +100,39 @@ cleaningsRouter.get('/', requirePermission('LIMPIEZA_CONSULTAR'), asyncHandler(a
   WHERE l.deleted_at IS NULL ORDER BY l.fecha_inicio DESC
 `)).rows)));
 
+cleaningsRouter.get('/:id', requirePermission('LIMPIEZA_CONSULTAR'), asyncHandler(async (req, res) => {
+  const row=(await pool.query(`
+    SELECT l.*,u.nombre potrero,
+      COALESCE((SELECT string_agg(tla.nombre,', ' ORDER BY tla.nombre)
+        FROM limpieza_potrero_actividad la JOIN tipo_limpieza_potrero tla ON tla.id_tipo_limpieza=la.id_tipo_limpieza
+        WHERE la.id_limpieza=l.id_limpieza AND la.deleted_at IS NULL),tl.nombre) tipo_limpieza,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('id_tipo_limpieza',tla.id_tipo_limpieza,'nombre',tla.nombre) ORDER BY tla.nombre)
+        FROM limpieza_potrero_actividad la JOIN tipo_limpieza_potrero tla ON tla.id_tipo_limpieza=la.id_tipo_limpieza
+        WHERE la.id_limpieza=l.id_limpieza AND la.deleted_at IS NULL),jsonb_build_array(jsonb_build_object('id_tipo_limpieza',tl.id_tipo_limpieza,'nombre',tl.nombre))) tipos_limpieza,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_producto',lp.id_producto,'producto',pa.nombre_comercial,
+        'cantidad_total',lp.cantidad_total,'id_unidad',lp.id_unidad,'unidad',COALESCE(um.simbolo,um.nombre),
+        'cantidad_por_tanque',lp.cantidad_por_tanque,'observaciones',lp.observaciones
+      )) FROM limpieza_potrero_producto lp
+        JOIN producto_agroquimico pa ON pa.id_producto=lp.id_producto
+        JOIN unidad_medida um ON um.id_unidad=lp.id_unidad
+        WHERE lp.id_limpieza=l.id_limpieza AND lp.deleted_at IS NULL),'[]') productos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_operador',o.id_operador,'nombre',concat_ws(' ',o.nombres,o.apellidos),
+        'funcion',lo.funcion,'observaciones',lo.observaciones
+      )) FROM limpieza_potrero_operador lo JOIN operador o ON o.id_operador=lo.id_operador
+        WHERE lo.id_limpieza=l.id_limpieza AND lo.deleted_at IS NULL),'[]') operadores,
+      COALESCE((SELECT jsonb_agg(to_jsonb(li) ORDER BY li.created_at)
+        FROM limpieza_potrero_imagen li WHERE li.id_limpieza=l.id_limpieza AND li.deleted_at IS NULL),'[]') imagenes
+    FROM limpieza_potrero l
+    JOIN potrero p ON p.id_potrero=l.id_potrero
+    JOIN ubicacion u ON u.id_ubicacion=p.id_ubicacion
+    JOIN tipo_limpieza_potrero tl ON tl.id_tipo_limpieza=l.id_tipo_limpieza
+    WHERE l.id_limpieza=$1 AND l.deleted_at IS NULL`,[routeParam(req.params.id,'id')])).rows[0];
+  if(!row)throw new NotFoundError('Limpieza no encontrada.');
+  return ok(res,row);
+}));
+
 cleaningsRouter.post('/', requirePermission('LIMPIEZA_ADMINISTRAR'), asyncHandler(async (req, res) => {
   const input = schema.parse(req.body);
   const result = await transaction(async (client) => {

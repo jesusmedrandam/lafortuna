@@ -49,7 +49,6 @@ export const recordsRouter = Router();
 const lactationSchema=z.object({
   id_vaca:z.string().uuid(),
   id_parto:z.string().uuid(),
-  fecha_inicio:z.string().date(),
   fecha_fin:z.string().date().nullable().optional(),
   activa:z.boolean().default(true),
   en_ordeno:z.boolean().default(false),
@@ -57,7 +56,6 @@ const lactationSchema=z.object({
 }).superRefine((value,ctx)=>{
   if(!value.activa&&!value.fecha_fin)ctx.addIssue({code:z.ZodIssueCode.custom,path:['fecha_fin'],message:'Ingresa la fecha de cierre.'});
   if(!value.activa&&value.en_ordeno)ctx.addIssue({code:z.ZodIssueCode.custom,path:['en_ordeno'],message:'Solo una lactancia activa puede estar en ordeño.'});
-  if(value.fecha_fin&&value.fecha_fin<value.fecha_inicio)ctx.addIssue({code:z.ZodIssueCode.custom,path:['fecha_fin'],message:'La fecha de cierre no puede ser anterior al inicio.'});
 });
 
 type LactationInput=z.infer<typeof lactationSchema>;
@@ -71,21 +69,20 @@ async function validateLactation(client:TransactionClient,input:LactationInput,e
   if(!cow)throw new NotFoundError('Vaca no encontrada.');
   if(cow.sexo!=='HEMBRA')throw new ValidationError('Solo se puede registrar una lactancia para una hembra.');
 
-  if(input.id_parto) {
-    const birth=(await client.query(
-      `SELECT id_madre,fecha_parto FROM parto
-       WHERE id_parto=$1 AND deleted_at IS NULL FOR SHARE`,[input.id_parto],
-    )).rows[0] as {id_madre:string;fecha_parto:string}|undefined;
-    if(!birth)throw new NotFoundError('El parto relacionado no existe.');
-    if(birth.id_madre!==input.id_vaca)throw new ValidationError('El parto seleccionado no pertenece a la vaca.');
-    if(input.fecha_inicio<String(birth.fecha_parto).slice(0,10))throw new ValidationError('La lactancia no puede iniciar antes del parto relacionado.');
-    const linked=(await client.query(
-      `SELECT id_lactancia FROM lactancia
-       WHERE id_parto=$1 AND deleted_at IS NULL AND ($2::uuid IS NULL OR id_lactancia<>$2::uuid)
-       LIMIT 1 FOR SHARE`,[input.id_parto,excludeId??null],
-    )).rows[0];
-    if(linked)throw new ValidationError('Este parto ya está relacionado con otra lactancia.');
-  }
+  const birth=(await client.query(
+    `SELECT id_madre,fecha_parto FROM parto
+     WHERE id_parto=$1 AND deleted_at IS NULL FOR SHARE`,[input.id_parto],
+  )).rows[0] as {id_madre:string;fecha_parto:string}|undefined;
+  if(!birth)throw new NotFoundError('El parto relacionado no existe.');
+  if(birth.id_madre!==input.id_vaca)throw new ValidationError('El parto seleccionado no pertenece a la vaca.');
+  const startDate=String(birth.fecha_parto).slice(0,10);
+  if(input.fecha_fin&&input.fecha_fin<startDate)throw new ValidationError('La fecha de cierre no puede ser anterior al parto.');
+  const linked=(await client.query(
+    `SELECT id_lactancia FROM lactancia
+     WHERE id_parto=$1 AND deleted_at IS NULL AND ($2::uuid IS NULL OR id_lactancia<>$2::uuid)
+     LIMIT 1 FOR SHARE`,[input.id_parto,excludeId??null],
+  )).rows[0];
+  if(linked)throw new ValidationError('Este parto ya está relacionado con otra lactancia.');
 
   const overlap=(await client.query(
     `SELECT id_lactancia FROM lactancia
@@ -94,9 +91,10 @@ async function validateLactation(client:TransactionClient,input:LactationInput,e
        AND daterange(fecha_inicio,COALESCE(fecha_fin,'infinity'::date),'[]')
            && daterange($2::date,COALESCE($3::date,'infinity'::date),'[]')
      LIMIT 1 FOR SHARE`,
-    [input.id_vaca,input.fecha_inicio,input.activa?null:(input.fecha_fin??null),excludeId??null],
+    [input.id_vaca,startDate,input.activa?null:(input.fecha_fin??null),excludeId??null],
   )).rows[0];
   if(overlap)throw new ValidationError('La vaca ya tiene otra lactancia que coincide con esas fechas.');
+  return startDate;
 }
 
 async function activeLactation(client:Parameters<Parameters<typeof transaction>[0]>[0],animalId:string,date:string) {
@@ -251,8 +249,8 @@ recordsRouter.post('/:module', asyncHandler(async (req, res) => {
     const parsed=lactationSchema.parse(req.body);
     const input={...parsed,id_parto:parsed.id_parto??null,fecha_fin:parsed.activa?null:(parsed.fecha_fin??null),observaciones:parsed.observaciones??null};
     const row=await transaction(async client=>{
-      await validateLactation(client,input);
-      return (await client.query(buildInsert('lactancia',{...input,registrado_por:req.user!.id}))).rows[0];
+      const fechaInicio=await validateLactation(client,input);
+      return (await client.query(buildInsert('lactancia',{...input,fecha_inicio:fechaInicio,registrado_por:req.user!.id}))).rows[0];
     },req.user!.id);
     return created(res,row);
   }
@@ -312,8 +310,8 @@ recordsRouter.patch('/:module/:id', asyncHandler(async (req, res) => {
         'SELECT id_lactancia FROM lactancia WHERE id_lactancia=$1 AND deleted_at IS NULL FOR UPDATE',[id],
       )).rows[0];
       if(!current)throw new NotFoundError('Lactancia no encontrada.');
-      await validateLactation(client,input,id);
-      return (await client.query(buildUpdate('lactancia','id_lactancia',id,input))).rows[0];
+      const fechaInicio=await validateLactation(client,input,id);
+      return (await client.query(buildUpdate('lactancia','id_lactancia',id,{...input,fecha_inicio:fechaInicio}))).rows[0];
     },req.user!.id);
     return ok(res,row);
   }
@@ -395,7 +393,23 @@ const partoSchema = z.object({
       id_origen: z.string().uuid(),
       id_grupo_actual: z.string().uuid().nullable().optional(),
       id_ubicacion_actual: z.string().uuid().nullable().optional(),
-      estado: z.enum(['ACTIVO','MUERTO']).default('ACTIVO')
+      estado: z.enum(['ACTIVO','MUERTO']).default('ACTIVO'),
+      colores: z.array(z.object({
+        id: z.string().uuid(),
+        principal: z.boolean().optional(),
+      })).default([]),
+      razas: z.array(z.object({
+        id: z.string().uuid(),
+        porcentaje: z.number().min(0).max(100).nullable().optional(),
+      })).default([]),
+      propietarios: z.array(z.object({
+        id: z.string().uuid(),
+        porcentaje: z.number().min(0).max(100).nullable().optional(),
+        principal: z.boolean().optional(),
+      })).default([]).superRefine((owners,ctx)=>{
+        if(owners.filter((owner)=>owner.principal).length>1)ctx.addIssue({code:z.ZodIssueCode.custom,message:'Solo un propietario puede ser principal.'});
+        if(owners.reduce((sum,owner)=>sum+(owner.porcentaje??0),0)>100.001)ctx.addIssue({code:z.ZodIssueCode.custom,message:'La suma de porcentajes de propiedad no puede superar 100%.'});
+      }),
     }),
     estado_nacimiento: z.enum(['VIVA','MUERTA','DEBIL','DESCONOCIDO']).default('VIVA'),
     peso_nacimiento_kg: z.number().positive().nullable().optional(),
@@ -440,7 +454,7 @@ birthsRouter.get('/', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (
        WHERE bie.id_imagen=bi.id_imagen AND bie.deleted_at IS NULL),'[]'::jsonb)
    ) ORDER BY bi.fecha_toma DESC,bi.created_at DESC)
    FROM animal_imagen bi
-   WHERE bi.id_parto=p.id_parto AND bi.deleted_at IS NULL),'[]') imagenes
+   WHERE bi.id_parto=p.id_parto AND bi.es_perfil=FALSE AND bi.deleted_at IS NULL),'[]') imagenes
    FROM parto p JOIN animal m ON m.id_animal=p.id_madre
    JOIN categoria_animal ca ON ca.id_categoria_animal=m.id_categoria_animal
    LEFT JOIN animal pa ON pa.id_animal=p.id_padre
@@ -559,9 +573,10 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
           if (location.id_categoria_animal !== mother.id_categoria_animal) throw new ValidationError(`La ubicación de la cría ${order} no coincide con la categoría de la madre.`);
         }
 
-        const childState = item.estado_nacimiento === 'MUERTA' ? 'MUERTO' : item.animal.estado;
+        const { colores,razas,propietarios,...animalData }=item.animal;
+        const childState = item.estado_nacimiento === 'MUERTA' ? 'MUERTO' : animalData.estado;
         const cria = (await client.query(buildInsert('animal', {
-          ...item.animal,
+          ...animalData,
           id_especie: mother.id_especie,
           id_categoria_animal: mother.id_categoria_animal,
           estado: childState,
@@ -570,6 +585,17 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
           id_padre: fatherId,
           registrado_por: req.user!.id,
         }))).rows[0];
+
+        for(const color of colores)await client.query(buildInsert('animal_color',{
+          id_animal:cria.id_animal,id_color:color.id,es_principal:color.principal??false,registrado_por:req.user!.id,
+        }));
+        for(const breed of razas)await client.query(buildInsert('animal_raza',{
+          id_animal:cria.id_animal,id_raza:breed.id,porcentaje:breed.porcentaje??null,registrado_por:req.user!.id,
+        }));
+        for(const owner of propietarios)await client.query(buildInsert('animal_propietario',{
+          id_animal:cria.id_animal,id_usuario:owner.id,porcentaje_propiedad:owner.porcentaje??null,
+          es_principal:owner.principal??false,fecha_desde:birthDay,registrado_por:req.user!.id,
+        }));
 
         const partoCria = (await client.query(buildInsert('parto_cria', {
           id_parto: parto.id_parto,
@@ -724,7 +750,7 @@ birthsRouter.post(
             id_imagen:image.id_imagen,id_animal:relatedId,registrado_por:req.user!.id,
           }));
         }
-        await client.query(
+        if(!profile)await client.query(
           `INSERT INTO animal_imagen_etiqueta(id_imagen,id_etiqueta,registrado_por)
            SELECT $1,id_etiqueta,$2 FROM etiqueta_multimedia
            WHERE codigo='PARTO' AND activo=TRUE AND deleted_at IS NULL

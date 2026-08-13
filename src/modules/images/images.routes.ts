@@ -152,6 +152,7 @@ imagesRouter.get('/multimedia',requirePermission('IMAGEN_CONSULTAR'),asyncHandle
     id_ubicacion_origen:z.string().uuid().optional(),id_ubicacion_destino:z.string().uuid().optional(),
     id_tipo_actividad:z.string().uuid().optional(),id_etiqueta:z.string().uuid().optional(),
     lado:z.enum(['ORIGEN','DESTINO']).optional(),sexo:z.enum(['MACHO','HEMBRA']).optional(),
+    perfil:z.enum(['SI','NO']).optional(),
     fecha_desde:z.string().date().optional(),fecha_hasta:z.string().date().optional(),
     orden:z.enum(['NEWEST','OLDEST','AZ','ZA']).default('NEWEST'),
   }).parse(req.query);
@@ -160,6 +161,7 @@ imagesRouter.get('/multimedia',requirePermission('IMAGEN_CONSULTAR'),asyncHandle
   const add=(condition:string,value:unknown)=>{params.push(value);where.push(condition.replaceAll('?',`$${params.length}`));};
   if(filters.categoria)add('m.categoria=?',filters.categoria);
   if(filters.tipo)add('m.tipo_archivo=?',filters.tipo);
+  if(filters.perfil)add('m.es_perfil=?::boolean',filters.perfil==='SI');
   if(filters.fecha_desde)add('m.fecha_toma>=?::date',filters.fecha_desde);
   if(filters.fecha_hasta)add('m.fecha_toma<=?::date',filters.fecha_hasta);
   if(filters.id_animal)add('?::uuid=ANY(m.animal_ids)',filters.id_animal);
@@ -191,16 +193,26 @@ imagesRouter.get('/multimedia',requirePermission('IMAGEN_CONSULTAR'),asyncHandle
     WITH media AS (
       SELECT
         'ANIMAL:'||i.id_imagen::text id_multimedia,i.id_imagen id_origen,
-        CASE WHEN i.id_parto IS NULL THEN 'ANIMALES' ELSE 'PARTOS' END categoria,
-        CASE WHEN i.id_parto IS NULL THEN 'Animal' ELSE 'Parto' END subcategoria,
-        CASE WHEN i.id_parto IS NULL
+        CASE WHEN EXISTS(SELECT 1 FROM animal_imagen_etiqueta ip
+          JOIN etiqueta_multimedia ep ON ep.id_etiqueta=ip.id_etiqueta AND ep.deleted_at IS NULL
+          WHERE ip.id_imagen=i.id_imagen AND ip.deleted_at IS NULL AND ep.codigo='PARTO') THEN 'PARTOS' ELSE 'ANIMALES' END categoria,
+        CASE WHEN EXISTS(SELECT 1 FROM animal_imagen_etiqueta ip
+          JOIN etiqueta_multimedia ep ON ep.id_etiqueta=ip.id_etiqueta AND ep.deleted_at IS NULL
+          WHERE ip.id_imagen=i.id_imagen AND ip.deleted_at IS NULL AND ep.codigo='PARTO') THEN 'Parto' ELSE 'Animal' END subcategoria,
+        CASE WHEN NOT EXISTS(SELECT 1 FROM animal_imagen_etiqueta ip
+          JOIN etiqueta_multimedia ep ON ep.id_etiqueta=ip.id_etiqueta AND ep.deleted_at IS NULL
+          WHERE ip.id_imagen=i.id_imagen AND ip.deleted_at IS NULL AND ep.codigo='PARTO')
           THEN COALESCE((SELECT string_agg(a2.nombre,', ' ORDER BY a2.nombre)
             FROM animal_imagen_relacion r2 JOIN animal a2 ON a2.id_animal=r2.id_animal AND a2.deleted_at IS NULL
             WHERE r2.id_imagen=i.id_imagen AND r2.deleted_at IS NULL),a.nombre,'Archivo de animal')
-          ELSE 'Parto de '||COALESCE(madre.nombre,'animal sin nombre') END titulo,
-        CASE WHEN i.id_parto IS NULL
+          ELSE 'Parto de '||COALESCE(madre.nombre,(SELECT string_agg(a2.nombre,', ' ORDER BY a2.nombre)
+            FROM animal_imagen_relacion r2 JOIN animal a2 ON a2.id_animal=r2.id_animal AND a2.deleted_at IS NULL
+            WHERE r2.id_imagen=i.id_imagen AND r2.deleted_at IS NULL),a.nombre,'animal sin nombre') END titulo,
+        CASE WHEN NOT EXISTS(SELECT 1 FROM animal_imagen_etiqueta ip
+          JOIN etiqueta_multimedia ep ON ep.id_etiqueta=ip.id_etiqueta AND ep.deleted_at IS NULL
+          WHERE ip.id_imagen=i.id_imagen AND ip.deleted_at IS NULL AND ep.codigo='PARTO')
           THEN CONCAT_WS(' · ',NULLIF(a.codigo_arete,''),g.nombre,u.nombre)
-          ELSE CONCAT_WS(' · ','Cría: '||a.nombre,'Fecha: '||TO_CHAR(p.fecha_parto,'DD/MM/YYYY')) END subtitulo,
+          ELSE CONCAT_WS(' · ',CASE WHEN p.id_parto IS NOT NULL THEN 'Cría: '||a.nombre END,CASE WHEN p.fecha_parto IS NOT NULL THEN 'Fecha: '||TO_CHAR(p.fecha_parto,'DD/MM/YYYY') END) END subtitulo,
         i.secure_url,i.public_id,i.nombre_original,i.descripcion,i.fecha_toma,i.created_at,
         COALESCE(i.tipo_archivo,'IMAGEN') tipo_archivo,i.es_perfil,
         ARRAY(SELECT DISTINCT r3.id_animal FROM animal_imagen_relacion r3
@@ -218,7 +230,7 @@ imagesRouter.get('/multimedia',requirePermission('IMAGEN_CONSULTAR'),asyncHandle
         ) ORDER BY e.nombre) FROM animal_imagen_etiqueta ie
           JOIN etiqueta_multimedia e ON e.id_etiqueta=ie.id_etiqueta AND e.deleted_at IS NULL
           WHERE ie.id_imagen=i.id_imagen AND ie.deleted_at IS NULL),'[]'::jsonb) etiquetas,
-        TRUE editable
+        NOT i.es_perfil editable
       FROM animal_imagen i
       LEFT JOIN animal a ON a.id_animal=i.id_animal
       LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual

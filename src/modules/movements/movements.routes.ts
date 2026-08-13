@@ -382,6 +382,41 @@ movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler
    WHERE m.deleted_at IS NULL ORDER BY m.fecha_movimiento DESC`,
 )).rows)));
 
+movementsRouter.get('/:id', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler(async (req, res) => {
+  const row=(await pool.query(
+    `SELECT m.*,COALESCE(mm.nombre,m.motivo) motivo_catalogo,
+      u1.nombre ubicacion_origen,u2.nombre ubicacion_destino,g1.nombre grupo_origen,g2.nombre grupo_destino,
+      p1.nombre propiedad_origen,p1.es_principal propiedad_origen_es_principal,
+      p2.nombre propiedad_destino,p2.es_principal propiedad_destino_es_principal,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_detalle',d.id_movimiento_detalle,'id_animal',a.id_animal,'animal',a.nombre,'nombre',a.nombre,
+        'arete',a.codigo_arete,'codigo_arete',a.codigo_arete,'sexo',a.sexo,
+        'id_categoria_animal',a.id_categoria_animal,'categoria',ca.nombre,
+        'id_grupo_actual',a.id_grupo_actual,'grupo',ga.nombre,'id_ubicacion_actual',a.id_ubicacion_actual,'ubicacion',ua.nombre,
+        'seleccionado',d.seleccionado,'estado',d.estado,'mensaje_error',d.mensaje_error,'observaciones',d.observaciones))
+        FROM movimiento_animal_detalle d
+        JOIN animal a ON a.id_animal=d.id_animal
+        JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
+        LEFT JOIN grupo ga ON ga.id_grupo=a.id_grupo_actual
+        LEFT JOIN ubicacion ua ON ua.id_ubicacion=a.id_ubicacion_actual
+        WHERE d.id_movimiento=m.id_movimiento AND d.deleted_at IS NULL),'[]') detalles,
+      COALESCE((SELECT jsonb_agg(to_jsonb(mi) ORDER BY mi.created_at)
+        FROM movimiento_imagen mi WHERE mi.id_movimiento=m.id_movimiento AND mi.lado='ORIGEN' AND mi.deleted_at IS NULL),'[]') fotos_origen,
+      COALESCE((SELECT jsonb_agg(to_jsonb(mi) ORDER BY mi.created_at)
+        FROM movimiento_imagen mi WHERE mi.id_movimiento=m.id_movimiento AND mi.lado='DESTINO' AND mi.deleted_at IS NULL),'[]') fotos_destino
+     FROM movimiento_animal m
+     LEFT JOIN ubicacion u1 ON u1.id_ubicacion=m.id_ubicacion_origen
+     LEFT JOIN ubicacion u2 ON u2.id_ubicacion=m.id_ubicacion_destino
+     LEFT JOIN grupo g1 ON g1.id_grupo=m.id_grupo_origen
+     LEFT JOIN grupo g2 ON g2.id_grupo=m.id_grupo_destino
+     LEFT JOIN propiedad_ganadera p1 ON p1.id_propiedad=m.id_propiedad_origen
+     LEFT JOIN propiedad_ganadera p2 ON p2.id_propiedad=m.id_propiedad_destino
+     LEFT JOIN motivo_movimiento mm ON mm.id_motivo_movimiento=m.id_motivo_movimiento
+     WHERE m.id_movimiento=$1 AND m.deleted_at IS NULL`,[routeParam(req.params.id,'id')])).rows[0];
+  if(!row)throw new NotFoundError('Movimiento no encontrado.');
+  return ok(res,row);
+}));
+
 movementsRouter.post('/', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(async (req, res) => {
   const input = movement.parse(req.body);
   validateMovementMode(input.tipo_movimiento, input.modo_seleccion, input.id_grupo_filtro, input.id_grupo_destino);

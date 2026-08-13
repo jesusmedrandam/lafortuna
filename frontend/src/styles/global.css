@@ -996,6 +996,10 @@ body, .shell-main, .page-content, .topbar, .card, .input, .modal { transition: b
 .image-lightbox-details strong { overflow-wrap: anywhere; }
 .image-lightbox-details small { color: rgba(255,255,255,.7); }
 .lightbox-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.record-collapsible { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--surface-alt); }
+.record-collapsible > summary { cursor: pointer; padding: 14px 16px; font-weight: 700; color: var(--text); }
+.record-collapsible[open] > summary { border-bottom: 1px solid var(--border); }
+.record-collapsible > .detail-lines { padding: 10px 14px 14px; }
 .lightbox-arrow { position: absolute; top: 50%; transform: translateY(-50%); z-index: 4; width: 52px; height: 52px; color: #fff; background: rgba(255,255,255,.13); }
 .lightbox-arrow:hover { color: #fff; background: rgba(255,255,255,.24); }
 .lightbox-arrow-left { left: 20px; }
