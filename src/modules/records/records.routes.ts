@@ -70,12 +70,12 @@ async function validateLactation(client:TransactionClient,input:LactationInput,e
   if(cow.sexo!=='HEMBRA')throw new ValidationError('Solo se puede registrar una lactancia para una hembra.');
 
   const birth=(await client.query(
-    `SELECT id_madre,fecha_parto FROM parto
+    `SELECT id_madre,fecha_parto::text AS fecha_parto FROM parto
      WHERE id_parto=$1 AND deleted_at IS NULL FOR SHARE`,[input.id_parto],
   )).rows[0] as {id_madre:string;fecha_parto:string}|undefined;
   if(!birth)throw new NotFoundError('El parto relacionado no existe.');
   if(birth.id_madre!==input.id_vaca)throw new ValidationError('El parto seleccionado no pertenece a la vaca.');
-  const startDate=String(birth.fecha_parto).slice(0,10);
+  const startDate=birth.fecha_parto;
   if(input.fecha_fin&&input.fecha_fin<startDate)throw new ValidationError('La fecha de cierre no puede ser anterior al parto.');
   const linked=(await client.query(
     `SELECT id_lactancia FROM lactancia
@@ -341,10 +341,13 @@ recordsRouter.patch('/:module/:id', asyncHandler(async (req, res) => {
   if(d.table==='produccion_leche') {
     const id=routeParam(req.params.id,'id');
     const row=await transaction(async client=>{
-      const current=(await client.query('SELECT * FROM produccion_leche WHERE id_produccion=$1 AND deleted_at IS NULL FOR UPDATE',[id])).rows[0];
+      const current=(await client.query(
+        `SELECT id_vaca,fecha_produccion::text AS fecha_produccion
+         FROM produccion_leche WHERE id_produccion=$1 AND deleted_at IS NULL FOR UPDATE`,[id],
+      )).rows[0];
       if(!current)throw new NotFoundError();
       const animalId=String(data.id_vaca??current.id_vaca);
-      const date=String(data.fecha_produccion??current.fecha_produccion).slice(0,10);
+      const date=String(data.fecha_produccion??current.fecha_produccion);
       await assertAnimalOperationAllowed(client,animalId,d.operation);
       const lactationId=await activeLactation(client,animalId,date);
       return (await client.query(buildUpdate(d.table,d.id,id,{...data,id_vaca:animalId,id_lactancia:lactationId}))).rows[0];
@@ -662,7 +665,7 @@ birthsRouter.post(
     const files=req.files as Express.Multer.File[]|undefined;
     if(!files?.length)throw new ValidationError('Debes seleccionar al menos una imagen.');
     const birth=(await pool.query(
-      'SELECT id_madre,fecha_parto FROM parto WHERE id_parto=$1 AND deleted_at IS NULL',[birthId],
+      'SELECT id_madre,fecha_parto::text AS fecha_parto FROM parto WHERE id_parto=$1 AND deleted_at IS NULL',[birthId],
     )).rows[0] as {id_madre:string;fecha_parto:string}|undefined;
     if(!birth)throw new NotFoundError('Parto no encontrado.');
     const uploaded:Array<{public_id:string;url:string;secure_url:string;format:string;width:number;height:number;bytes:number}>=[];
@@ -677,7 +680,7 @@ birthsRouter.post(
             id_animal:birth.id_madre,id_parto:birthId,public_id:cloud.public_id,url:cloud.url,
             secure_url:cloud.secure_url,formato:cloud.format,ancho:cloud.width,alto:cloud.height,
             bytes:cloud.bytes,tipo_archivo:'IMAGEN',mime_type:file.mimetype,nombre_original:file.originalname,
-            es_perfil:false,fecha_toma:String(birth.fecha_parto).slice(0,10),registrado_por:req.user!.id,
+            es_perfil:false,fecha_toma:birth.fecha_parto,registrado_por:req.user!.id,
           }))).rows[0];
           await client.query(buildInsert('animal_imagen_relacion',{id_imagen:image.id_imagen,id_animal:birth.id_madre,registrado_por:req.user!.id}));
           await client.query(
@@ -707,7 +710,7 @@ birthsRouter.post(
     const birthId = routeParam(req.params.id, 'id');
     const childId = routeParam(req.params.childId, 'childId');
     const relation = await pool.query(
-      `SELECT p.id_madre,p.fecha_parto
+      `SELECT p.id_madre,p.fecha_parto::text AS fecha_parto
        FROM parto_cria pc
        JOIN parto p ON p.id_parto=pc.id_parto AND p.deleted_at IS NULL
        JOIN animal a ON a.id_animal=pc.id_cria AND a.deleted_at IS NULL
@@ -740,7 +743,7 @@ birthsRouter.post(
           mime_type: req.file!.mimetype,
           nombre_original: req.file!.originalname,
           es_perfil: profile,
-          fecha_toma: String(relation.rows[0].fecha_parto).slice(0,10),
+          fecha_toma: relation.rows[0].fecha_parto,
           descripcion: req.body.descripcion || null,
           registrado_por: req.user!.id,
         }))).rows[0];
