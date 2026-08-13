@@ -585,6 +585,7 @@ birthsRouter.post(
         }
         const image=(await client.query(buildInsert('animal_imagen', {
           id_animal: childId,
+          id_parto: birthId,
           public_id: cloud.public_id,
           url: cloud.url,
           secure_url: cloud.secure_url,
@@ -606,6 +607,13 @@ birthsRouter.post(
             id_imagen:image.id_imagen,id_animal:relatedId,registrado_por:req.user!.id,
           }));
         }
+        await client.query(
+          `INSERT INTO animal_imagen_etiqueta(id_imagen,id_etiqueta,registrado_por)
+           SELECT $1,id_etiqueta,$2 FROM etiqueta_multimedia
+           WHERE codigo='PARTO' AND activo=TRUE AND deleted_at IS NULL
+           ON CONFLICT DO NOTHING`,
+          [image.id_imagen,req.user!.id],
+        );
         return image;
       }, req.user!.id);
       return created(res, row);

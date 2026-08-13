@@ -13,6 +13,7 @@ import { deleteRecordImage, recordImageUpload, requestFiles, saveRecordImages } 
 
 const schema=z.object({
   id_tipo_actividad:z.string().uuid(),
+  id_marquilla_aplicada:z.string().uuid().nullable().optional(),
   fecha:z.string().date(),
   descripcion:z.string().nullable().optional(),
   id_animales:z.array(z.string().uuid()).min(1).max(500),
@@ -30,28 +31,64 @@ async function replaceAnimals(client:Parameters<Parameters<typeof transaction>[0
   for(const id of unique)await client.query(buildInsert('actividad_animal',{id_actividad:activityId,id_animal:id}));
 }
 
+async function resolveAppliedMark(
+  client:Parameters<Parameters<typeof transaction>[0]>[0],
+  typeId:string,
+  markId?:string|null,
+) {
+  const type=(await client.query(
+    'SELECT codigo FROM tipo_actividad WHERE id_tipo_actividad=$1 AND activo=TRUE AND deleted_at IS NULL',
+    [typeId],
+  )).rows[0] as {codigo:string}|undefined;
+  if(!type)throw new ValidationError('El tipo de actividad no está disponible.');
+  if(type.codigo!=='HERRAJE')return null;
+  if(!markId)throw new ValidationError('Seleccione el fierro aplicado durante el herraje.');
+  const mark=await client.query(
+    'SELECT 1 FROM marquilla WHERE id_marquilla=$1 AND activo=TRUE AND deleted_at IS NULL',
+    [markId],
+  );
+  if(!mark.rowCount)throw new ValidationError('El fierro seleccionado no está disponible.');
+  return markId;
+}
+
+async function applyCurrentMark(
+  client:Parameters<Parameters<typeof transaction>[0]>[0],
+  ids:string[],
+  markId:string|null,
+) {
+  if(!markId)return;
+  await client.query(
+    `UPDATE animal SET id_marquilla=$2,updated_at=NOW()
+     WHERE id_animal=ANY($1::uuid[]) AND deleted_at IS NULL`,
+    [[...new Set(ids)],markId],
+  );
+}
+
 export const activitiesRouter=Router();
 
 activitiesRouter.get('/',requirePermission('ACTIVIDAD_CONSULTAR'),asyncHandler(async(_req,res)=>ok(res,(await pool.query(
   `SELECT ac.*,ta.nombre tipo_actividad,ta.codigo tipo_actividad_codigo,
+    mq.nombre marquilla_aplicada,mq.codigo marquilla_aplicada_codigo,mq.secure_url marquilla_aplicada_foto,
     COALESCE((SELECT jsonb_agg(jsonb_build_object('id_animal',a.id_animal,'nombre',a.nombre,'codigo_arete',a.codigo_arete) ORDER BY a.nombre)
       FROM actividad_animal aa JOIN animal a ON a.id_animal=aa.id_animal AND a.deleted_at IS NULL
       WHERE aa.id_actividad=ac.id_actividad AND aa.deleted_at IS NULL),'[]') animales,
     COALESCE((SELECT jsonb_agg(to_jsonb(ai) ORDER BY ai.created_at)
       FROM actividad_imagen ai WHERE ai.id_actividad=ac.id_actividad AND ai.deleted_at IS NULL),'[]') imagenes
    FROM actividad ac JOIN tipo_actividad ta ON ta.id_tipo_actividad=ac.id_tipo_actividad
+   LEFT JOIN marquilla mq ON mq.id_marquilla=ac.id_marquilla_aplicada
    WHERE ac.deleted_at IS NULL ORDER BY ac.fecha DESC,ac.created_at DESC`
 )).rows)));
 
 activitiesRouter.post('/',requirePermission('ACTIVIDAD_ADMINISTRAR'),asyncHandler(async(req,res)=>{
   const input=schema.parse(req.body);
   const row=await transaction(async client=>{
-    const type=await client.query('SELECT 1 FROM tipo_actividad WHERE id_tipo_actividad=$1 AND activo=TRUE AND deleted_at IS NULL',[input.id_tipo_actividad]);
-    if(!type.rowCount)throw new ValidationError('El tipo de actividad no está disponible.');
+    const markId=await resolveAppliedMark(client,input.id_tipo_actividad,input.id_marquilla_aplicada);
     const activity=(await client.query(buildInsert('actividad',{
-      id_tipo_actividad:input.id_tipo_actividad,fecha:input.fecha,descripcion:input.descripcion??null,registrado_por:req.user!.id,
+      id_tipo_actividad:input.id_tipo_actividad,id_marquilla_aplicada:markId,
+      fecha:input.fecha,descripcion:input.descripcion??null,registrado_por:req.user!.id,
     }))).rows[0];
     await replaceAnimals(client,activity.id_actividad,input.id_animales);
+    await applyCurrentMark(client,input.id_animales,markId);
     return activity;
   },req.user!.id);
   return created(res,row);
@@ -61,15 +98,15 @@ activitiesRouter.patch('/:id',requirePermission('ACTIVIDAD_ADMINISTRAR'),asyncHa
   const id=routeParam(req.params.id,'id');
   const input=schema.parse(req.body);
   const row=await transaction(async client=>{
-    const type=await client.query('SELECT 1 FROM tipo_actividad WHERE id_tipo_actividad=$1 AND activo=TRUE AND deleted_at IS NULL',[input.id_tipo_actividad]);
-    if(!type.rowCount)throw new ValidationError('El tipo de actividad no está disponible.');
+    const markId=await resolveAppliedMark(client,input.id_tipo_actividad,input.id_marquilla_aplicada);
     const updated=(await client.query(
-      `UPDATE actividad SET id_tipo_actividad=$2,fecha=$3,descripcion=$4,updated_at=NOW()
+      `UPDATE actividad SET id_tipo_actividad=$2,id_marquilla_aplicada=$3,fecha=$4,descripcion=$5,updated_at=NOW()
        WHERE id_actividad=$1 AND deleted_at IS NULL RETURNING *`,
-      [id,input.id_tipo_actividad,input.fecha,input.descripcion??null],
+      [id,input.id_tipo_actividad,markId,input.fecha,input.descripcion??null],
     )).rows[0];
     if(!updated)throw new NotFoundError('Actividad no encontrada.');
     await replaceAnimals(client,id,input.id_animales);
+    await applyCurrentMark(client,input.id_animales,markId);
     return updated;
   },req.user!.id);
   return ok(res,row);

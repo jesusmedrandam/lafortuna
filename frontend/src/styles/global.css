@@ -987,7 +987,8 @@ body, .shell-main, .page-content, .topbar, .card, .input, .modal { transition: b
 .animal-carousel-card { overflow: hidden; }
 .carousel-counter { position: absolute; left: 12px; bottom: 12px; z-index: 3; padding: 6px 9px; border-radius: 999px; background: rgba(0,0,0,.68); color: #fff; font-size: .72rem; font-weight: 800; }
 .image-lightbox { display: flex; align-items: center; justify-content: center; padding: 56px 86px 24px; touch-action: pan-y; }
-.image-lightbox > .lightbox-close { position: absolute; right: 20px; top: 18px; z-index: 4; color: #fff; background: rgba(255,255,255,.13); }
+.image-lightbox > .lightbox-close { position: absolute; right: 20px; left: auto; top: 18px; z-index: 4; color: #fff; background: rgba(255,255,255,.13); }
+.image-lightbox > .lightbox-download { position: absolute; left: 20px; right: auto; top: 18px; z-index: 4; color: #fff; background: rgba(255,255,255,.13); }
 .image-lightbox-content { width: min(1180px, 100%); height: 100%; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 14px; align-items: center; }
 .image-lightbox-content > img { width: 100%; height: 100%; max-height: calc(100vh - 160px); object-fit: contain; border-radius: 10px; }
 .image-lightbox-details { color: #fff; display: flex; justify-content: space-between; align-items: center; gap: 18px; min-height: 56px; }
@@ -1093,6 +1094,7 @@ body, .shell-main, .page-content, .topbar, .card, .input, .modal { transition: b
 .multimedia-card { padding: 0; overflow: hidden; }
 .multimedia-preview { position: relative; aspect-ratio: 4/3; background: #101614; overflow: hidden; }
 .multimedia-preview img,.multimedia-preview video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.multimedia-open-button { width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .multimedia-preview > .badge { position: absolute; left: 10px; top: 10px; display: inline-flex; align-items: center; gap: 5px; }
 .multimedia-body { padding: 13px; display: grid; gap: 11px; }
 .multimedia-body > div:first-child { display: grid; gap: 3px; }
@@ -1172,6 +1174,19 @@ body, .shell-main, .page-content, .topbar, .card, .input, .modal { transition: b
 .multimedia-bottom-overlay { position: absolute; z-index: 4; left: 0; right: 0; bottom: 0; display: grid; gap: 2px; padding: 30px 10px 9px; color: #fff; background: linear-gradient(transparent,rgba(0,0,0,.84)); pointer-events: none; }
 .multimedia-bottom-overlay strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .78rem; }
 .multimedia-bottom-overlay small { color: rgba(255,255,255,.86); font-size: .68rem; }
+.record-photo-view { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
+.record-photo-view img { width: 100%; height: 100%; object-fit: cover; }
+.category-filter-bar { display: flex; gap: 7px; flex-wrap: wrap; margin: 0 0 12px; }
+.category-filter-bar button { border: 1px solid var(--border); border-radius: 999px; padding: 8px 12px; background: var(--surface); color: var(--muted); font: inherit; font-size: .76rem; font-weight: 750; cursor: pointer; }
+.category-filter-bar button.active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); }
+.group-detail-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; }
+.group-detail-summary > div { padding: 11px; border-radius: 12px; background: var(--surface-alt); display: grid; gap: 3px; }
+.group-detail-summary small { color: var(--muted); }
+.history-stack { display: grid; gap: 8px; }
+.history-entry { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 11px 12px; border: 1px solid var(--border); border-radius: 12px; }
+.history-entry > span:first-child { display: grid; gap: 3px; min-width: 0; }
+.history-entry small { color: var(--muted); overflow-wrap: anywhere; }
+@media(max-width:760px){.group-detail-summary{grid-template-columns:1fr}.history-entry{grid-template-columns:1fr}}
 
 .reproduction-tabs { margin-bottom: 18px; }
 .reproduction-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }

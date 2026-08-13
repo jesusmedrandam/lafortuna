@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { AnimalSelectionBuilder, type AnimalSelectionValue } from '../../components/AnimalSelectionBuilder';
+import { ImageLightbox } from '../../components/ImageLightbox';
 import { useToast } from '../../components/ToastContext';
 import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, ListToolbar, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
 import { useListControls } from '../../hooks/useListControls';
@@ -339,4 +340,4 @@ function MovementPhotoPicker({label,existing,files,onFiles,onDelete}:{label:stri
 }
 
 function FilePreview({file}:{file:File}){const [url,setUrl]=useState('');useEffect(()=>{const next=URL.createObjectURL(file);setUrl(next);return()=>URL.revokeObjectURL(next);},[file]);return <img src={url} alt={file.name}/>;}
-function PhotoGallery({title,images}:{title:string;images:RecordImage[]}){return <div><strong>{title}</strong><div className="record-photo-grid">{images.length?images.map((image)=><a key={image.public_id} href={image.secure_url} target="_blank" rel="noreferrer"><img src={image.secure_url} alt={`${title} del potrero`}/></a>):<span className="muted">Sin fotografías</span>}</div></div>;}
+function PhotoGallery({title,images}:{title:string;images:RecordImage[]}){const [viewer,setViewer]=useState<number|null>(null);return <div><strong>{title}</strong><div className="record-photo-grid">{images.length?images.map((image,index)=><button className="record-photo-view" type="button" key={image.public_id} onClick={()=>setViewer(index)}><img src={image.secure_url} alt={`${title} del potrero`}/></button>):<span className="muted">Sin fotografías</span>}</div>{viewer!==null?<ImageLightbox items={images.map((image,index)=>({key:image.id_movimiento_imagen??String(index),url:image.secure_url,title:`Potrero de ${title.toLowerCase()}`,subtitle:'Evidencia del movimiento',date:image.created_at,filename:image.nombre_original}))} initialIndex={viewer} onClose={()=>setViewer(null)}/>:null}</div>;}

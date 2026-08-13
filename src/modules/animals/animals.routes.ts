@@ -321,7 +321,46 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       FROM animal_condicion_evento ace
       LEFT JOIN ubicacion ace_u ON ace_u.id_ubicacion=ace.id_ubicacion_destino
       LEFT JOIN grupo ace_g ON ace_g.id_grupo=ace.id_grupo_destino
-      WHERE ace.id_animal=a.id_animal AND ace.deleted_at IS NULL),'[]'::jsonb) eventos_condicion
+      WHERE ace.id_animal=a.id_animal AND ace.deleted_at IS NULL),'[]'::jsonb) eventos_condicion,
+      CASE WHEN a.sexo='HEMBRA' THEN (SELECT COUNT(*)::int FROM parto hp
+        WHERE hp.id_madre=a.id_animal AND hp.deleted_at IS NULL) ELSE 0 END total_partos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_actividad',ha.id_actividad,'fecha',ha.fecha,'tipo',hta.nombre,'codigo',hta.codigo,
+        'descripcion',ha.descripcion,'fierro',hm.nombre,'fierro_codigo',hm.codigo
+      ) ORDER BY ha.fecha DESC,ha.created_at DESC)
+      FROM actividad_animal haa
+      JOIN actividad ha ON ha.id_actividad=haa.id_actividad AND ha.deleted_at IS NULL
+      JOIN tipo_actividad hta ON hta.id_tipo_actividad=ha.id_tipo_actividad
+      LEFT JOIN marquilla hm ON hm.id_marquilla=ha.id_marquilla_aplicada
+      WHERE haa.id_animal=a.id_animal AND haa.deleted_at IS NULL),'[]'::jsonb) historial_actividades,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_movimiento',hmv.id_movimiento,
+        'fecha',COALESCE(hmd.aplicado_en,hmv.aplicado_en,hmv.fecha_movimiento),
+        'tipo',hmv.tipo_movimiento,'motivo',COALESCE(hmm.nombre,hmv.motivo),
+        'ubicacion_origen',huo.nombre,'ubicacion_destino',hud.nombre,
+        'grupo_origen',hgo.nombre,'grupo_destino',hgd.nombre
+      ) ORDER BY COALESCE(hmd.aplicado_en,hmv.aplicado_en,hmv.fecha_movimiento) DESC)
+      FROM movimiento_animal_detalle hmd
+      JOIN movimiento_animal hmv ON hmv.id_movimiento=hmd.id_movimiento AND hmv.deleted_at IS NULL
+      LEFT JOIN motivo_movimiento hmm ON hmm.id_motivo_movimiento=hmv.id_motivo_movimiento
+      LEFT JOIN ubicacion huo ON huo.id_ubicacion=COALESCE(hmd.id_ubicacion_anterior,hmv.id_ubicacion_origen)
+      LEFT JOIN ubicacion hud ON hud.id_ubicacion=COALESCE(hmd.id_ubicacion_destino,hmv.id_ubicacion_destino)
+      LEFT JOIN grupo hgo ON hgo.id_grupo=COALESCE(hmd.id_grupo_anterior,hmv.id_grupo_origen)
+      LEFT JOIN grupo hgd ON hgd.id_grupo=COALESCE(hmd.id_grupo_destino,hmv.id_grupo_destino)
+      WHERE hmd.id_animal=a.id_animal AND hmd.seleccionado=TRUE AND hmd.estado='APLICADO'
+        AND hmd.deleted_at IS NULL AND hmv.estado='COMPLETADO'),'[]'::jsonb) historial_movimientos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_tratamiento',ht.id_tratamiento,'fecha',ht.fecha_aplicacion,
+        'tipo',htt.nombre,'medicamento',hmed.nombre_comercial,'via',hvia.nombre,
+        'dosis',ht.dosis,'unidad',COALESCE(hum.simbolo,hum.nombre),
+        'descripcion',ht.descripcion,'observaciones',ht.observaciones
+      ) ORDER BY ht.fecha_aplicacion DESC,ht.created_at DESC)
+      FROM tratamiento_animal ht
+      JOIN tipo_tratamiento htt ON htt.id_tipo_tratamiento=ht.id_tipo_tratamiento
+      JOIN medicamento hmed ON hmed.id_medicamento=ht.id_medicamento
+      JOIN via_administracion hvia ON hvia.id_via_administracion=ht.id_via_administracion
+      JOIN unidad_medida hum ON hum.id_unidad=ht.id_unidad_dosis
+      WHERE ht.id_animal=a.id_animal AND ht.deleted_at IS NULL),'[]'::jsonb) historial_tratamientos
      FROM animal a
      JOIN especie e ON e.id_especie=a.id_especie
      JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal

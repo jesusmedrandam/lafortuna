@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   ArrowRightLeft,
+  Activity,
   Ban,
+  Baby,
   Beef,
   CalendarDays,
   Camera,
@@ -22,7 +24,6 @@ import {
   UserRound,
   Users,
   Weight,
-  X,
   type LucideIcon,
 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -49,6 +50,7 @@ import type { Animal, AnimalImage, Group, Location } from '../../types/api';
 import { currentDateInput, formatAge, formatDate, formatNumber, humanizeCode } from '../../utils';
 import { AnimalFormModal } from './AnimalFormModal';
 import { AnimalMultiPicker } from '../../components/AnimalMultiPicker';
+import { ImageLightbox } from '../../components/ImageLightbox';
 
 interface ViewerImage {
   key: string;
@@ -77,7 +79,6 @@ export function AnimalDetailPage() {
   const client = useQueryClient();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const touchStart = useRef<number | null>(null);
-  const viewerTouchStart = useRef<number | null>(null);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [imageProfile, setImageProfile] = useState(false);
@@ -238,28 +239,11 @@ export function AnimalDetailPage() {
     };
   }, [uploadDraft?.previewUrl]);
 
-  useEffect(() => {
-    if (viewerIndex === null) return undefined;
-    if (!viewerImages.length) {
-      setViewerIndex(null);
-      return undefined;
-    }
-    if (viewerIndex >= viewerImages.length) setViewerIndex(viewerImages.length - 1);
-    const handleKeys = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setViewerIndex(null);
-      if (event.key === 'ArrowRight') setViewerIndex((current) => current === null ? null : (current + 1) % viewerImages.length);
-      if (event.key === 'ArrowLeft') setViewerIndex((current) => current === null ? null : (current - 1 + viewerImages.length) % viewerImages.length);
-    };
-    window.addEventListener('keydown', handleKeys);
-    return () => window.removeEventListener('keydown', handleKeys);
-  }, [viewerImages.length, viewerIndex]);
-
   if (query.isLoading) return <LoadingState />;
   if (query.isError) return <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} />;
 
   const animal = query.data!;
   const currentGallery = gallery[galleryIndex];
-  const currentViewer = viewerIndex === null ? null : viewerImages[viewerIndex];
   const ownerText = animal.propietarios?.length
     ? animal.propietarios.map((owner) => `${owner.nombre}${owner.porcentaje != null ? ` (${formatNumber(owner.porcentaje)}%)` : ''}`).join(', ')
     : 'Sin propietario registrado';
@@ -297,12 +281,6 @@ export function AnimalDetailPage() {
   function openMarkViewer() {
     const index = viewerImages.findIndex((item) => item.key === 'fierro');
     if (index >= 0) setViewerIndex(index);
-  }
-  function nextViewer() {
-    if (viewerImages.length > 1) setViewerIndex((current) => current === null ? 0 : (current + 1) % viewerImages.length);
-  }
-  function previousViewer() {
-    if (viewerImages.length > 1) setViewerIndex((current) => current === null ? 0 : (current - 1 + viewerImages.length) % viewerImages.length);
   }
   function openConditionAction(action: ConditionAction) {
     setConditionForm({ fecha_evento: currentDateInput(), id_grupo_actual: '', id_ubicacion_actual: '', observaciones: '' });
@@ -372,6 +350,7 @@ export function AnimalDetailPage() {
             <CompactInfo icon={UserRound} label="Propietario(s)" value={ownerText} wide />
             <CompactInfo icon={CalendarDays} label="Fecha de nacimiento" value={formatDate(animal.fecha_nacimiento)} />
             {animal.fecha_nacimiento ? <CompactInfo icon={CalendarDays} label="Edad" value={formatAge(animal.fecha_nacimiento)} /> : null}
+            {animal.sexo==='HEMBRA'&&(animal.total_partos??0)>0?<CompactInfo icon={Baby} label="Partos registrados" value={String(animal.total_partos)}/>:null}
             {animal.marquilla ? <CompactInfo icon={Tag} label="Fierro" value={<span className="animal-mark-inline"><span>{animal.marquilla_codigo || animal.marquilla}</span>{animal.marquilla_foto ? <button type="button" className="animal-mark-thumb" onClick={openMarkViewer} aria-label="Ver imagen del fierro en grande"><img src={animal.marquilla_foto} alt={`Fierro ${animal.marquilla_codigo || animal.marquilla}`} /></button> : null}</span>} /> : null}
             <CompactInfo icon={UserRound} label="Padres" value={`Madre: ${animal.madre || '—'} · Padre: ${animal.padre || '—'}`} wide />
             {lastTreatment ? <CompactInfo icon={Syringe} label="Último tratamiento" value={treatmentText} wide /> : null}
@@ -395,6 +374,13 @@ export function AnimalDetailPage() {
         </div>)}
       </div>
     </Card> : null}
+
+    {(animal.historial_actividades?.length||animal.historial_movimientos?.length||animal.historial_tratamientos?.length)?<Card className="animal-condition-history">
+      <div className="section-heading-inline"><div><h2>Historial operativo</h2><p className="muted">Actividades, cambios y tratamientos en los que participó el animal.</p></div></div>
+      {animal.historial_movimientos?.length?<section><h3><ArrowRightLeft size={17}/> Movimientos</h3><div className="history-stack">{animal.historial_movimientos.map((movement)=><div className="history-entry" key={movement.id_movimiento}><span><strong>{movement.motivo||humanizeCode(movement.tipo)}</strong><small>{movement.ubicacion_origen||movement.grupo_origen||'Sin origen'} → {movement.ubicacion_destino||movement.grupo_destino||'Sin destino'}</small></span><strong>{formatDate(movement.fecha)}</strong></div>)}</div></section>:null}
+      {animal.historial_actividades?.length?<section><h3><Activity size={17}/> Actividades</h3><div className="history-stack">{animal.historial_actividades.map((activity)=><div className="history-entry" key={activity.id_actividad}><span><strong>{activity.tipo}</strong><small>{[activity.fierro_codigo?`Fierro ${activity.fierro_codigo}`:null,activity.descripcion].filter(Boolean).join(' · ')||'Sin observaciones'}</small></span><strong>{formatDate(activity.fecha)}</strong></div>)}</div></section>:null}
+      {animal.historial_tratamientos?.length?<section><h3><Syringe size={17}/> Tratamientos</h3><div className="history-stack">{animal.historial_tratamientos.map((treatment)=><div className="history-entry" key={treatment.id_tratamiento}><span><strong>{treatment.tipo} · {treatment.medicamento}</strong><small>{[`${formatNumber(treatment.dosis)} ${treatment.unidad??''}`.trim(),treatment.via,treatment.observaciones].filter(Boolean).join(' · ')}</small></span><strong>{formatDate(treatment.fecha)}</strong></div>)}</div></section>:null}
+    </Card>:null}
 
     <section className="animal-gallery-compact-section">
       <div className="animal-gallery-compact-header">
@@ -428,39 +414,12 @@ export function AnimalDetailPage() {
       </Card> : <EmptyState icon={ImagePlus} title="Sin archivos adicionales" description="Agrega fotos o videos para conservar el historial visual del animal." action={hasPermission('IMAGEN_ADMINISTRAR') ? <IconButton label="Subir archivo" onClick={() => chooseFile(false)}><ImagePlus size={22} /></IconButton> : undefined} />}
     </section>
 
-    {currentViewer ? <div
-      className="image-lightbox"
-      role="dialog"
-      aria-modal="true"
-      onMouseDown={(event) => { if (event.target === event.currentTarget) setViewerIndex(null); }}
-      onTouchStart={(event) => { viewerTouchStart.current = event.touches[0]?.clientX ?? null; }}
-      onTouchEnd={(event) => {
-        if (viewerTouchStart.current === null) return;
-        const delta = (event.changedTouches[0]?.clientX ?? viewerTouchStart.current) - viewerTouchStart.current;
-        if (delta > 45) nextViewer();
-        else if (delta < -45) previousViewer();
-        viewerTouchStart.current = null;
-      }}
-    >
-      <IconButton className="lightbox-close" label="Cerrar imagen" onClick={() => setViewerIndex(null)}><X size={28} /></IconButton>
-      {viewerImages.length > 1 ? <>
-        <IconButton className="lightbox-arrow lightbox-arrow-left" label="Imagen anterior" onClick={previousViewer}><ChevronLeft size={34} /></IconButton>
-        <IconButton className="lightbox-arrow lightbox-arrow-right" label="Imagen siguiente" onClick={nextViewer}><ChevronRight size={34} /></IconButton>
-      </> : null}
-      <div className="image-lightbox-content">
-        {currentViewer.type==='VIDEO'?<video src={currentViewer.url} controls autoPlay/>:<img src={currentViewer.url} alt={currentViewer.alt} />}
-        <div className="image-lightbox-details">
-          <div>
-            <strong>{currentViewer.title}</strong>
-            <small>{currentViewer.createdAt ? formatDate(currentViewer.createdAt) : ''}{viewerImages.length > 1 ? ` · ${(viewerIndex ?? 0) + 1} de ${viewerImages.length}` : ''}</small>
-          </div>
-          {hasPermission('IMAGEN_ADMINISTRAR') && currentViewer.imageId ? <div className="lightbox-actions">
-            {!currentViewer.isProfile&&currentViewer.type==='IMAGEN' ? <IconButton label="Usar como foto de perfil" onClick={() => imageAction.mutate({ imageId: currentViewer.imageId!, action: 'profile' })}><Star size={18} /></IconButton> : null}
-            <IconButton className="detail-action-danger" label="Eliminar fotografía" onClick={() => imageAction.mutate({ imageId: currentViewer.imageId!, action: 'delete' })}><Trash2 size={18} /></IconButton>
-          </div> : null}
-        </div>
-      </div>
-    </div> : null}
+    {viewerIndex!==null?<ImageLightbox
+      items={viewerImages.map((image)=>({key:image.key,url:image.url,type:image.type,title:image.title,date:image.createdAt}))}
+      initialIndex={viewerIndex}
+      onClose={()=>setViewerIndex(null)}
+      actions={(media)=>{const image=viewerImages.find((item)=>item.key===media.key);return hasPermission('IMAGEN_ADMINISTRAR')&&image?.imageId?<div className="lightbox-actions">{!image.isProfile&&image.type==='IMAGEN'?<IconButton label="Usar como foto de perfil" onClick={()=>imageAction.mutate({imageId:image.imageId!,action:'profile'})}><Star size={18}/></IconButton>:null}<IconButton className="detail-action-danger" label="Eliminar fotografía" onClick={()=>imageAction.mutate({imageId:image.imageId!,action:'delete'})}><Trash2 size={18}/></IconButton></div>:null;}}
+    />:null}
 
     {uploadDraft ? <Modal
       title={uploadDraft.profile ? 'Cambiar foto de perfil' : 'Agregar foto o video'}

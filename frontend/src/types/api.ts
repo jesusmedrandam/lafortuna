@@ -121,10 +121,47 @@ export interface Animal {
     motivo: string | null;
   } | null;
   eventos_condicion?: AnimalConditionEvent[];
+  total_partos?: number;
+  historial_actividades?: AnimalActivityHistory[];
+  historial_movimientos?: AnimalMovementHistory[];
+  historial_tratamientos?: AnimalTreatmentHistory[];
   imagenes?: AnimalImage[];
   colores?: { id_color: string; nombre: string; es_principal: boolean }[];
   razas?: { id_raza: string; nombre: string; porcentaje: number | null }[];
   total?: number;
+}
+
+export interface AnimalActivityHistory {
+  id_actividad: string;
+  fecha: string;
+  tipo: string;
+  codigo: string;
+  descripcion: string | null;
+  fierro: string | null;
+  fierro_codigo: string | null;
+}
+
+export interface AnimalMovementHistory {
+  id_movimiento: string;
+  fecha: string;
+  tipo: string;
+  motivo: string | null;
+  ubicacion_origen: string | null;
+  ubicacion_destino: string | null;
+  grupo_origen: string | null;
+  grupo_destino: string | null;
+}
+
+export interface AnimalTreatmentHistory {
+  id_tratamiento: string;
+  fecha: string;
+  tipo: string;
+  medicamento: string;
+  via: string;
+  dosis: string | number;
+  unidad: string | null;
+  descripcion: string | null;
+  observaciones: string | null;
 }
 
 export interface AnimalConditionEvent {
@@ -208,6 +245,34 @@ export interface AnimalImage {
   total?: number;
 }
 
+export interface MultimediaItem {
+  id_multimedia: string;
+  id_origen: string;
+  categoria: 'ANIMALES' | 'MOVIMIENTOS' | 'PARTOS' | 'ACTIVIDADES' | 'LIMPIEZAS';
+  subcategoria: string;
+  titulo: string;
+  subtitulo: string | null;
+  secure_url: string;
+  public_id: string;
+  nombre_original: string | null;
+  descripcion: string | null;
+  fecha_toma: string;
+  created_at: string;
+  tipo_archivo: 'IMAGEN' | 'VIDEO';
+  es_perfil: boolean;
+  id_grupo: string | null;
+  id_ubicacion: string | null;
+  id_ubicacion_origen: string | null;
+  id_ubicacion_destino: string | null;
+  id_tipo_actividad: string | null;
+  lado: 'ORIGEN' | 'DESTINO' | null;
+  id_parto: string | null;
+  animales: AnimalImage['animales'];
+  etiquetas: AnimalImage['etiquetas'];
+  editable: boolean;
+  total?: number;
+}
+
 export interface RecordImage {
   id_movimiento_imagen?: string;
   id_limpieza_imagen?: string;
@@ -243,6 +308,24 @@ export interface Group {
   activo: boolean;
   total_animales: number;
   total?: number;
+}
+
+export interface GroupMovementHistory {
+  id_movimiento: string;
+  fecha: string;
+  estado: string;
+  tipo_movimiento: string;
+  motivo: string | null;
+  ubicacion_origen: string | null;
+  ubicacion_destino: string | null;
+  grupo_origen: string | null;
+  grupo_destino: string | null;
+  total_animales: number;
+}
+
+export interface GroupDetail extends Group {
+  animales: Array<{id_animal:string;nombre:string;codigo_arete:string|null;sexo:'MACHO'|'HEMBRA';estado:string}>;
+  historial_movimientos: GroupMovementHistory[];
 }
 
 export interface Location {
@@ -579,6 +662,10 @@ export interface Activity {
   id_tipo_actividad: string;
   tipo_actividad: string;
   tipo_actividad_codigo: string;
+  id_marquilla_aplicada: string | null;
+  marquilla_aplicada: string | null;
+  marquilla_aplicada_codigo: string | null;
+  marquilla_aplicada_foto: string | null;
   fecha: string;
   descripcion: string | null;
   animales: Array<{ id_animal: string; nombre: string; codigo_arete: string | null }>;

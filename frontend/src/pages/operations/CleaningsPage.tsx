@@ -4,6 +4,7 @@ import { CalendarDays, ChevronRight, Droplets, Edit3, Gauge, ImagePlus, MapPin, 
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
+import { ImageLightbox } from '../../components/ImageLightbox';
 import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, Input, ListToolbar, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
 import { useListControls } from '../../hooks/useListControls';
@@ -142,6 +143,7 @@ export function CleaningsPage() {
 }
 
 function CleaningDetail({item,onClose,onEdit}:{item:PastureCleaning;onClose:()=>void;onEdit?:()=>void}){
+  const [viewer,setViewer]=useState<number|null>(null);
   const application=item.unidad_aplicacion==='BOMBADAS'?'bombadas':'tanques';
   const singular=item.unidad_aplicacion==='BOMBADAS'?'bombada':'tanque';
   return <Modal title="Detalle de la limpieza" wide onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cerrar</Button>{onEdit?<Button onClick={onEdit}><Edit3 size={17}/>Editar limpieza</Button>:null}</>}>
@@ -157,9 +159,9 @@ function CleaningDetail({item,onClose,onEdit}:{item:PastureCleaning;onClose:()=>
       </div>
       <section><h3>Productos aplicados</h3>{item.productos.length?<div className="cleaning-detail-lines">{item.productos.map((product,index)=><div key={`${item.id_limpieza}-product-${index}`}><strong>{product.producto}</strong><span>{formatNumber(product.cantidad_por_tanque,4)} {product.unidad} por {singular}</span><span><strong>Total utilizado: {formatNumber(product.cantidad_total,4)} {product.unidad}</strong></span>{product.observaciones?<small>{product.observaciones}</small>:null}</div>)}</div>:<p className="muted">No se registraron productos.</p>}</section>
       <section><h3>Operadores responsables</h3>{item.operadores.length?<div className="cleaning-detail-lines">{item.operadores.map((operator)=><div key={`${item.id_limpieza}-${operator.id_operador}`}><strong>{operator.nombre}</strong><span>{operator.funcion || 'Sin función registrada'}</span>{operator.observaciones?<small>{operator.observaciones}</small>:null}</div>)}</div>:<p className="muted">No se registraron operadores.</p>}</section>
-      {item.imagenes?.length?<section><h3>Estado del potrero</h3><div className="record-photo-grid">{item.imagenes.map((image)=><a key={image.id_limpieza_imagen} href={image.secure_url} target="_blank" rel="noreferrer"><img src={image.secure_url} alt="Estado del potrero"/></a>)}</div></section>:null}
+      {item.imagenes?.length?<section><h3>Estado del potrero</h3><div className="record-photo-grid">{item.imagenes.map((image,index)=><button className="record-photo-view" type="button" key={image.id_limpieza_imagen} onClick={()=>setViewer(index)}><img src={image.secure_url} alt="Estado del potrero"/></button>)}</div></section>:null}
       <section><h3>Observaciones generales</h3><p>{item.observaciones||'Sin observaciones.'}</p></section>
-    </div>
+    </div>{viewer!==null?<ImageLightbox items={item.imagenes.map((image,index)=>({key:image.id_limpieza_imagen??String(index),url:image.secure_url,title:`Limpieza de ${item.potrero}`,subtitle:item.tipo_limpieza,date:item.fecha_inicio,filename:image.nombre_original}))} initialIndex={viewer} onClose={()=>setViewer(null)}/>:null}
   </Modal>;
 }
 

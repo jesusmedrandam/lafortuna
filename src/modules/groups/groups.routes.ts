@@ -95,6 +95,8 @@ groupsRouter.get('/', requirePermission('GRUPO_CONSULTAR'), asyncHandler(async (
     `SELECT g.*,tg.nombre tipo_grupo,e.nombre especie,ca.nombre categoria,ca.codigo categoria_codigo,
        u.nombre ubicacion,u.tipo ubicacion_tipo,
        propiedad.nombre propiedad,propiedad.es_principal propiedad_es_principal,
+       (SELECT COUNT(*)::int FROM animal ac
+        WHERE ac.id_grupo_actual=g.id_grupo AND ac.deleted_at IS NULL AND ac.estado='ACTIVO') total_animales,
        (SELECT COUNT(*)::int FROM animal a
         WHERE a.id_grupo_actual=g.id_grupo AND a.deleted_at IS NULL AND a.estado='ACTIVO') total_animales,
        COUNT(*) OVER()::int total
@@ -110,6 +112,50 @@ groupsRouter.get('/', requirePermission('GRUPO_CONSULTAR'), asyncHandler(async (
     params,
   );
   return ok(res, result.rows, { page: pagination.page, limit: pagination.limit, total: result.rows[0]?.total ?? 0 });
+}));
+
+groupsRouter.get('/:id', requirePermission('GRUPO_CONSULTAR'), asyncHandler(async (req, res) => {
+  const row=(await pool.query(
+    `SELECT g.*,tg.nombre tipo_grupo,e.nombre especie,ca.nombre categoria,ca.codigo categoria_codigo,
+       u.nombre ubicacion,u.tipo ubicacion_tipo,
+       propiedad.nombre propiedad,propiedad.es_principal propiedad_es_principal,
+       COALESCE((SELECT jsonb_agg(jsonb_build_object(
+         'id_animal',a.id_animal,'nombre',a.nombre,'codigo_arete',a.codigo_arete,
+         'sexo',a.sexo,'estado',a.estado
+       ) ORDER BY a.nombre)
+       FROM animal a
+       WHERE a.id_grupo_actual=g.id_grupo AND a.deleted_at IS NULL AND a.estado='ACTIVO'),'[]'::jsonb) animales,
+       COALESCE((SELECT jsonb_agg(jsonb_build_object(
+         'id_movimiento',m.id_movimiento,'fecha',m.fecha_movimiento,'estado',m.estado,
+         'tipo_movimiento',m.tipo_movimiento,'motivo',COALESCE(mm.nombre,m.motivo),
+         'ubicacion_origen',uo.nombre,'ubicacion_destino',ud.nombre,
+         'grupo_origen',go.nombre,'grupo_destino',gd.nombre,
+         'total_animales',(SELECT COUNT(*)::int FROM movimiento_animal_detalle md
+           WHERE md.id_movimiento=m.id_movimiento AND md.seleccionado=TRUE AND md.deleted_at IS NULL)
+       ) ORDER BY m.fecha_movimiento DESC,m.created_at DESC)
+       FROM movimiento_animal m
+       LEFT JOIN motivo_movimiento mm ON mm.id_motivo_movimiento=m.id_motivo_movimiento
+       LEFT JOIN ubicacion uo ON uo.id_ubicacion=m.id_ubicacion_origen
+       LEFT JOIN ubicacion ud ON ud.id_ubicacion=m.id_ubicacion_destino
+       LEFT JOIN grupo go ON go.id_grupo=m.id_grupo_origen
+       LEFT JOIN grupo gd ON gd.id_grupo=m.id_grupo_destino
+       WHERE m.deleted_at IS NULL AND (
+         m.id_grupo_filtro=g.id_grupo OR m.id_grupo_origen=g.id_grupo OR m.id_grupo_destino=g.id_grupo
+         OR EXISTS(SELECT 1 FROM movimiento_animal_detalle md2
+           WHERE md2.id_movimiento=m.id_movimiento AND md2.deleted_at IS NULL
+             AND (md2.id_grupo_anterior=g.id_grupo OR md2.id_grupo_destino=g.id_grupo))
+       )),'[]'::jsonb) historial_movimientos
+     FROM grupo g
+     JOIN tipo_grupo tg ON tg.id_tipo_grupo=g.id_tipo_grupo
+     JOIN categoria_animal ca ON ca.id_categoria_animal=g.id_categoria_animal
+     LEFT JOIN ubicacion u ON u.id_ubicacion=g.id_ubicacion_actual
+     JOIN propiedad_ganadera propiedad ON propiedad.id_propiedad=g.id_propiedad
+     LEFT JOIN especie e ON e.id_especie=g.id_especie
+     WHERE g.id_grupo=$1 AND g.deleted_at IS NULL`,
+    [routeParam(req.params.id,'id')],
+  )).rows[0];
+  if(!row)throw new NotFoundError('Grupo no encontrado.');
+  return ok(res,row);
 }));
 
 groupsRouter.post('/', requirePermission('GRUPO_ADMINISTRAR'), asyncHandler(async (req, res) => {
