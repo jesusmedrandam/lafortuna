@@ -70,13 +70,17 @@ async function validateLactation(client:TransactionClient,input:LactationInput,e
   if(cow.sexo!=='HEMBRA')throw new ValidationError('Solo se puede registrar una lactancia para una hembra.');
 
   const birth=(await client.query(
-    `SELECT id_madre,fecha_parto::text AS fecha_parto FROM parto
+    `SELECT id_madre,fecha_parto::text AS fecha_parto,
+       (fecha_parto + INTERVAL '18 months')::date::text AS fecha_limite
+     FROM parto
      WHERE id_parto=$1 AND deleted_at IS NULL FOR SHARE`,[input.id_parto],
-  )).rows[0] as {id_madre:string;fecha_parto:string}|undefined;
+  )).rows[0] as {id_madre:string;fecha_parto:string;fecha_limite:string}|undefined;
   if(!birth)throw new NotFoundError('El parto relacionado no existe.');
   if(birth.id_madre!==input.id_vaca)throw new ValidationError('El parto seleccionado no pertenece a la vaca.');
   const startDate=birth.fecha_parto;
   if(input.fecha_fin&&input.fecha_fin<startDate)throw new ValidationError('La fecha de cierre no puede ser anterior al parto.');
+  if(input.fecha_fin&&input.fecha_fin>birth.fecha_limite)throw new ValidationError('La lactancia no puede extenderse más de 18 meses después del parto.');
+  if(input.activa&&new Date().toISOString().slice(0,10)>birth.fecha_limite)throw new ValidationError('Esta lactancia superó los 18 meses desde el parto y debe registrarse como finalizada.');
   const linked=(await client.query(
     `SELECT id_lactancia FROM lactancia
      WHERE id_parto=$1 AND deleted_at IS NULL AND ($2::uuid IS NULL OR id_lactancia<>$2::uuid)
@@ -97,17 +101,33 @@ async function validateLactation(client:TransactionClient,input:LactationInput,e
   return startDate;
 }
 
-async function activeLactation(client:Parameters<Parameters<typeof transaction>[0]>[0],animalId:string,date:string) {
+async function milkingLactation(client:Parameters<Parameters<typeof transaction>[0]>[0],animalId:string,date:string) {
+  await assertAnimalOperationAllowed(client,animalId,'PRODUCCION_LECHE');
+  const cow=(await client.query(
+    `SELECT sexo,en_ordeno FROM animal
+     WHERE id_animal=$1 AND estado='ACTIVO' AND deleted_at IS NULL FOR SHARE`,[animalId],
+  )).rows[0] as {sexo:string;en_ordeno:boolean}|undefined;
+  if(!cow)throw new NotFoundError('Vaca no encontrada o inactiva.');
+  if(cow.sexo!=='HEMBRA')throw new ValidationError('La producción de leche solo puede registrarse para una hembra.');
+  if(!cow.en_ordeno)throw new ValidationError('La vaca no está marcada como en ordeño.');
+  const eligible=(await client.query(
+    `SELECT EXISTS(
+       SELECT 1 FROM parto p
+       WHERE p.id_madre=$1 AND p.deleted_at IS NULL
+         AND p.fecha_parto<=$2::date
+         AND p.fecha_parto + INTERVAL '18 months'>=$2::date
+     ) permitido`,[animalId,date],
+  )).rows[0] as {permitido:boolean};
+  if(!eligible.permitido)throw new ValidationError('La vaca debe tener un parto registrado dentro de los 18 meses anteriores a la fecha de producción.');
   const rows=(await client.query(
     `SELECT id_lactancia FROM lactancia
-     WHERE id_vaca=$1 AND deleted_at IS NULL AND activa=TRUE AND en_ordeno=TRUE
+     WHERE id_vaca=$1 AND deleted_at IS NULL AND activa=TRUE
        AND fecha_inicio<=$2::date AND fecha_inicio + INTERVAL '18 months'>=$2::date
        AND (fecha_fin IS NULL OR fecha_fin>=$2::date)
      ORDER BY fecha_inicio DESC FOR SHARE`,[animalId,date],
   )).rows as Array<{id_lactancia:string}>;
-  if(!rows.length)throw new ValidationError('La vaca debe tener una lactancia activa, marcada en ordeño y con no más de 18 meses en la fecha seleccionada.');
   if(rows.length>1)throw new ValidationError('La vaca tiene más de una lactancia activa. Cierra el registro duplicado antes de continuar.');
-  return rows[0].id_lactancia;
+  return rows[0]?.id_lactancia??null;
 }
 
 async function linkedHealthCondition(client:Parameters<Parameters<typeof transaction>[0]>[0],conditionId:string|null|undefined,animalId:string) {
@@ -130,13 +150,111 @@ const tankSchema=z.object({
 recordsRouter.get('/producciones/vacas-activas',requirePermission('PRODUCCION_CONSULTAR'),asyncHandler(async(req,res)=>{
   const date=z.string().date().catch(new Date().toISOString().slice(0,10)).parse(req.query.fecha);
   return ok(res,(await pool.query(
-    `SELECT a.id_animal,a.nombre,a.codigo_arete,l.id_lactancia,l.fecha_inicio
-     FROM lactancia l JOIN animal a ON a.id_animal=l.id_vaca AND a.deleted_at IS NULL AND a.estado='ACTIVO'
-     WHERE l.deleted_at IS NULL AND l.activa=TRUE AND l.en_ordeno=TRUE
-       AND l.fecha_inicio<=$1::date AND l.fecha_inicio + INTERVAL '18 months'>=$1::date
-       AND (l.fecha_fin IS NULL OR l.fecha_fin>=$1::date)
+    `SELECT a.id_animal,a.nombre,a.codigo_arete,l.id_lactancia,l.fecha_inicio,p.fecha_parto
+     FROM animal a
+     JOIN LATERAL(
+       SELECT parto.fecha_parto FROM parto
+       WHERE parto.id_madre=a.id_animal AND parto.deleted_at IS NULL
+         AND parto.fecha_parto<=$1::date
+         AND parto.fecha_parto + INTERVAL '18 months'>=$1::date
+       ORDER BY parto.fecha_parto DESC LIMIT 1
+     ) p ON TRUE
+     LEFT JOIN LATERAL(
+       SELECT lactancia.id_lactancia,lactancia.fecha_inicio FROM lactancia
+       WHERE lactancia.id_vaca=a.id_animal AND lactancia.deleted_at IS NULL
+         AND lactancia.activa=TRUE AND lactancia.fecha_inicio<=$1::date
+         AND lactancia.fecha_inicio + INTERVAL '18 months'>=$1::date
+         AND (lactancia.fecha_fin IS NULL OR lactancia.fecha_fin>=$1::date)
+       ORDER BY lactancia.fecha_inicio DESC LIMIT 1
+     ) l ON TRUE
+     WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='HEMBRA' AND a.en_ordeno=TRUE
      ORDER BY a.nombre,a.codigo_arete`,[date],
   )).rows);
+}));
+
+recordsRouter.get('/producciones/vacas-elegibles',requirePermission('PRODUCCION_CONSULTAR'),asyncHandler(async(req,res)=>{
+  const date=z.string().date().catch(new Date().toISOString().slice(0,10)).parse(req.query.fecha);
+  return ok(res,(await pool.query(
+    `SELECT a.id_animal,a.nombre,a.codigo_arete,a.en_ordeno,p.fecha_parto,
+       l.id_lactancia,l.fecha_inicio,l.activa lactancia_activa
+     FROM animal a
+     JOIN LATERAL(
+       SELECT parto.fecha_parto FROM parto
+       WHERE parto.id_madre=a.id_animal AND parto.deleted_at IS NULL
+         AND parto.fecha_parto<=$1::date
+         AND parto.fecha_parto + INTERVAL '18 months'>=$1::date
+       ORDER BY parto.fecha_parto DESC LIMIT 1
+     ) p ON TRUE
+     LEFT JOIN LATERAL(
+       SELECT lactancia.id_lactancia,lactancia.fecha_inicio,lactancia.activa
+       FROM lactancia
+       WHERE lactancia.id_vaca=a.id_animal AND lactancia.deleted_at IS NULL
+         AND lactancia.activa=TRUE AND lactancia.fecha_inicio<=$1::date
+         AND lactancia.fecha_inicio + INTERVAL '18 months'>=$1::date
+         AND (lactancia.fecha_fin IS NULL OR lactancia.fecha_fin>=$1::date)
+       ORDER BY lactancia.fecha_inicio DESC LIMIT 1
+     ) l ON TRUE
+     WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='HEMBRA'
+       AND COALESCE((
+         SELECT policy.permitido FROM operacion_categoria_animal policy
+         WHERE policy.id_categoria_animal=a.id_categoria_animal
+           AND policy.codigo_operacion='PRODUCCION_LECHE' AND policy.deleted_at IS NULL
+         LIMIT 1
+       ),TRUE)=TRUE
+     ORDER BY a.nombre,a.codigo_arete`,[date],
+  )).rows);
+}));
+
+const milkingStateSchema=z.object({
+  en_ordeno:z.boolean(),
+  fecha_referencia:z.string().date().optional(),
+});
+
+recordsRouter.put('/producciones/vacas/:id/ordeno',requirePermission('PRODUCCION_ADMINISTRAR'),asyncHandler(async(req,res)=>{
+  const id=routeParam(req.params.id,'id');
+  const input=milkingStateSchema.parse(req.body);
+  const referenceDate=input.fecha_referencia??new Date().toISOString().slice(0,10);
+  const row=await transaction(async client=>{
+    await assertAnimalOperationAllowed(client,id,'PRODUCCION_LECHE');
+    const cow=(await client.query(
+      `SELECT id_animal,sexo FROM animal
+       WHERE id_animal=$1 AND estado='ACTIVO' AND deleted_at IS NULL FOR UPDATE`,[id],
+    )).rows[0] as {id_animal:string;sexo:string}|undefined;
+    if(!cow)throw new NotFoundError('Vaca no encontrada o inactiva.');
+    if(cow.sexo!=='HEMBRA')throw new ValidationError('Solo una hembra puede marcarse como en ordeño.');
+    if(input.en_ordeno) {
+      const recentBirth=(await client.query(
+        `SELECT id_parto FROM parto
+         WHERE id_madre=$1 AND deleted_at IS NULL AND fecha_parto<=$2::date
+           AND fecha_parto + INTERVAL '18 months'>=$2::date
+         ORDER BY fecha_parto DESC LIMIT 1 FOR SHARE`,[id,referenceDate],
+      )).rows[0];
+      if(!recentBirth)throw new ValidationError('Para iniciar el ordeño la vaca debe tener un parto registrado dentro de los últimos 18 meses.');
+    }
+    const saved=(await client.query(
+      `UPDATE animal SET en_ordeno=$2,updated_at=NOW()
+       WHERE id_animal=$1 RETURNING id_animal,nombre,codigo_arete,en_ordeno`,[id,input.en_ordeno],
+    )).rows[0];
+    if(!input.en_ordeno) {
+      await client.query(
+        `UPDATE lactancia SET en_ordeno=FALSE,updated_at=NOW()
+         WHERE id_vaca=$1 AND en_ordeno=TRUE AND deleted_at IS NULL`,[id],
+      );
+    } else {
+      await client.query(
+        `UPDATE lactancia SET en_ordeno=COALESCE(id_lactancia=(
+           SELECT l2.id_lactancia FROM lactancia l2
+           JOIN parto p2 ON p2.id_parto=l2.id_parto AND p2.deleted_at IS NULL
+           WHERE l2.id_vaca=$1 AND l2.deleted_at IS NULL AND l2.activa=TRUE
+             AND p2.fecha_parto<=$2::date AND p2.fecha_parto + INTERVAL '18 months'>=$2::date
+           ORDER BY p2.fecha_parto DESC LIMIT 1
+         ),FALSE),updated_at=NOW()
+         WHERE id_vaca=$1 AND deleted_at IS NULL AND activa=TRUE`,[id,referenceDate],
+      );
+    }
+    return saved;
+  },req.user!.id);
+  return ok(res,row);
 }));
 
 recordsRouter.get('/lactancias/vacas-disponibles',requirePermission('LACTANCIA_CONSULTAR'),asyncHandler(async(req,res)=>{
@@ -250,7 +368,9 @@ recordsRouter.post('/:module', asyncHandler(async (req, res) => {
     const input={...parsed,id_parto:parsed.id_parto??null,fecha_fin:parsed.activa?null:(parsed.fecha_fin??null),observaciones:parsed.observaciones??null};
     const row=await transaction(async client=>{
       const fechaInicio=await validateLactation(client,input);
-      return (await client.query(buildInsert('lactancia',{...input,fecha_inicio:fechaInicio,registrado_por:req.user!.id}))).rows[0];
+      const saved=(await client.query(buildInsert('lactancia',{...input,fecha_inicio:fechaInicio,registrado_por:req.user!.id}))).rows[0];
+      if(input.en_ordeno)await client.query('UPDATE animal SET en_ordeno=TRUE,updated_at=NOW() WHERE id_animal=$1',[input.id_vaca]);
+      return saved;
     },req.user!.id);
     return created(res,row);
   }
@@ -281,7 +401,7 @@ recordsRouter.post('/:module', asyncHandler(async (req, res) => {
     const date=String(data.fecha_produccion??'');
     if(!date)throw new ValidationError('Selecciona la fecha de producción.');
     const row=await transaction(async client=>{
-      const lactationId=await activeLactation(client,animalId,date);
+      const lactationId=await milkingLactation(client,animalId,date);
       return (await client.query(buildInsert(d.table,{...data,id_lactancia:lactationId,fuente:data.fuente??'MANUAL',registrado_por:req.user!.id}))).rows[0];
     },req.user!.id);
     return created(res,row);
@@ -307,11 +427,14 @@ recordsRouter.patch('/:module/:id', asyncHandler(async (req, res) => {
     const input={...parsed,id_parto:parsed.id_parto??null,fecha_fin:parsed.activa?null:(parsed.fecha_fin??null),observaciones:parsed.observaciones??null};
     const row=await transaction(async client=>{
       const current=(await client.query(
-        'SELECT id_lactancia FROM lactancia WHERE id_lactancia=$1 AND deleted_at IS NULL FOR UPDATE',[id],
-      )).rows[0];
+        'SELECT id_lactancia,id_vaca,en_ordeno FROM lactancia WHERE id_lactancia=$1 AND deleted_at IS NULL FOR UPDATE',[id],
+      )).rows[0] as {id_lactancia:string;id_vaca:string;en_ordeno:boolean}|undefined;
       if(!current)throw new NotFoundError('Lactancia no encontrada.');
       const fechaInicio=await validateLactation(client,input,id);
-      return (await client.query(buildUpdate('lactancia','id_lactancia',id,{...input,fecha_inicio:fechaInicio}))).rows[0];
+      const saved=(await client.query(buildUpdate('lactancia','id_lactancia',id,{...input,fecha_inicio:fechaInicio}))).rows[0];
+      if(input.en_ordeno)await client.query('UPDATE animal SET en_ordeno=TRUE,updated_at=NOW() WHERE id_animal=$1',[input.id_vaca]);
+      else if(current.en_ordeno)await client.query('UPDATE animal SET en_ordeno=FALSE,updated_at=NOW() WHERE id_animal=$1',[current.id_vaca]);
+      return saved;
     },req.user!.id);
     return ok(res,row);
   }
@@ -349,7 +472,7 @@ recordsRouter.patch('/:module/:id', asyncHandler(async (req, res) => {
       const animalId=String(data.id_vaca??current.id_vaca);
       const date=String(data.fecha_produccion??current.fecha_produccion);
       await assertAnimalOperationAllowed(client,animalId,d.operation);
-      const lactationId=await activeLactation(client,animalId,date);
+      const lactationId=await milkingLactation(client,animalId,date);
       return (await client.query(buildUpdate(d.table,d.id,id,{...data,id_vaca:animalId,id_lactancia:lactationId}))).rows[0];
     },req.user!.id);
     return ok(res,row);

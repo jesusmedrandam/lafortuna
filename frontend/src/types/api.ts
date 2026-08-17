@@ -704,8 +704,14 @@ export interface ActiveLactationCow {
   id_animal: string;
   nombre: string;
   codigo_arete: string | null;
-  id_lactancia: string;
-  fecha_inicio: string;
+  id_lactancia: string | null;
+  fecha_inicio: string | null;
+  fecha_parto: string;
+}
+
+export interface MilkingCowOption extends ActiveLactationCow {
+  en_ordeno: boolean;
+  lactancia_activa: boolean | null;
 }
 
 export interface LactationCowOption {

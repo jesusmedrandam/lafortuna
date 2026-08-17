@@ -107,6 +107,10 @@ function validateMovementMode(kind: z.infer<typeof movementKind>, mode: Movement
   }
 }
 
+function destinationComesFromGroup(kind: z.infer<typeof movementKind>) {
+  return kind === 'GRUPO' || kind === 'PROPIEDAD' || kind === 'COMBINADO';
+}
+
 function defaultReasonCode(kind: z.infer<typeof movementKind>) {
   if (kind === 'UBICACION') return 'ROTACION_POTRERO';
   if (kind === 'GRUPO') return 'CAMBIO_GRUPO';
@@ -177,8 +181,14 @@ async function validateMovementSelection(database: Queryable, input: MovementInp
   )).rows[0] as { id_grupo: string; id_categoria_animal: string; id_propiedad: string; id_ubicacion_actual: string | null } | undefined;
   if (!group) throw new ValidationError('El grupo de destino no está disponible.');
 
-  const effectiveLocationId = input.id_ubicacion_destino ?? group.id_ubicacion_actual;
-  if (!effectiveLocationId) throw new ValidationError('Seleccione la ubicación de destino del grupo.');
+  // En cambios de grupo y traslados entre propiedades el grupo es la fuente
+  // única de la ubicación. El cliente no debe poder enviar un potrero distinto.
+  const effectiveLocationId = destinationComesFromGroup(input.tipo_movimiento)
+    ? group.id_ubicacion_actual
+    : input.id_ubicacion_destino ?? group.id_ubicacion_actual;
+  if (!effectiveLocationId) {
+    throw new ValidationError('El grupo de destino no tiene un potrero o corral asignado. Configúralo antes de realizar el traslado.');
+  }
   const location = (await database.query(
     `SELECT u.id_ubicacion,u.tipo,u.id_categoria_animal,u.id_propiedad
      FROM ubicacion u
@@ -434,7 +444,10 @@ movementsRouter.post('/', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(as
       ? input.id_grupo_filtro
       : input.id_grupo_destino;
     const destinationGroup=await groupOrigin(client,destinationGroupId);
-    const destinationLocationProperty=await locationProperty(client,input.id_ubicacion_destino);
+    const destinationLocationId=destinationGroup&&destinationComesFromGroup(input.tipo_movimiento)
+      ? destinationGroup.id_ubicacion_actual
+      : input.id_ubicacion_destino;
+    const destinationLocationProperty=await locationProperty(client,destinationLocationId);
     if(destinationGroup&&destinationLocationProperty&&destinationGroup.id_propiedad!==destinationLocationProperty){
       throw new ValidationError('El grupo y la ubicación de destino pertenecen a propiedades diferentes.');
     }
@@ -446,6 +459,7 @@ movementsRouter.post('/', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(as
     const row = (await client.query(buildInsert('movimiento_animal', {
       ...head,
       id_ubicacion_origen: input.id_ubicacion_origen ?? source?.id_ubicacion_actual ?? null,
+      id_ubicacion_destino: destinationLocationId ?? null,
       id_grupo_origen: input.tipo_movimiento === 'UBICACION' ? input.id_grupo_filtro ?? null : input.id_grupo_origen ?? null,
       id_grupo_destino: destinationGroupId ?? null,
       id_propiedad_origen:requestedSourceProperty??source?.id_propiedad??null,
@@ -459,7 +473,7 @@ movementsRouter.post('/', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(as
     }))).rows[0];
     for (const animal of animals) await client.query(buildInsert('movimiento_animal_detalle', {
       ...animal,
-      id_ubicacion_destino: input.id_ubicacion_destino ?? null,
+      id_ubicacion_destino: destinationLocationId ?? null,
       id_grupo_destino: destinationGroupId ?? null,
       id_movimiento: row.id_movimiento,
     }));
@@ -501,8 +515,11 @@ movementsRouter.patch('/:id', requirePermission('MOVIMIENTO_CREAR'), asyncHandle
         nextGroupFilter,
         nextDestinationGroup,
       );
-      const nextDestinationLocation=input.id_ubicacion_destino===undefined?found.id_ubicacion_destino:input.id_ubicacion_destino;
       const destinationGroup=await groupOrigin(client,nextDestinationGroup);
+      const requestedDestinationLocation=input.id_ubicacion_destino===undefined?found.id_ubicacion_destino:input.id_ubicacion_destino;
+      const nextDestinationLocation=destinationGroup&&destinationComesFromGroup(nextKind)
+        ? destinationGroup.id_ubicacion_actual
+        : requestedDestinationLocation;
       const destinationLocationProperty=await locationProperty(client,nextDestinationLocation);
       if(destinationGroup&&destinationLocationProperty&&destinationGroup.id_propiedad!==destinationLocationProperty){
         throw new ValidationError('El grupo y la ubicación de destino pertenecen a propiedades diferentes.');
