@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ChevronRight, Edit3, Plus, Stethoscope, Syringe, Trash2, Users } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { AnimalSelectionBuilder, type AnimalSelectionValue } from '../../components/AnimalSelectionBuilder';
@@ -57,6 +58,9 @@ const emptyCondition=():ConditionForm=>({id_animal:'',id_tipo_condicion_salud:''
 
 
 export function SanitaryPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const consumedInitialAnimal = useRef(false);
   const { hasPermission } = useAuth();
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -83,6 +87,17 @@ export function SanitaryPage() {
   const campaigns = useQuery({ queryKey: ['sanitary-campaigns'], queryFn: () => apiRequest<SanitaryCampaign[]>('/jornadas-sanitarias') });
   const treatments = useQuery({ queryKey: ['records', 'tratamientos'], queryFn: () => apiRequest<GenericRecord[]>('/registros/tratamientos') });
   const conditions=useQuery({queryKey:['health-conditions'],queryFn:()=>apiRequest<HealthCondition[]>('/condiciones-salud')});
+
+  useEffect(() => {
+    const initialAnimal = (location.state as { initialTreatmentAnimal?: Pick<Animal, 'id_animal' | 'categoria_codigo'> } | null)?.initialTreatmentAnimal;
+    if (!initialAnimal || consumedInitialAnimal.current) return;
+    consumedInitialAnimal.current = true;
+    setOwnershipScope(initialAnimal.categoria_codigo === 'EN_PROPIEDAD' ? 'EN_PROPIEDAD' : 'FUERA_PROPIEDAD');
+    setTab('individual');
+    setTreatment({ ...emptyTreatment(), id_animal: initialAnimal.id_animal });
+    setTreatmentOpen(true);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate]);
 
   const createCampaign = useMutation({
     mutationFn: () => {

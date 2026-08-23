@@ -1308,3 +1308,77 @@ body, .shell-main, .page-content, .topbar, .card, .input, .modal { transition: b
   .dashboard-module-metrics.metrics-2,
   .dashboard-module-metrics.metrics-4 { grid-template-columns: 1fr; }
 }
+
+/* Perfil del animal: portada, retrato e historiales independientes */
+.animal-detail-redesign { display: grid; gap: 16px; }
+.animal-cover-hero { position: relative; margin-bottom: 58px; }
+.animal-cover-stage {
+  position: relative;
+  min-height: 350px;
+  aspect-ratio: 16 / 6;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: linear-gradient(135deg, var(--primary-soft), var(--surface-alt));
+  box-shadow: 0 16px 38px rgba(7, 24, 18, .16);
+  isolation: isolate;
+}
+.animal-cover-open { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; color: var(--primary); cursor: zoom-in; }
+.animal-cover-open > img,
+.animal-cover-open > video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.animal-cover-open > .animal-cover-fallback { transform: scale(1.08); filter: blur(12px); opacity: .82; }
+.animal-cover-empty { height: 100%; display: grid; place-items: center; align-content: center; gap: 10px; }
+.animal-cover-empty small { font-size: .82rem; font-weight: 750; }
+.animal-cover-expand { position: absolute; top: 18px; left: 18px; width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.38); border-radius: 13px; color: #fff; background: rgba(5,14,11,.58); backdrop-filter: blur(8px); }
+.animal-cover-shade { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(180deg, rgba(1,9,6,.06) 42%, rgba(1,9,6,.8) 100%); }
+.animal-cover-stage > h1 { position: absolute; z-index: 2; right: 26px; bottom: 24px; max-width: calc(100% - 220px); margin: 0; color: #fff; font-size: clamp(1.55rem,4vw,2.65rem); line-height: 1.08; text-align: right; text-shadow: 0 3px 16px rgba(0,0,0,.75); pointer-events: none; }
+.animal-cover-stage > .badge { position: absolute; z-index: 3; top: 20px; right: 20px; box-shadow: 0 5px 18px rgba(0,0,0,.28); }
+.animal-profile-overlap { position: absolute; z-index: 5; left: 28px; bottom: -58px; width: 142px; height: 142px; padding: 0; display: grid; place-items: center; overflow: hidden; border: 5px solid var(--background); border-radius: 27px; background: var(--primary-soft); color: var(--primary); box-shadow: 0 14px 32px rgba(4,18,13,.28); cursor: zoom-in; }
+.animal-profile-overlap img { width: 100%; height: 100%; object-fit: cover; }
+.animal-profile-overlap > span { position: absolute; right: 8px; bottom: 8px; width: 31px; height: 31px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: rgba(4,12,9,.7); }
+.animal-cover-arrow { position: absolute; z-index: 4; top: 50%; translate: 0 -50%; color: #fff !important; border: 1px solid rgba(255,255,255,.34) !important; background: rgba(4,12,9,.58) !important; backdrop-filter: blur(7px); }
+.animal-cover-arrow-left { left: 15px; }
+.animal-cover-arrow-right { right: 15px; }
+.animal-cover-dots { position: absolute; z-index: 4; left: 50%; bottom: 14px; translate: -50% 0; display: flex; align-items: center; gap: 6px; }
+.animal-cover-dots button { width: 7px; height: 7px; padding: 0; border: 0; border-radius: 999px; background: rgba(255,255,255,.58); cursor: pointer; transition: width .18s ease, background .18s ease; }
+.animal-cover-dots button.active { width: 24px; background: #fff; }
+.animal-detail-primary-actions { flex-wrap: wrap; margin-top: 2px; }
+.animal-detail-primary-actions .button { min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); background: var(--surface); }
+.animal-detail-primary-actions .button:hover { border-color: var(--primary); background: var(--primary-soft); }
+.animal-summary-heading-compact { display: grid; justify-content: stretch; }
+.animal-summary-heading-compact p { margin-top: 4px; }
+.animal-history-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; align-items: start; }
+.animal-history-card { padding: 15px; min-width: 0; }
+.animal-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 11px; border-bottom: 1px solid var(--border); }
+.animal-history-heading h2 { min-width: 0; margin: 0; display: flex; align-items: center; gap: 8px; font-size: 1rem; }
+.animal-history-heading h2 > svg { color: var(--primary); flex: 0 0 auto; }
+.animal-history-heading .button { min-height: 32px; padding: 5px 8px; white-space: nowrap; }
+.animal-history-card .history-stack { margin-top: 8px; }
+.animal-history-card .history-entry { width: 100%; padding: 10px 5px; background: transparent; color: inherit; }
+.animal-history-card .history-entry:last-child { border-bottom: 0; }
+.animal-history-card .history-entry > strong:last-child { color: var(--muted); font-size: .72rem; text-align: right; white-space: nowrap; }
+.lightbox-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
+
+@media (max-width: 760px) {
+  .animal-detail-redesign { gap: 13px; }
+  .animal-cover-hero { margin-bottom: 47px; }
+  .animal-cover-stage { min-height: 285px; aspect-ratio: 4 / 3; border-radius: 20px; }
+  .animal-cover-stage > h1 { right: 17px; bottom: 25px; max-width: calc(100% - 145px); font-size: clamp(1.35rem,7vw,2rem); }
+  .animal-cover-stage > .badge { top: 14px; right: 14px; }
+  .animal-cover-expand { top: 13px; left: 13px; width: 36px; height: 36px; }
+  .animal-profile-overlap { left: 18px; bottom: -47px; width: 112px; height: 112px; border-width: 4px; border-radius: 22px; }
+  .animal-cover-arrow { width: 42px; height: 42px; }
+  .animal-cover-arrow-left { left: 8px; }
+  .animal-cover-arrow-right { right: 8px; }
+  .animal-detail-primary-actions { flex-wrap: nowrap; overflow-x: auto; padding: 1px 1px 7px; scrollbar-width: thin; }
+  .animal-detail-primary-actions .button { flex: 0 0 auto; }
+  .animal-history-grid { grid-template-columns: 1fr; }
+  .animal-history-card { padding: 13px; }
+  .animal-history-heading { align-items: flex-start; }
+}
+
+@media (max-width: 390px) {
+  .animal-cover-stage { min-height: 255px; }
+  .animal-cover-stage > h1 { max-width: calc(100% - 125px); font-size: 1.3rem; }
+  .animal-profile-overlap { width: 98px; height: 98px; }
+}

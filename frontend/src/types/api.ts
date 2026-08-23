@@ -82,6 +82,7 @@ export interface Animal {
   id_padre: string | null;
   padre?: string | null;
   id_origen: string;
+  origen?: string | null;
   id_categoria_animal: string;
   categoria?: string;
   categoria_codigo?: string;
@@ -131,13 +132,14 @@ export interface Animal {
   historial_actividades?: AnimalActivityHistory[];
   historial_movimientos?: AnimalMovementHistory[];
   historial_tratamientos?: AnimalTreatmentHistory[];
+  historial_produccion?: AnimalProductionHistory[];
   imagenes?: AnimalImage[];
   colores?: { id_color: string; nombre: string; es_principal: boolean }[];
   razas?: { id_raza: string; nombre: string; porcentaje: number | null }[];
   total?: number;
 }
 
-export interface AnimalRegisteredChild { id_animal:string;nombre:string;codigo_arete:string|null;sexo:'MACHO'|'HEMBRA';id_parto:string;fecha_parto:string;parentesco:'MADRE'|'PADRE' }
+export interface AnimalRegisteredChild { id_animal:string;nombre:string;codigo_arete:string|null;sexo:'MACHO'|'HEMBRA';fecha_nacimiento:string|null;id_parto:string|null;fecha_parto:string|null;parentesco:'MADRE'|'PADRE' }
 export interface AnimalReproductiveBirth { id_parto:string;fecha:string;tipo:string;rol:'MADRE'|'PADRE';contraparte:string|null;total_crias:number }
 export interface AnimalReproductiveHeat { id_celo:string;fecha_inicio:string;fecha_fin:string|null;rol:'VACA'|'TORO';contraparte:string|null;observaciones:string|null }
 export interface AnimalReproductivePregnancy { id_prenez:string;fecha:string;estado:string;metodo:string;rol:'VACA'|'PADRE';contraparte:string|null;fecha_parto_tentativa:string|null }
@@ -173,6 +175,15 @@ export interface AnimalTreatmentHistory {
   dosis: string | number;
   unidad: string | null;
   descripcion: string | null;
+  observaciones: string | null;
+}
+
+export interface AnimalProductionHistory {
+  id_produccion: string;
+  fecha: string;
+  litros: string | number;
+  turno: string | null;
+  fuente: string | null;
   observaciones: string | null;
 }
 

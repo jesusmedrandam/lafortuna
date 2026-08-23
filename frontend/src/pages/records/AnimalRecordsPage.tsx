@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Edit3, HeartOff, Plus, Trash2, Weight } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
@@ -24,6 +25,9 @@ interface RecordForm {
 const emptyForm = (): RecordForm => ({ id_animal: '', fecha: currentDateInput(), peso: '', metodo: '', causa: '', descripcion: '', observaciones: '' });
 
 export function AnimalRecordsPage({ mode }: { mode: Mode }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const consumedInitialAnimal = useRef(false);
   const { hasPermission } = useAuth();
   const toast = useToast();
   const client = useQueryClient();
@@ -37,6 +41,16 @@ export function AnimalRecordsPage({ mode }: { mode: Mode }) {
   const animals = useQuery({ queryKey: ['animals', mode], queryFn: () => apiRequest<Animal[]>('/animales?limit=100') });
   const visibleRecords = mode === 'muertes' ? (records.data ?? []).filter((record) => isInOwnershipScope(String(record.categoria_codigo ?? ''), ownershipScope)) : records.data ?? [];
   const visibleAnimals = mode === 'muertes' ? (animals.data ?? []).filter((animal) => isInOwnershipScope(animal.categoria_codigo, ownershipScope)) : animals.data ?? [];
+
+  useEffect(() => {
+    const initialAnimal = (location.state as { initialDeathAnimal?: Pick<Animal, 'id_animal' | 'categoria_codigo'> } | null)?.initialDeathAnimal;
+    if (mode !== 'muertes' || !initialAnimal || consumedInitialAnimal.current) return;
+    consumedInitialAnimal.current = true;
+    setOwnershipScope(initialAnimal.categoria_codigo === 'EN_PROPIEDAD' ? 'EN_PROPIEDAD' : 'FUERA_PROPIEDAD');
+    setForm({ ...emptyForm(), id_animal: initialAnimal.id_animal });
+    setOpen(true);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, mode, navigate]);
 
   const save = useMutation({
     mutationFn: () => {

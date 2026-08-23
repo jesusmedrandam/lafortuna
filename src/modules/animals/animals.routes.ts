@@ -235,7 +235,7 @@ animalsRouter.get('/opciones/propietarios', requirePermission('ANIMAL_CONSULTAR'
 
 animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
   const result = await pool.query(
-    `SELECT a.*,e.nombre especie,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
+    `SELECT a.*,e.nombre especie,oa.nombre origen,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
       mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
       COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)
        FROM marquilla_usuario mu JOIN usuario mu_u ON mu_u.id_usuario=mu.id_usuario AND mu_u.deleted_at IS NULL
@@ -325,16 +325,21 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       CASE WHEN a.sexo='HEMBRA' THEN (SELECT COUNT(*)::int FROM parto hp
         WHERE hp.id_madre=a.id_animal AND hp.deleted_at IS NULL) ELSE 0 END total_partos,
       (SELECT COUNT(*)::int
-       FROM parto rp JOIN parto_cria rpc ON rpc.id_parto=rp.id_parto AND rpc.deleted_at IS NULL
-       WHERE rp.deleted_at IS NULL AND (rp.id_madre=a.id_animal OR rp.id_padre=a.id_animal)) total_crias,
+       FROM animal rc
+       WHERE rc.deleted_at IS NULL
+         AND (CASE WHEN a.sexo='HEMBRA' THEN rc.id_madre=a.id_animal ELSE rc.id_padre=a.id_animal END)) total_crias,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_animal',rc.id_animal,'nombre',rc.nombre,'codigo_arete',rc.codigo_arete,'sexo',rc.sexo,
-        'id_parto',rp.id_parto,'fecha_parto',rp.fecha_parto,
-        'parentesco',CASE WHEN rp.id_madre=a.id_animal THEN 'MADRE' ELSE 'PADRE' END
-      ) ORDER BY rp.fecha_parto DESC,rc.nombre)
-      FROM parto rp JOIN parto_cria rpc ON rpc.id_parto=rp.id_parto AND rpc.deleted_at IS NULL
-      JOIN animal rc ON rc.id_animal=rpc.id_cria AND rc.deleted_at IS NULL
-      WHERE rp.deleted_at IS NULL AND (rp.id_madre=a.id_animal OR rp.id_padre=a.id_animal)),'[]'::jsonb) crias_registradas,
+        'fecha_nacimiento',rc.fecha_nacimiento,
+        'id_parto',(SELECT rpc.id_parto FROM parto_cria rpc JOIN parto rp ON rp.id_parto=rpc.id_parto AND rp.deleted_at IS NULL
+          WHERE rpc.id_cria=rc.id_animal AND rpc.deleted_at IS NULL ORDER BY rp.fecha_parto DESC LIMIT 1),
+        'fecha_parto',(SELECT rp.fecha_parto FROM parto_cria rpc JOIN parto rp ON rp.id_parto=rpc.id_parto AND rp.deleted_at IS NULL
+          WHERE rpc.id_cria=rc.id_animal AND rpc.deleted_at IS NULL ORDER BY rp.fecha_parto DESC LIMIT 1),
+        'parentesco',CASE WHEN a.sexo='HEMBRA' THEN 'MADRE' ELSE 'PADRE' END
+      ) ORDER BY rc.fecha_nacimiento DESC NULLS LAST,rc.created_at DESC,rc.nombre)
+      FROM animal rc
+      WHERE rc.deleted_at IS NULL
+        AND (CASE WHEN a.sexo='HEMBRA' THEN rc.id_madre=a.id_animal ELSE rc.id_padre=a.id_animal END)),'[]'::jsonb) crias_registradas,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_parto',rp.id_parto,'fecha',rp.fecha_parto,'tipo',rp.tipo_parto,
         'rol',CASE WHEN rp.id_madre=a.id_animal THEN 'MADRE' ELSE 'PADRE' END,
@@ -404,9 +409,17 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       JOIN medicamento hmed ON hmed.id_medicamento=ht.id_medicamento
       JOIN via_administracion hvia ON hvia.id_via_administracion=ht.id_via_administracion
       JOIN unidad_medida hum ON hum.id_unidad=ht.id_unidad_dosis
-      WHERE ht.id_animal=a.id_animal AND ht.deleted_at IS NULL),'[]'::jsonb) historial_tratamientos
+      WHERE ht.id_animal=a.id_animal AND ht.deleted_at IS NULL),'[]'::jsonb) historial_tratamientos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_produccion',hpl.id_produccion,'fecha',hpl.fecha_produccion,
+        'litros',hpl.litros,'turno',hpl.turno,'fuente',hpl.fuente,
+        'observaciones',hpl.observaciones
+      ) ORDER BY hpl.fecha_produccion DESC,hpl.created_at DESC)
+      FROM produccion_leche hpl
+      WHERE hpl.id_vaca=a.id_animal AND hpl.deleted_at IS NULL),'[]'::jsonb) historial_produccion
      FROM animal a
      JOIN especie e ON e.id_especie=a.id_especie
+     JOIN origen_animal oa ON oa.id_origen=a.id_origen
      JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
      LEFT JOIN condicion_animal coa ON coa.codigo=a.estado
      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
