@@ -4,6 +4,9 @@ import { asyncHandler } from '../../core/async-handler.js';
 import { noContent, ok } from '../../core/http.js';
 import { routeParam } from '../../core/route-param.js';
 import { pool } from '../../database/pool.js';
+import { transaction } from '../../database/transaction.js';
+import { emitNotification } from './notifications.service.js';
+import { dispatchPendingPushNotifications } from './notifications.push.js';
 
 export const notificationsRouter = Router();
 
@@ -99,6 +102,24 @@ notificationsRouter.post('/dispositivos', asyncHandler(async (req,res) => {
     RETURNING id_dispositivo,plataforma,nombre_dispositivo,version_app,activo`,
   [req.user!.id,input.token,input.plataforma,input.nombre_dispositivo ?? null,input.version_app ?? null])).rows[0];
   return ok(res,row);
+}));
+
+notificationsRouter.get('/dispositivos', asyncHandler(async (req,res) => ok(res,(await pool.query(
+  `SELECT id_dispositivo,plataforma,nombre_dispositivo,version_app,activo,ultimo_uso_at,created_at
+   FROM notificacion_dispositivo
+   WHERE id_usuario=$1
+   ORDER BY activo DESC,ultimo_uso_at DESC`,[req.user!.id],
+)).rows)));
+
+notificationsRouter.post('/prueba', asyncHandler(async (req,res) => {
+  const notificationId = await transaction(client=>emitNotification(client,{
+    tipo:'PRUEBA_FIREBASE',categoria:'SISTEMA',prioridad:'IMPORTANTE',
+    titulo:'Firebase conectado',
+    mensaje:'Las notificaciones push de SGB están funcionando correctamente.',
+    ruta:'/',usuarios:[req.user!.id],creadoPor:req.user!.id,
+  }),req.user!.id);
+  void dispatchPendingPushNotifications().catch(error=>console.error('No se pudo enviar la notificación de prueba:',error));
+  return ok(res,{id_notificacion:notificationId});
 }));
 
 notificationsRouter.delete('/dispositivos/:id', asyncHandler(async (req,res) => {
