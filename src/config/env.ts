@@ -32,7 +32,12 @@ const envSchema = z.object({
   BOOTSTRAP_ADMIN_NAMES: z.string().default('Administrador'),
   BOOTSTRAP_ADMIN_LASTNAMES: z.string().default('M&M'),
   FIREBASE_PROJECT_ID: z.string().trim().min(1).optional(),
-  PUSH_DISPATCH_INTERVAL_MS: z.coerce.number().int().min(3000).max(60000).default(10000)
+  PUSH_DISPATCH_INTERVAL_MS: z.coerce.number().int().min(3000).max(60000).default(10000),
+  CALCULATED_ALERT_INTERVAL_MS: z.coerce.number().int().min(300000).max(86400000).default(3600000),
+  TICK_MINIMUM_REST_DAYS: z.coerce.number().int().min(30).max(70).default(45),
+  TICK_REDUCED_RISK_DAYS: z.coerce.number().int().min(61).max(180).default(100),
+  CLEANING_ALERT_DAYS: z.coerce.number().int().min(15).max(365).default(60),
+  PRODUCTION_VARIATION_ALERT_PERCENT: z.coerce.number().min(5).max(100).default(20)
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -12,6 +12,7 @@ import { assertPermission, requirePermission } from '../../middleware/permission
 import { buildInsert, buildUpdate } from '../shared/sql.js';
 import { deleteCloudinaryImage, uploadAnimalImage } from '../../services/cloudinary.service.js';
 import { assertAnimalOperationAllowed, type AnimalOperationCode } from '../../services/animal-operation-policy.js';
+import { notifyBirth, notifyRecordCreated, notifyTankProduction } from '../notifications/business-notifications.service.js';
 
 type Def = {
   table: string;
@@ -322,7 +323,12 @@ recordsRouter.get('/produccion-tanque',requirePermission('PRODUCCION_CONSULTAR')
 
 recordsRouter.post('/produccion-tanque',requirePermission('PRODUCCION_ADMINISTRAR'),asyncHandler(async(req,res)=>{
   const input=tankSchema.parse(req.body);
-  return created(res,(await pool.query(buildInsert('produccion_tanque',{...input,referencia_externa:input.referencia_externa??null,observaciones:input.observaciones??null,registrado_por:req.user!.id}))).rows[0]);
+  const row=await transaction(async client=>{
+    const saved=(await client.query(buildInsert('produccion_tanque',{...input,referencia_externa:input.referencia_externa??null,observaciones:input.observaciones??null,registrado_por:req.user!.id}))).rows[0];
+    await notifyTankProduction(client,saved,req.user!.id);
+    return saved;
+  },req.user!.id);
+  return created(res,row);
 }));
 
 recordsRouter.patch('/produccion-tanque/:id',requirePermission('PRODUCCION_ADMINISTRAR'),asyncHandler(async(req,res)=>{
@@ -370,6 +376,7 @@ recordsRouter.post('/:module', asyncHandler(async (req, res) => {
       const fechaInicio=await validateLactation(client,input);
       const saved=(await client.query(buildInsert('lactancia',{...input,fecha_inicio:fechaInicio,registrado_por:req.user!.id}))).rows[0];
       if(input.en_ordeno)await client.query('UPDATE animal SET en_ordeno=TRUE,updated_at=NOW() WHERE id_animal=$1',[input.id_vaca]);
+      await notifyRecordCreated(client,'lactancias',saved,req.user!.id);
       return saved;
     },req.user!.id);
     return created(res,row);
@@ -393,6 +400,7 @@ recordsRouter.post('/:module', asyncHandler(async (req, res) => {
         await client.query("UPDATE prenez SET estado='CANCELADA',updated_at=NOW() WHERE id_prenez=$1",[data.id_prenez]);
         await client.query("UPDATE proximo_parto SET estado='CANCELADO',updated_at=NOW() WHERE id_prenez=$1 AND deleted_at IS NULL",[data.id_prenez]);
       }
+      await notifyRecordCreated(client,'abortos',saved,req.user!.id);
       return saved;
     },req.user!.id);
     return created(res,row);
@@ -411,11 +419,16 @@ recordsRouter.post('/:module', asyncHandler(async (req, res) => {
       const condition=await linkedHealthCondition(client,data.id_condicion_salud as string|null|undefined,animalId);
       const saved=(await client.query(buildInsert(d.table,{...data,id_condicion_salud:data.id_condicion_salud??null,registrado_por:req.user!.id}))).rows[0];
       if(condition)await client.query("UPDATE condicion_salud SET estado='EN_TRATAMIENTO',updated_at=NOW() WHERE id_condicion_salud=$1",[condition.id_condicion_salud]);
+      await notifyRecordCreated(client,'tratamientos',saved,req.user!.id);
       return saved;
     },req.user!.id);
     return created(res,row);
   }
-  const row = (await pool.query(buildInsert(d.table, { ...data, registrado_por: req.user!.id }))).rows[0];
+  const row=await transaction(async client=>{
+    const saved=(await client.query(buildInsert(d.table,{...data,registrado_por:req.user!.id}))).rows[0];
+    await notifyRecordCreated(client,routeParam(req.params.module,'module'),saved,req.user!.id);
+    return saved;
+  },req.user!.id);
   return created(res, row);
 }));
 recordsRouter.patch('/:module/:id', asyncHandler(async (req, res) => {
@@ -767,7 +780,9 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
         [pregnancy.id_prenez],
       );
 
-      return { ...parto, crias: createdChildren };
+      const completed={ ...parto, crias: createdChildren };
+      await notifyBirth(client,completed,req.user!.id);
+      return completed;
     }, req.user!.id);
     return created(res, result);
   } catch (error) {

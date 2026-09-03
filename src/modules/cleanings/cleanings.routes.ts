@@ -10,6 +10,7 @@ import { requirePermission } from '../../middleware/permission.js';
 import { buildInsert } from '../shared/sql.js';
 import { deleteCloudinaryImage } from '../../services/cloudinary.service.js';
 import { deleteRecordImage, recordImageUpload, requestFiles, saveRecordImages } from '../shared/record-images.js';
+import { notifyCleaning } from '../notifications/business-notifications.service.js';
 
 const productSchema = z.object({
   id_producto: z.string().uuid(),
@@ -152,6 +153,7 @@ cleaningsRouter.post('/', requirePermission('LIMPIEZA_ADMINISTRAR'), asyncHandle
     for (const operator of operadores) {
       await client.query(buildInsert('limpieza_potrero_operador', { ...operator, id_limpieza: cleaning.id_limpieza }));
     }
+    await notifyCleaning(client,cleaning,req.user!.id);
     return cleaning;
   }, req.user!.id);
   return created(res, result);

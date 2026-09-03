@@ -11,6 +11,7 @@ import { assertAnimalOperationAllowed, type AnimalOperationCode } from '../../se
 import { buildInsert, type Queryable } from '../shared/sql.js';
 import { deleteCloudinaryImage } from '../../services/cloudinary.service.js';
 import { deleteRecordImage, recordImageUpload, requestFiles, saveRecordImages } from '../shared/record-images.js';
+import { assessPastureTickRisk, notifyMovementApplied } from '../notifications/business-notifications.service.js';
 
 const movementKind = z.enum(['UBICACION', 'GRUPO', 'PROPIEDAD', 'COMBINADO']);
 const MAIN_PROPERTY = 'PROPIEDAD_PRINCIPAL';
@@ -579,7 +580,13 @@ movementsRouter.post('/:id/aplicar', requirePermission('MOVIMIENTO_CREAR'), asyn
   const row = await transaction(async (client) => {
     const input = await loadMovementForValidation(client, id);
     const validation = await validateMovementSelection(client, input);
-    return applyValidatedMovement(client, id, input, validation);
+    const tickRisk=await assessPastureTickRisk(client,validation.effectiveLocationId,input.fecha_movimiento);
+    const applied=await applyValidatedMovement(client,id,input,validation);
+    await notifyMovementApplied(client,{
+      id,tipo:input.tipo_movimiento,fecha:input.fecha_movimiento,cantidad:applied.cantidad,
+      destinoId:validation.effectiveLocationId,actor:req.user!.id,tickRisk,
+    });
+    return applied;
   }, req.user!.id);
   return ok(res, row);
 }));

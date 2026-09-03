@@ -9,6 +9,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../../core/errors
 import { requirePermission } from '../../middleware/permission.js';
 import { buildInsert } from '../shared/sql.js';
 import { cache } from '../../services/cache.service.js';
+import { notifyPurchase } from '../notifications/business-notifications.service.js';
 
 const purchasedAnimal=z.object({
   codigo_arete:z.string().trim().max(60).nullable().optional(),
@@ -107,7 +108,9 @@ purchasesRouter.post('/',requirePermission('COMPRA_ADMINISTRAR'),asyncHandler(as
         valor_unitario:input.valor_unitario,valor_total:total,moneda:input.moneda.toUpperCase(),
         observaciones:input.observaciones??null,registrado_por:req.user!.id,
       }))).rows[0];
-      return {...purchase,animal:input.animal?.nombre??null};
+      const completed={...purchase,animal:input.animal?.nombre??null};
+      await notifyPurchase(client,completed,req.user!.id);
+      return completed;
     },req.user!.id);
     cache.forgetModuleVersion('compras');
     cache.forgetModuleVersion('animales');

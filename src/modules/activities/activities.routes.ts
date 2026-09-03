@@ -10,6 +10,7 @@ import { requirePermission } from '../../middleware/permission.js';
 import { deleteCloudinaryImage } from '../../services/cloudinary.service.js';
 import { buildInsert } from '../shared/sql.js';
 import { deleteRecordImage, recordImageUpload, requestFiles, saveRecordImages } from '../shared/record-images.js';
+import { notifyActivity } from '../notifications/business-notifications.service.js';
 
 const schema=z.object({
   id_tipo_actividad:z.string().uuid(),
@@ -89,6 +90,7 @@ activitiesRouter.post('/',requirePermission('ACTIVIDAD_ADMINISTRAR'),asyncHandle
     }))).rows[0];
     await replaceAnimals(client,activity.id_actividad,input.id_animales);
     await applyCurrentMark(client,input.id_animales,markId);
+    await notifyActivity(client,activity,[...new Set(input.id_animales)].length,req.user!.id);
     return activity;
   },req.user!.id);
   return created(res,row);

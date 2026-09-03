@@ -9,6 +9,7 @@ import { NotFoundError, ValidationError } from '../../core/errors.js';
 import { requirePermission } from '../../middleware/permission.js';
 import { buildInsert } from '../shared/sql.js';
 import type { Queryable } from '../shared/sql.js';
+import { notifyHealthCondition } from '../notifications/business-notifications.service.js';
 
 const schema=z.object({
   id_animal:z.string().uuid(),
@@ -45,9 +46,11 @@ healthRouter.post('/',requirePermission('SANIDAD_ADMINISTRAR'),asyncHandler(asyn
   const input=schema.parse(req.body);
   const row=await transaction(async client=>{
     await assertReferences(client,input.id_animal,input.id_tipo_condicion_salud);
-    return (await client.query(buildInsert('condicion_salud',{
+    const saved=(await client.query(buildInsert('condicion_salud',{
       ...input,id_tipo_condicion_salud:input.id_tipo_condicion_salud??null,estado:'POR_RESOLVER',registrado_por:req.user!.id,
     }))).rows[0];
+    await notifyHealthCondition(client,saved,req.user!.id);
+    return saved;
   },req.user!.id);
   return created(res,row);
 }));
@@ -79,12 +82,16 @@ healthRouter.patch('/:id',requirePermission('SANIDAD_ADMINISTRAR'),asyncHandler(
 
 healthRouter.patch('/:id/resolver',requirePermission('SANIDAD_ADMINISTRAR'),asyncHandler(async(req,res)=>{
   const input=z.object({fecha_resolucion:z.string().date()}).parse(req.body);
-  const row=(await pool.query(
-    `UPDATE condicion_salud SET estado='RESUELTA',fecha_resolucion=$2,updated_at=NOW()
-     WHERE id_condicion_salud=$1 AND deleted_at IS NULL AND estado<>'RESUELTA' AND $2::date>=fecha_deteccion RETURNING *`,
-    [routeParam(req.params.id,'id'),input.fecha_resolucion],
-  )).rows[0];
-  if(!row)throw new ValidationError('La fecha de resolución debe ser posterior a la detección.');
+  const row=await transaction(async client=>{
+    const saved=(await client.query(
+      `UPDATE condicion_salud SET estado='RESUELTA',fecha_resolucion=$2,updated_at=NOW()
+       WHERE id_condicion_salud=$1 AND deleted_at IS NULL AND estado<>'RESUELTA' AND $2::date>=fecha_deteccion RETURNING *`,
+      [routeParam(req.params.id,'id'),input.fecha_resolucion],
+    )).rows[0];
+    if(!saved)throw new ValidationError('La fecha de resolución debe ser posterior a la detección.');
+    await notifyHealthCondition(client,saved,req.user!.id,true);
+    return saved;
+  },req.user!.id);
   return ok(res,row);
 }));
 

@@ -10,6 +10,7 @@ import { requirePermission } from '../../middleware/permission.js';
 import { cache } from '../../services/cache.service.js';
 import { assertAnimalOperationAllowed } from '../../services/animal-operation-policy.js';
 import { buildInsert } from '../shared/sql.js';
+import { notifyAnimalSale, notifyProductSale } from '../notifications/business-notifications.service.js';
 
 const detailSchema = z.object({
   id_animal: z.string().uuid(),
@@ -191,6 +192,7 @@ salesRouter.post('/', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async
       );
     }
 
+    await notifyAnimalSale(client,row,animales.length,req.user!.id);
     return row;
   }, req.user!.id);
 
@@ -254,6 +256,7 @@ salesRouter.post('/productos', requirePermission('VENTA_ADMINISTRAR'), asyncHand
         observaciones: detail.observaciones ?? null,
       }));
     }
+    await notifyProductSale(client,row,details.length,req.user!.id);
     return { ...row, productos: details };
   }, req.user!.id);
 
