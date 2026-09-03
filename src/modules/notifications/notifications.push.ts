@@ -16,6 +16,7 @@ interface PendingRecipient {
 
 let running = false;
 let timer: NodeJS.Timeout | null = null;
+let scheduledDispatch: NodeJS.Timeout | null = null;
 
 async function claimPending(limit = 50): Promise<PendingRecipient[]> {
   const client = await pool.connect();
@@ -140,6 +141,15 @@ export async function dispatchPendingPushNotifications() {
   }
 }
 
+export function scheduleNotificationPushDispatch(delayMs = 750) {
+  if (scheduledDispatch) clearTimeout(scheduledDispatch);
+  scheduledDispatch = setTimeout(() => {
+    scheduledDispatch = null;
+    void dispatchPendingPushNotifications().catch(error=>console.error('Error al despachar notificación push:',error));
+  },delayMs);
+  scheduledDispatch.unref();
+}
+
 export function startNotificationPushWorker() {
   if (timer) return () => undefined;
   void dispatchPendingPushNotifications().catch(error=>console.error('Error al despachar notificaciones push:',error));
@@ -148,6 +158,8 @@ export function startNotificationPushWorker() {
   },env.PUSH_DISPATCH_INTERVAL_MS);
   timer.unref();
   return () => {
+    if (scheduledDispatch) clearTimeout(scheduledDispatch);
+    scheduledDispatch = null;
     if (timer) clearInterval(timer);
     timer = null;
   };

@@ -580,7 +580,9 @@ movementsRouter.post('/:id/aplicar', requirePermission('MOVIMIENTO_CREAR'), asyn
   const row = await transaction(async (client) => {
     const input = await loadMovementForValidation(client, id);
     const validation = await validateMovementSelection(client, input);
-    const tickRisk=await assessPastureTickRisk(client,validation.effectiveLocationId,input.fecha_movimiento);
+    const tickRisk=input.tipo_movimiento==='UBICACION'
+      ? await assessPastureTickRisk(client,validation.effectiveLocationId,input.fecha_movimiento)
+      : null;
     const applied=await applyValidatedMovement(client,id,input,validation);
     await notifyMovementApplied(client,{
       id,tipo:input.tipo_movimiento,fecha:input.fecha_movimiento,cantidad:applied.cantidad,

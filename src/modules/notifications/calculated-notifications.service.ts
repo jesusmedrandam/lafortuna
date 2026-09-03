@@ -3,6 +3,7 @@ import { env } from '../../config/env.js';
 import { pool } from '../../database/pool.js';
 import { transaction } from '../../database/transaction.js';
 import { emitNotification } from './notifications.service.js';
+import { scheduleNotificationPushDispatch } from './notifications.push.js';
 
 type Row = Record<string, unknown>;
 
@@ -201,7 +202,7 @@ export async function generateCalculatedNotifications() {
   if (running) return 0;
   running = true;
   try {
-    return await transaction(async client => {
+    const result=await transaction(async client => {
       const lock = await client.query(`SELECT pg_try_advisory_xact_lock(78128433) acquired`);
       if (!lock.rows[0]?.acquired) return 0;
       const dates = await currentEcuadorDate(client);
@@ -212,6 +213,8 @@ export async function generateCalculatedNotifications() {
       await notifyTreatmentDates(client, dates.hoy);
       return 1;
     });
+    if(result)scheduleNotificationPushDispatch();
+    return result;
   } finally {
     running = false;
   }

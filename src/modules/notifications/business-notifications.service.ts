@@ -1,6 +1,7 @@
 import { env } from '../../config/env.js';
 import type { Queryable } from '../shared/sql.js';
 import { emitNotification, type NotificationEvent } from './notifications.service.js';
+import { scheduleNotificationPushDispatch } from './notifications.push.js';
 
 type Row = Record<string, unknown>;
 type Priority = NonNullable<NotificationEvent['prioridad']>;
@@ -51,7 +52,7 @@ async function emitBusinessNotification(
   event: Omit<NotificationEvent, 'entidadId' | 'creadoPor' | 'claveDedupe'> & { dedupe: string },
 ) {
   const { dedupe, ...notification } = event;
-  return emitNotification(database, {
+  const notificationId=await emitNotification(database, {
     ...notification,
     titulo: notification.titulo.slice(0, 160),
     mensaje: notification.mensaje.slice(0, 700),
@@ -59,6 +60,8 @@ async function emitBusinessNotification(
     creadoPor: actor,
     claveDedupe: `EVENTO:${dedupe}:${entityId}`,
   });
+  if(notificationId)scheduleNotificationPushDispatch();
+  return notificationId;
 }
 
 export async function notifyRecordCreated(
@@ -297,23 +300,28 @@ export async function assessPastureTickRisk(
 }
 
 function tickMessage(risk: TickRisk): { title: string; message: string; priority: Priority; level: string } {
+  const earliestHatch = Math.min(env.TICK_EARLIEST_HATCH_DAYS, env.TICK_MINIMUM_REST_DAYS - 1);
   const minimumRest = env.TICK_MINIMUM_REST_DAYS;
   const reducedRisk = Math.max(env.TICK_REDUCED_RISK_DAYS, minimumRest + 1);
   if (risk.animales_presentes > 0) return {
     title: `Riesgo alto de garrapata: ${risk.nombre}`, priority: 'URGENTE', level: 'ALTO',
-    message: `${risk.nombre} ya estaba ocupado y no tuvo descanso verificable. Los animales que ingresan podrían infestarse; inspeccione y aplique el manejo sanitario definido por su veterinario.`,
+    message: `${risk.nombre} ya está ocupado; no corresponde a un potrero en descanso. Si se trata de una rotación, revise la selección antes de ingresar el grupo.`,
   };
   if (risk.dias_descanso === null) return {
     title: `Riesgo alto de garrapata: ${risk.nombre}`, priority: 'URGENTE', level: 'ALTO',
     message: `No existe información suficiente para comprobar el descanso de ${risk.nombre}. Considere que los animales podrían infestarse y realice inspección de garrapatas.`,
   };
+  if (risk.dias_descanso < earliestHatch) return {
+    title: `Fase previa a la eclosión: ${risk.nombre}`, priority: 'IMPORTANTE', level: 'PRE_ECLOSION',
+    message: `${risk.nombre} lleva ${risk.dias_descanso} día(s) desocupado. Está en la fase inicial: es probable que las larvas todavía no hayan emergido, aunque pueden quedar huevos que eclosionen mientras el grupo permanezca allí.`,
+  };
   if (risk.dias_descanso < minimumRest) return {
     title: `Riesgo alto de garrapata: ${risk.nombre}`, priority: 'URGENTE', level: 'ALTO',
-    message: `${risk.nombre} descansó ${risk.dias_descanso} día(s): aún no cumple la referencia mínima preventiva de ${minimumRest} días. Los animales podrían infestarse.`,
+    message: `${risk.nombre} lleva ${risk.dias_descanso} día(s) desocupado y está dentro de la ventana en que pueden comenzar a emerger larvas. Los animales podrían infestarse.`,
   };
   if (risk.dias_descanso < reducedRisk) return {
     title: `Riesgo moderado de garrapata: ${risk.nombre}`, priority: 'IMPORTANTE', level: 'MODERADO',
-    message: `${risk.nombre} descansó ${risk.dias_descanso} día(s). Superó la referencia mínima de ${minimumRest} días, pero todavía no los ${reducedRisk} días usados como margen ambiental conservador.`,
+    message: `${risk.nombre} descansó ${risk.dias_descanso} día(s). Un descanso de ${minimumRest} días puede reducir la carga, pero todavía pueden persistir larvas capaces de infestar hasta el margen conservador de ${reducedRisk} días.`,
   };
   return {
     title: `Riesgo reducido de garrapata: ${risk.nombre}`, priority: 'INFO', level: 'REDUCIDO',
@@ -323,18 +331,41 @@ function tickMessage(risk: TickRisk): { title: string; message: string; priority
 
 export async function notifyMovementApplied(database: Queryable, input: MovementNotice) {
   const context = (await database.query(
-    `SELECT m.tipo_movimiento,u1.nombre origen,COALESCE(u2.nombre,ud.nombre) destino,g2.nombre grupo_destino
+    `SELECT m.tipo_movimiento,u1.nombre ubicacion_origen,COALESCE(u2.nombre,ud.nombre) ubicacion_destino,
+       g1.nombre grupo_origen,g2.nombre grupo_destino,p1.nombre propiedad_origen,p2.nombre propiedad_destino,
+       (SELECT STRING_AGG(DISTINCT anterior.nombre,', ' ORDER BY anterior.nombre)
+        FROM movimiento_animal_detalle d
+        JOIN grupo anterior ON anterior.id_grupo=d.id_grupo_anterior
+        WHERE d.id_movimiento=m.id_movimiento AND d.seleccionado=TRUE AND d.deleted_at IS NULL) grupos_anteriores
      FROM movimiento_animal m
      LEFT JOIN ubicacion u1 ON u1.id_ubicacion=m.id_ubicacion_origen
      LEFT JOIN ubicacion u2 ON u2.id_ubicacion=m.id_ubicacion_destino
      LEFT JOIN ubicacion ud ON ud.id_ubicacion=$2
+     LEFT JOIN grupo g1 ON g1.id_grupo=m.id_grupo_origen
      LEFT JOIN grupo g2 ON g2.id_grupo=m.id_grupo_destino
+     LEFT JOIN propiedad_ganadera p1 ON p1.id_propiedad=m.id_propiedad_origen
+     LEFT JOIN propiedad_ganadera p2 ON p2.id_propiedad=m.id_propiedad_destino
      WHERE m.id_movimiento=$1`, [input.id,input.destinoId],
   )).rows[0] as Row | undefined;
+  const kind=text(context?.tipo_movimiento,input.tipo);
+  let title='Movimiento aplicado';
+  let message=`${input.cantidad} animal(es) trasladado(s).`;
+  if(kind==='UBICACION') {
+    title='Cambio de potrero aplicado';
+    message=`${input.cantidad} animal(es) · ${text(context?.ubicacion_origen,'potrero de origen no indicado')} → ${text(context?.ubicacion_destino,'potrero de destino no indicado')}.`;
+  } else if(kind==='GRUPO') {
+    title='Cambio de grupo aplicado';
+    message=`${input.cantidad} animal(es) · ${text(context?.grupos_anteriores ?? context?.grupo_origen,'grupo de origen no indicado')} → ${text(context?.grupo_destino,'grupo de destino no indicado')}.`;
+  } else if(kind==='PROPIEDAD') {
+    title='Traslado de propiedad aplicado';
+    message=`${input.cantidad} animal(es) · ${text(context?.propiedad_origen,'propiedad de origen no indicada')} → ${text(context?.propiedad_destino,'propiedad de destino no indicada')}.`;
+  } else if(kind==='COMBINADO') {
+    title='Traslado combinado aplicado';
+    message=`${input.cantidad} animal(es) · ${text(context?.propiedad_origen,'propiedad de origen no indicada')} → ${text(context?.propiedad_destino,'propiedad de destino no indicada')} · grupo ${text(context?.grupo_destino,'no indicado')}.`;
+  }
   await emitBusinessNotification(database, input.actor, input.id, {
     dedupe: 'MOVIMIENTO', tipo: 'MOVIMIENTO_APLICADO', categoria: 'MOVIMIENTOS', prioridad: 'INFO',
-    titulo: 'Movimiento aplicado',
-    mensaje: `${input.cantidad} animal(es) · ${text(context?.origen, 'origen no indicado')} → ${text(context?.destino ?? context?.grupo_destino, 'destino no indicado')}.`,
+    titulo: title, mensaje: message,
     permiso: 'MOVIMIENTO_CONSULTAR', entidadTipo: 'MOVIMIENTO', ruta: '/movimientos',
     datos: { tipo: input.tipo, fecha: input.fecha, cantidad: input.cantidad },
   });
@@ -349,6 +380,7 @@ export async function notifyMovementApplied(database: Queryable, input: Movement
       id_ubicacion: input.destinoId,
       dias_descanso: input.tickRisk.dias_descanso,
       nivel_riesgo: risk.level,
+      referencia_inicio_eclosion_dias: Math.min(env.TICK_EARLIEST_HATCH_DAYS, env.TICK_MINIMUM_REST_DAYS - 1),
       referencia_descanso_minimo_dias: env.TICK_MINIMUM_REST_DAYS,
       referencia_riesgo_reducido_dias: Math.max(env.TICK_REDUCED_RISK_DAYS, env.TICK_MINIMUM_REST_DAYS + 1),
       criterio: 'Regla preventiva para clima tropical cálido-húmedo; no sustituye inspección ni criterio veterinario.',
