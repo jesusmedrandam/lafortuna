@@ -30,7 +30,9 @@ const envSchema = z.object({
   BOOTSTRAP_ADMIN_EMAIL: z.string().email().optional(),
   BOOTSTRAP_ADMIN_PASSWORD: z.string().min(8).optional(),
   BOOTSTRAP_ADMIN_NAMES: z.string().default('Administrador'),
-  BOOTSTRAP_ADMIN_LASTNAMES: z.string().default('M&M')
+  BOOTSTRAP_ADMIN_LASTNAMES: z.string().default('M&M'),
+  FIREBASE_PROJECT_ID: z.string().trim().min(1).optional(),
+  PUSH_DISPATCH_INTERVAL_MS: z.coerce.number().int().min(3000).max(60000).default(10000)
 });
 
 const parsed = envSchema.safeParse(process.env);

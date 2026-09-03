@@ -31,6 +31,7 @@ import { settingsRouter } from './modules/settings/settings.routes.js';
 import { purchasesRouter } from './modules/purchases/purchases.routes.js';
 import { activitiesRouter } from './modules/activities/activities.routes.js';
 import { healthRouter } from './modules/health/health.routes.js';
+import { notificationsRouter } from './modules/notifications/notifications.routes.js';
 
 export const app=express();
 app.set('trust proxy',1);
@@ -74,6 +75,7 @@ api.use('/compras',purchasesRouter);
 api.use('/actividades',activitiesRouter);
 api.use('/condiciones-salud',healthRouter);
 api.use('/configuracion',settingsRouter);
+api.use('/notificaciones',notificationsRouter);
 app.use(env.API_PREFIX,api);
 app.use(notFoundHandler);
 app.use(errorHandler);
