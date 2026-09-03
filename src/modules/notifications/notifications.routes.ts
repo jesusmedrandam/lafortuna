@@ -10,6 +10,11 @@ import { dispatchPendingPushNotifications } from './notifications.push.js';
 
 export const notificationsRouter = Router();
 
+const notificationCategories = [
+  'ANIMALES','MOVIMIENTOS','PESAJES','SANIDAD','PRODUCCION','REPRODUCCION',
+  'MANTENIMIENTO','ACTIVIDADES','VENTAS','COMPRAS','SISTEMA',
+] as const;
+
 const listSchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(25),
   solo_no_leidas: z.enum(['true','false','1','0']).optional(),
@@ -25,10 +30,12 @@ const deviceSchema = z.object({
 
 const preferenceSchema = z.object({
   preferencias: z.array(z.object({
-    categoria: z.string().trim().min(1).max(40),
+    categoria: z.enum(notificationCategories),
     mostrar_en_buzon: z.boolean(),
     enviar_push: z.boolean(),
-  })).max(50),
+  }).refine(item => item.mostrar_en_buzon || !item.enviar_push, {
+    message: 'El envío push también requiere conservar el aviso en el buzón.',
+  })).max(notificationCategories.length),
 });
 
 notificationsRouter.get('/', asyncHandler(async (req,res) => {
@@ -72,21 +79,31 @@ notificationsRouter.post('/leer-todas', asyncHandler(async (req,res) => {
   return ok(res,{actualizadas:result.rowCount ?? 0});
 }));
 
-notificationsRouter.get('/preferencias', asyncHandler(async (req,res) => ok(res,(await pool.query(
-  `SELECT categoria,mostrar_en_buzon,enviar_push
-   FROM notificacion_preferencia WHERE id_usuario=$1 ORDER BY categoria`,[req.user!.id],
-)).rows)));
+notificationsRouter.get('/preferencias', asyncHandler(async (req,res) => {
+  const stored = (await pool.query<{
+    categoria: typeof notificationCategories[number];
+    mostrar_en_buzon: boolean;
+    enviar_push: boolean;
+  }>(`SELECT categoria,mostrar_en_buzon,enviar_push
+     FROM notificacion_preferencia WHERE id_usuario=$1`,[req.user!.id])).rows;
+  const byCategory = new Map(stored.map(item => [item.categoria,item]));
+  return ok(res,notificationCategories.map(categoria => byCategory.get(categoria) ?? {
+    categoria,mostrar_en_buzon:true,enviar_push:true,
+  }));
+}));
 
 notificationsRouter.put('/preferencias', asyncHandler(async (req,res) => {
   const input = preferenceSchema.parse(req.body);
-  for (const item of input.preferencias) {
-    await pool.query(`INSERT INTO notificacion_preferencia(id_usuario,categoria,mostrar_en_buzon,enviar_push)
-      VALUES($1,$2,$3,$4)
-      ON CONFLICT(id_usuario,categoria) DO UPDATE SET
-        mostrar_en_buzon=EXCLUDED.mostrar_en_buzon,
-        enviar_push=EXCLUDED.enviar_push,updated_at=NOW()`,
-    [req.user!.id,item.categoria,item.mostrar_en_buzon,item.enviar_push]);
-  }
+  await transaction(async (client) => {
+    for (const item of input.preferencias) {
+      await client.query(`INSERT INTO notificacion_preferencia(id_usuario,categoria,mostrar_en_buzon,enviar_push)
+        VALUES($1,$2,$3,$4)
+        ON CONFLICT(id_usuario,categoria) DO UPDATE SET
+          mostrar_en_buzon=EXCLUDED.mostrar_en_buzon,
+          enviar_push=EXCLUDED.enviar_push,updated_at=NOW()`,
+      [req.user!.id,item.categoria,item.mostrar_en_buzon,item.enviar_push]);
+    }
+  },req.user!.id);
   return ok(res,{actualizadas:input.preferencias.length});
 }));
 

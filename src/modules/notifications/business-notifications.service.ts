@@ -12,6 +12,10 @@ type TickRisk = {
   animales_presentes: number;
   dias_descanso: number | null;
   descanso_desde: string | null;
+  alertas_garrapata: boolean;
+  inicio_eclosion_dias: number;
+  descanso_minimo_dias: number;
+  riesgo_reducido_dias: number;
 };
 
 type MovementNotice = {
@@ -277,6 +281,10 @@ export async function assessPastureTickRisk(
 ): Promise<TickRisk | null> {
   const row = (await database.query(
     `SELECT p.id_potrero,u.nombre,
+       COALESCE(cp.alertas_garrapata,TRUE) alertas_garrapata,
+       COALESCE(cp.inicio_eclosion_dias,$3)::int inicio_eclosion_dias,
+       COALESCE(cp.descanso_minimo_dias,$4)::int descanso_minimo_dias,
+       COALESCE(cp.riesgo_reducido_dias,$5)::int riesgo_reducido_dias,
        (SELECT COUNT(*)::int FROM animal a
         WHERE a.id_ubicacion_actual=u.id_ubicacion AND a.estado='ACTIVO' AND a.deleted_at IS NULL) animales_presentes,
        COALESCE((SELECT MAX(h.fecha_hasta)::date FROM animal_ubicacion_historial h
@@ -291,18 +299,23 @@ export async function assessPastureTickRisk(
          ELSE GREATEST(0,$2::date-COALESCE((SELECT MAX(h.fecha_hasta)::date FROM animal_ubicacion_historial h
            WHERE h.id_ubicacion=u.id_ubicacion AND h.fecha_hasta IS NOT NULL AND h.deleted_at IS NULL),
            p.fecha_ultimo_descanso::date))::int END dias_descanso
-     FROM potrero p JOIN ubicacion u ON u.id_ubicacion=p.id_ubicacion
+     FROM potrero p
+     JOIN ubicacion u ON u.id_ubicacion=p.id_ubicacion
+     LEFT JOIN configuracion_propiedad cp ON cp.id_propiedad=u.id_propiedad
      WHERE u.id_ubicacion=$1 AND u.tipo='POTRERO' AND u.activo=TRUE
        AND u.deleted_at IS NULL AND p.deleted_at IS NULL`,
-    [destinationLocationId, movementDate],
+    [
+      destinationLocationId,movementDate,env.TICK_EARLIEST_HATCH_DAYS,
+      env.TICK_MINIMUM_REST_DAYS,env.TICK_REDUCED_RISK_DAYS,
+    ],
   )).rows[0] as TickRisk | undefined;
-  return row ?? null;
+  return row?.alertas_garrapata ? row : null;
 }
 
 function tickMessage(risk: TickRisk): { title: string; message: string; priority: Priority; level: string } {
-  const earliestHatch = Math.min(env.TICK_EARLIEST_HATCH_DAYS, env.TICK_MINIMUM_REST_DAYS - 1);
-  const minimumRest = env.TICK_MINIMUM_REST_DAYS;
-  const reducedRisk = Math.max(env.TICK_REDUCED_RISK_DAYS, minimumRest + 1);
+  const minimumRest = number(risk.descanso_minimo_dias);
+  const earliestHatch = Math.min(number(risk.inicio_eclosion_dias), minimumRest - 1);
+  const reducedRisk = Math.max(number(risk.riesgo_reducido_dias), minimumRest + 1);
   if (risk.animales_presentes > 0) return {
     title: `Riesgo alto de garrapata: ${risk.nombre}`, priority: 'URGENTE', level: 'ALTO',
     message: `${risk.nombre} ya está ocupado; no corresponde a un potrero en descanso. Si se trata de una rotación, revise la selección antes de ingresar el grupo.`,
@@ -380,9 +393,9 @@ export async function notifyMovementApplied(database: Queryable, input: Movement
       id_ubicacion: input.destinoId,
       dias_descanso: input.tickRisk.dias_descanso,
       nivel_riesgo: risk.level,
-      referencia_inicio_eclosion_dias: Math.min(env.TICK_EARLIEST_HATCH_DAYS, env.TICK_MINIMUM_REST_DAYS - 1),
-      referencia_descanso_minimo_dias: env.TICK_MINIMUM_REST_DAYS,
-      referencia_riesgo_reducido_dias: Math.max(env.TICK_REDUCED_RISK_DAYS, env.TICK_MINIMUM_REST_DAYS + 1),
+      referencia_inicio_eclosion_dias: input.tickRisk.inicio_eclosion_dias,
+      referencia_descanso_minimo_dias: input.tickRisk.descanso_minimo_dias,
+      referencia_riesgo_reducido_dias: input.tickRisk.riesgo_reducido_dias,
       criterio: 'Regla preventiva para clima tropical cálido-húmedo; no sustituye inspección ni criterio veterinario.',
     },
   });
