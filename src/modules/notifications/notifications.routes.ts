@@ -53,7 +53,8 @@ notificationsRouter.get('/', asyncHandler(async (req,res) => {
     pool.query(`SELECT
       n.id_notificacion,n.tipo,n.categoria,n.prioridad,n.titulo,n.mensaje,
       n.entidad_tipo,n.entidad_id,n.ruta,n.datos,n.created_at,
-      nu.leida_at,(nu.leida_at IS NULL) AS no_leida
+      nu.leida_at,(nu.leida_at IS NULL) AS no_leida,
+      nu.push_estado,nu.push_intentos,nu.push_enviada_at,nu.push_ultimo_error
     FROM notificacion_usuario nu
     JOIN notificacion n ON n.id_notificacion=nu.id_notificacion
     WHERE ${where.join(' AND ')}
@@ -129,12 +130,21 @@ notificationsRouter.get('/dispositivos', asyncHandler(async (req,res) => ok(res,
 )).rows)));
 
 notificationsRouter.post('/prueba', asyncHandler(async (req,res) => {
-  const notificationId = await transaction(client=>emitNotification(client,{
-    tipo:'PRUEBA_FIREBASE',categoria:'SISTEMA',prioridad:'IMPORTANTE',
-    titulo:'Firebase conectado',
-    mensaje:'Las notificaciones push de SGB están funcionando correctamente.',
-    ruta:'/',usuarios:[req.user!.id],creadoPor:req.user!.id,
-  }),req.user!.id);
+  const notificationId = await transaction(async client=>{
+    await client.query(`UPDATE notificacion_usuario nu
+      SET push_estado='OMITIDA',push_procesando_at=NULL,
+          push_ultimo_error='Prueba anterior reemplazada por una nueva.'
+      FROM notificacion n
+      WHERE n.id_notificacion=nu.id_notificacion
+        AND n.tipo='PRUEBA_FIREBASE' AND nu.id_usuario=$1
+        AND nu.push_estado IN ('PENDIENTE','ERROR','EN_PROCESO')`,[req.user!.id]);
+    return emitNotification(client,{
+      tipo:'PRUEBA_FIREBASE',categoria:'SISTEMA',prioridad:'IMPORTANTE',
+      titulo:'Firebase conectado',
+      mensaje:'Las notificaciones push de SGB están funcionando correctamente.',
+      ruta:'/',usuarios:[req.user!.id],creadoPor:req.user!.id,
+    });
+  },req.user!.id);
   void dispatchPendingPushNotifications().catch(error=>console.error('No se pudo enviar la notificación de prueba:',error));
   return ok(res,{id_notificacion:notificationId});
 }));

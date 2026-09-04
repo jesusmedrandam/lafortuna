@@ -22,15 +22,30 @@ async function claimPending(limit = 50): Promise<PendingRecipient[]> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await client.query(`UPDATE notificacion_usuario nu
+      SET push_estado='OMITIDA',push_procesando_at=NULL,
+          push_ultimo_error='Prueba de Firebase vencida; no se vuelve a enviar.'
+      FROM notificacion n
+      WHERE n.id_notificacion=nu.id_notificacion
+        AND n.tipo='PRUEBA_FIREBASE'
+        AND nu.push_estado IN ('PENDIENTE','ERROR','EN_PROCESO')
+        AND n.created_at < NOW() - INTERVAL '5 minutes'`);
     const result = await client.query<PendingRecipient>(`
       WITH candidatos AS (
         SELECT nu.id_notificacion,nu.id_usuario
         FROM notificacion_usuario nu
+        JOIN notificacion n ON n.id_notificacion=nu.id_notificacion
         WHERE (
-          (nu.push_estado IN ('PENDIENTE','ERROR') AND nu.push_intentos < 5)
-          OR (nu.push_estado='EN_PROCESO' AND nu.push_procesando_at < NOW() - INTERVAL '5 minutes')
+          (n.tipo='PRUEBA_FIREBASE' AND nu.push_estado='PENDIENTE' AND nu.push_intentos=0)
+          OR (n.tipo<>'PRUEBA_FIREBASE' AND (
+            (nu.push_estado IN ('PENDIENTE','ERROR') AND nu.push_intentos < 5)
+            OR (nu.push_estado='EN_PROCESO' AND nu.push_procesando_at < NOW() - INTERVAL '5 minutes')
+          ))
         )
-        ORDER BY nu.created_at
+        ORDER BY
+          CASE n.prioridad WHEN 'URGENTE' THEN 0 WHEN 'IMPORTANTE' THEN 1 ELSE 2 END,
+          CASE WHEN n.tipo='PRUEBA_FIREBASE' THEN 1 ELSE 0 END,
+          nu.created_at
         FOR UPDATE SKIP LOCKED
         LIMIT $1
       ), reclamados AS (
@@ -147,7 +162,6 @@ export function scheduleNotificationPushDispatch(delayMs = 750) {
     scheduledDispatch = null;
     void dispatchPendingPushNotifications().catch(error=>console.error('Error al despachar notificación push:',error));
   },delayMs);
-  scheduledDispatch.unref();
 }
 
 export function startNotificationPushWorker() {
