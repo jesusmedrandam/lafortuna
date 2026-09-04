@@ -17,7 +17,7 @@ export const errorHandler = (error, req, res, _next) => {
     if (pgError.code === '23503') {
         return res.status(409).json({ ok: false, error: { code: 'REFERENCE_CONFLICT', message: 'El registro está relacionado con otros datos o la referencia no existe.', details: pgError.detail }, requestId: req.requestId });
     }
-    if (pgError.code === '23514' || pgError.code === '22P02') {
+    if (pgError.code === '23514' || pgError.code === '22P02' || pgError.code === '22007') {
         return res.status(400).json({ ok: false, error: { code: 'DATABASE_VALIDATION', message: pgError.message || 'Los datos no cumplen las reglas del sistema.' }, requestId: req.requestId });
     }
     if (pgError.code === '23502') {
