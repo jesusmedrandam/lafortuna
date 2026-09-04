@@ -131,6 +131,24 @@ async function milkingLactation(client:Parameters<Parameters<typeof transaction>
   return rows[0]?.id_lactancia??null;
 }
 
+async function assertUniqueMilkProduction(
+  client: Parameters<Parameters<typeof transaction>[0]>[0],
+  animalId: string,
+  date: string,
+  shift: string,
+  excludeId?: string,
+) {
+  const duplicate=(await client.query(
+    `SELECT id_produccion FROM produccion_leche
+     WHERE id_vaca=$1 AND fecha_produccion=$2::date AND turno=$3
+       AND deleted_at IS NULL
+       AND ($4::uuid IS NULL OR id_produccion<>$4::uuid)
+     LIMIT 1 FOR SHARE`,
+    [animalId,date,shift,excludeId??null],
+  )).rows[0];
+  if(duplicate)throw new ValidationError('Ya existe una producción para esta vaca en la fecha y turno seleccionados.');
+}
+
 async function linkedHealthCondition(client:Parameters<Parameters<typeof transaction>[0]>[0],conditionId:string|null|undefined,animalId:string) {
   if(!conditionId)return null;
   const row=(await client.query(
@@ -410,7 +428,10 @@ recordsRouter.post('/:module', asyncHandler(async (req, res) => {
     if(!date)throw new ValidationError('Selecciona la fecha de producción.');
     const row=await transaction(async client=>{
       const lactationId=await milkingLactation(client,animalId,date);
-      return (await client.query(buildInsert(d.table,{...data,id_lactancia:lactationId,fuente:data.fuente??'MANUAL',registrado_por:req.user!.id}))).rows[0];
+      await assertUniqueMilkProduction(client,animalId,date,String(data.turno??'UNICO'));
+      const saved=(await client.query(buildInsert(d.table,{...data,id_lactancia:lactationId,fuente:data.fuente??'MANUAL',registrado_por:req.user!.id}))).rows[0];
+      await notifyRecordCreated(client,'producciones',saved,req.user!.id);
+      return saved;
     },req.user!.id);
     return created(res,row);
   }
@@ -478,7 +499,7 @@ recordsRouter.patch('/:module/:id', asyncHandler(async (req, res) => {
     const id=routeParam(req.params.id,'id');
     const row=await transaction(async client=>{
       const current=(await client.query(
-        `SELECT id_vaca,fecha_produccion::text AS fecha_produccion
+        `SELECT id_vaca,fecha_produccion::text AS fecha_produccion,turno
          FROM produccion_leche WHERE id_produccion=$1 AND deleted_at IS NULL FOR UPDATE`,[id],
       )).rows[0];
       if(!current)throw new NotFoundError();
@@ -486,6 +507,7 @@ recordsRouter.patch('/:module/:id', asyncHandler(async (req, res) => {
       const date=String(data.fecha_produccion??current.fecha_produccion);
       await assertAnimalOperationAllowed(client,animalId,d.operation);
       const lactationId=await milkingLactation(client,animalId,date);
+      await assertUniqueMilkProduction(client,animalId,date,String(data.turno??current.turno??'UNICO'),id);
       return (await client.query(buildUpdate(d.table,d.id,id,{...data,id_vaca:animalId,id_lactancia:lactationId}))).rows[0];
     },req.user!.id);
     return ok(res,row);

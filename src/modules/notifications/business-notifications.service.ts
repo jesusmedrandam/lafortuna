@@ -74,12 +74,21 @@ export async function notifyRecordCreated(
   row: Row,
   actor: string,
 ) {
-  if (moduleName === 'producciones') return null;
   const animalId = text(row.id_animal ?? row.id_vaca);
   const animal = animalId
     ? (await database.query('SELECT nombre,codigo_arete FROM animal WHERE id_animal=$1', [animalId])).rows[0] as Row | undefined
     : undefined;
   const label = animalLabel(animal);
+
+  if (moduleName === 'producciones') {
+    return emitBusinessNotification(database, actor, text(row.id_produccion), {
+      dedupe: 'PRODUCCION_VACA', tipo: 'PRODUCCION_VACA_REGISTRADA', categoria: 'PRODUCCION', prioridad: 'INFO',
+      titulo: 'Producción de leche registrada',
+      mensaje: `${label} · ${number(row.litros).toLocaleString('es-EC')} litros · ${text(row.fecha_produccion)}${row.turno ? ` · ${text(row.turno).toLowerCase()}` : ''}.`,
+      permiso: 'PRODUCCION_CONSULTAR', entidadTipo: 'PRODUCCION_LECHE', ruta: '/produccion',
+      datos: { id_animal: animalId, litros: number(row.litros), fecha: row.fecha_produccion, turno: row.turno ?? null },
+    });
+  }
 
   if (moduleName === 'abortos') {
     return emitBusinessNotification(database, actor, text(row.id_aborto), {
@@ -346,10 +355,7 @@ export async function notifyMovementApplied(database: Queryable, input: Movement
   const context = (await database.query(
     `SELECT m.tipo_movimiento,u1.nombre ubicacion_origen,COALESCE(u2.nombre,ud.nombre) ubicacion_destino,
        g1.nombre grupo_origen,g2.nombre grupo_destino,p1.nombre propiedad_origen,p2.nombre propiedad_destino,
-       (SELECT STRING_AGG(DISTINCT anterior.nombre,', ' ORDER BY anterior.nombre)
-        FROM movimiento_animal_detalle d
-        JOIN grupo anterior ON anterior.id_grupo=d.id_grupo_anterior
-        WHERE d.id_movimiento=m.id_movimiento AND d.seleccionado=TRUE AND d.deleted_at IS NULL) grupos_anteriores
+       route.origen_descripcion,route.destino_descripcion
      FROM movimiento_animal m
      LEFT JOIN ubicacion u1 ON u1.id_ubicacion=m.id_ubicacion_origen
      LEFT JOIN ubicacion u2 ON u2.id_ubicacion=m.id_ubicacion_destino
@@ -358,6 +364,24 @@ export async function notifyMovementApplied(database: Queryable, input: Movement
      LEFT JOIN grupo g2 ON g2.id_grupo=m.id_grupo_destino
      LEFT JOIN propiedad_ganadera p1 ON p1.id_propiedad=m.id_propiedad_origen
      LEFT JOIN propiedad_ganadera p2 ON p2.id_propiedad=m.id_propiedad_destino
+     LEFT JOIN LATERAL (
+       SELECT
+         STRING_AGG(DISTINCT CASE
+           WHEN go.nombre IS NOT NULL AND uo.nombre IS NOT NULL THEN go.nombre||' ('||uo.nombre||')'
+           WHEN go.nombre IS NOT NULL THEN go.nombre
+           ELSE uo.nombre END,', ') origen_descripcion,
+         STRING_AGG(DISTINCT CASE
+           WHEN gd.nombre IS NOT NULL AND udd.nombre IS NOT NULL THEN gd.nombre||' ('||udd.nombre||')'
+           WHEN gd.nombre IS NOT NULL THEN gd.nombre
+           ELSE udd.nombre END,', ') destino_descripcion
+       FROM movimiento_animal_detalle md
+       JOIN animal ma ON ma.id_animal=md.id_animal
+       LEFT JOIN grupo go ON go.id_grupo=COALESCE(md.id_grupo_anterior,ma.id_grupo_actual,m.id_grupo_origen,m.id_grupo_filtro)
+       LEFT JOIN ubicacion uo ON uo.id_ubicacion=COALESCE(md.id_ubicacion_anterior,ma.id_ubicacion_actual,m.id_ubicacion_origen)
+       LEFT JOIN grupo gd ON gd.id_grupo=COALESCE(md.id_grupo_destino,m.id_grupo_destino)
+       LEFT JOIN ubicacion udd ON udd.id_ubicacion=COALESCE(md.id_ubicacion_destino,m.id_ubicacion_destino,$2)
+       WHERE md.id_movimiento=m.id_movimiento AND md.seleccionado=TRUE AND md.deleted_at IS NULL
+     ) route ON TRUE
      WHERE m.id_movimiento=$1`, [input.id,input.destinoId],
   )).rows[0] as Row | undefined;
   const kind=text(context?.tipo_movimiento,input.tipo);
@@ -365,10 +389,10 @@ export async function notifyMovementApplied(database: Queryable, input: Movement
   let message=`${input.cantidad} animal(es) trasladado(s).`;
   if(kind==='UBICACION') {
     title='Cambio de potrero aplicado';
-    message=`${input.cantidad} animal(es) · ${text(context?.ubicacion_origen,'potrero de origen no indicado')} → ${text(context?.ubicacion_destino,'potrero de destino no indicado')}.`;
+    message=`${input.cantidad} animal(es) · ${text(context?.origen_descripcion,`${text(context?.grupo_origen,'Grupo')} (${text(context?.ubicacion_origen,'potrero de origen no indicado')})`)} → ${text(context?.destino_descripcion,`${text(context?.grupo_destino ?? context?.grupo_origen,'Grupo')} (${text(context?.ubicacion_destino,'potrero de destino no indicado')})`)}.`;
   } else if(kind==='GRUPO') {
     title='Cambio de grupo aplicado';
-    message=`${input.cantidad} animal(es) · ${text(context?.grupos_anteriores ?? context?.grupo_origen,'grupo de origen no indicado')} → ${text(context?.grupo_destino,'grupo de destino no indicado')}.`;
+    message=`${input.cantidad} animal(es) · ${text(context?.origen_descripcion,'grupo de origen no indicado')} → ${text(context?.destino_descripcion,`${text(context?.grupo_destino,'grupo de destino no indicado')} (${text(context?.ubicacion_destino,'potrero no indicado')})`)}.`;
   } else if(kind==='PROPIEDAD') {
     title='Traslado de propiedad aplicado';
     message=`${input.cantidad} animal(es) · ${text(context?.propiedad_origen,'propiedad de origen no indicada')} → ${text(context?.propiedad_destino,'propiedad de destino no indicada')}.`;

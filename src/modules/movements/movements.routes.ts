@@ -366,6 +366,7 @@ movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler
     u1.nombre ubicacion_origen,u2.nombre ubicacion_destino,g1.nombre grupo_origen,g2.nombre grupo_destino,
     p1.nombre propiedad_origen,p1.es_principal propiedad_origen_es_principal,
     p2.nombre propiedad_destino,p2.es_principal propiedad_destino_es_principal,
+    route.origen_descripcion,route.destino_descripcion,
     COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id_detalle',d.id_movimiento_detalle,'id_animal',a.id_animal,'animal',a.nombre,'nombre',a.nombre,
       'arete',a.codigo_arete,'codigo_arete',a.codigo_arete,'sexo',a.sexo,
@@ -389,6 +390,24 @@ movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler
    LEFT JOIN grupo g2 ON g2.id_grupo=m.id_grupo_destino
    LEFT JOIN propiedad_ganadera p1 ON p1.id_propiedad=m.id_propiedad_origen
    LEFT JOIN propiedad_ganadera p2 ON p2.id_propiedad=m.id_propiedad_destino
+   LEFT JOIN LATERAL (
+     SELECT
+       STRING_AGG(DISTINCT CASE
+         WHEN go.nombre IS NOT NULL AND uo.nombre IS NOT NULL THEN go.nombre||' ('||uo.nombre||')'
+         WHEN go.nombre IS NOT NULL THEN go.nombre
+         ELSE uo.nombre END,', ') origen_descripcion,
+       STRING_AGG(DISTINCT CASE
+         WHEN gd.nombre IS NOT NULL AND ud.nombre IS NOT NULL THEN gd.nombre||' ('||ud.nombre||')'
+         WHEN gd.nombre IS NOT NULL THEN gd.nombre
+         ELSE ud.nombre END,', ') destino_descripcion
+     FROM movimiento_animal_detalle md
+     JOIN animal ma ON ma.id_animal=md.id_animal
+     LEFT JOIN grupo go ON go.id_grupo=COALESCE(md.id_grupo_anterior,ma.id_grupo_actual,m.id_grupo_origen,m.id_grupo_filtro)
+     LEFT JOIN ubicacion uo ON uo.id_ubicacion=COALESCE(md.id_ubicacion_anterior,ma.id_ubicacion_actual,m.id_ubicacion_origen)
+     LEFT JOIN grupo gd ON gd.id_grupo=COALESCE(md.id_grupo_destino,m.id_grupo_destino)
+     LEFT JOIN ubicacion ud ON ud.id_ubicacion=COALESCE(md.id_ubicacion_destino,m.id_ubicacion_destino)
+     WHERE md.id_movimiento=m.id_movimiento AND md.seleccionado=TRUE AND md.deleted_at IS NULL
+   ) route ON TRUE
    LEFT JOIN motivo_movimiento mm ON mm.id_motivo_movimiento=m.id_motivo_movimiento
    WHERE m.deleted_at IS NULL ORDER BY m.fecha_movimiento DESC`,
 )).rows)));
@@ -399,6 +418,7 @@ movementsRouter.get('/:id', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHand
       u1.nombre ubicacion_origen,u2.nombre ubicacion_destino,g1.nombre grupo_origen,g2.nombre grupo_destino,
       p1.nombre propiedad_origen,p1.es_principal propiedad_origen_es_principal,
       p2.nombre propiedad_destino,p2.es_principal propiedad_destino_es_principal,
+      route.origen_descripcion,route.destino_descripcion,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_detalle',d.id_movimiento_detalle,'id_animal',a.id_animal,'animal',a.nombre,'nombre',a.nombre,
         'arete',a.codigo_arete,'codigo_arete',a.codigo_arete,'sexo',a.sexo,
@@ -422,6 +442,24 @@ movementsRouter.get('/:id', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHand
      LEFT JOIN grupo g2 ON g2.id_grupo=m.id_grupo_destino
      LEFT JOIN propiedad_ganadera p1 ON p1.id_propiedad=m.id_propiedad_origen
      LEFT JOIN propiedad_ganadera p2 ON p2.id_propiedad=m.id_propiedad_destino
+     LEFT JOIN LATERAL (
+       SELECT
+         STRING_AGG(DISTINCT CASE
+           WHEN go.nombre IS NOT NULL AND uo.nombre IS NOT NULL THEN go.nombre||' ('||uo.nombre||')'
+           WHEN go.nombre IS NOT NULL THEN go.nombre
+           ELSE uo.nombre END,', ') origen_descripcion,
+         STRING_AGG(DISTINCT CASE
+           WHEN gd.nombre IS NOT NULL AND ud.nombre IS NOT NULL THEN gd.nombre||' ('||ud.nombre||')'
+           WHEN gd.nombre IS NOT NULL THEN gd.nombre
+           ELSE ud.nombre END,', ') destino_descripcion
+       FROM movimiento_animal_detalle md
+       JOIN animal ma ON ma.id_animal=md.id_animal
+       LEFT JOIN grupo go ON go.id_grupo=COALESCE(md.id_grupo_anterior,ma.id_grupo_actual,m.id_grupo_origen,m.id_grupo_filtro)
+       LEFT JOIN ubicacion uo ON uo.id_ubicacion=COALESCE(md.id_ubicacion_anterior,ma.id_ubicacion_actual,m.id_ubicacion_origen)
+       LEFT JOIN grupo gd ON gd.id_grupo=COALESCE(md.id_grupo_destino,m.id_grupo_destino)
+       LEFT JOIN ubicacion ud ON ud.id_ubicacion=COALESCE(md.id_ubicacion_destino,m.id_ubicacion_destino)
+       WHERE md.id_movimiento=m.id_movimiento AND md.seleccionado=TRUE AND md.deleted_at IS NULL
+     ) route ON TRUE
      LEFT JOIN motivo_movimiento mm ON mm.id_motivo_movimiento=m.id_motivo_movimiento
      WHERE m.id_movimiento=$1 AND m.deleted_at IS NULL`,[routeParam(req.params.id,'id')])).rows[0];
   if(!row)throw new NotFoundError('Movimiento no encontrado.');
