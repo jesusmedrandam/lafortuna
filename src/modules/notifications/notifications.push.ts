@@ -39,7 +39,8 @@ async function claimPending(limit = 50): Promise<PendingRecipient[]> {
           (n.tipo='PRUEBA_FIREBASE' AND nu.push_estado='PENDIENTE' AND nu.push_intentos=0)
           OR (n.tipo<>'PRUEBA_FIREBASE' AND (
             (nu.push_estado IN ('PENDIENTE','ERROR') AND nu.push_intentos < 5)
-            OR (nu.push_estado='EN_PROCESO' AND nu.push_procesando_at < NOW() - INTERVAL '5 minutes')
+            OR (nu.push_estado='EN_PROCESO' AND nu.push_intentos < 5
+                AND nu.push_procesando_at < NOW() - INTERVAL '5 minutes')
           ))
         )
         ORDER BY
@@ -92,30 +93,30 @@ async function finish(
   error?: string,
 ) {
   await pool.query(`UPDATE notificacion_usuario SET
-      push_estado=$3,push_procesando_at=NULL,
-      push_enviada_at=CASE WHEN $3='ENVIADA' THEN NOW() ELSE push_enviada_at END,
-      push_ultimo_error=$4
+      push_estado=$3::varchar,push_procesando_at=NULL,
+      push_enviada_at=CASE WHEN $4::boolean THEN NOW() ELSE push_enviada_at END,
+      push_ultimo_error=$5::text
     WHERE id_notificacion=$1 AND id_usuario=$2 AND push_estado='EN_PROCESO'`,
-  [item.id_notificacion,item.id_usuario,state,error?.slice(0,1000) ?? null]);
+  [item.id_notificacion,item.id_usuario,state,state==='ENVIADA',error?.slice(0,1000) ?? null]);
 }
 
 async function sendRecipient(item: PendingRecipient) {
-  const messaging = firebaseMessaging();
-  if (!messaging) {
-    await finish(item,'ERROR','Firebase no está configurado en el servidor.');
-    return;
-  }
-  const tokens = (await pool.query<{token_push:string}>(`
-    SELECT token_push FROM notificacion_dispositivo
-    WHERE id_usuario=$1 AND activo=TRUE
-    ORDER BY ultimo_uso_at DESC
-    LIMIT 500`,[item.id_usuario])).rows.map(row=>row.token_push);
-  if (!tokens.length) {
-    await finish(item,'OMITIDA','El usuario no tiene dispositivos activos.');
-    return;
-  }
   try {
-    const response = await messaging.sendEachForMulticast({
+    const messaging = firebaseMessaging();
+    if (!messaging) {
+      await finish(item,'ERROR','Firebase no está configurado en el servidor.');
+      return;
+    }
+    const tokens = (await pool.query<{token_push:string}>(`
+      SELECT token_push FROM notificacion_dispositivo
+      WHERE id_usuario=$1 AND activo=TRUE
+      ORDER BY ultimo_uso_at DESC
+      LIMIT 500`,[item.id_usuario])).rows.map(row=>row.token_push);
+    if (!tokens.length) {
+      await finish(item,'OMITIDA','El usuario no tiene dispositivos activos.');
+      return;
+    }
+    const send = messaging.sendEachForMulticast({
       tokens,
       data: {
         id_notificacion: item.id_notificacion,
@@ -131,6 +132,13 @@ async function sendRecipient(item: PendingRecipient) {
         ttl: 24 * 60 * 60 * 1000,
       },
     });
+    const response = await Promise.race<BatchResponse>([
+      send,
+      new Promise<never>((_,reject)=>setTimeout(
+        ()=>reject(new Error('Firebase no respondió en 30 segundos.')),
+        30_000,
+      )),
+    ]);
     await deactivateInvalidTokens(tokens,response);
     if (response.successCount > 0) {
       const partial = response.failureCount ? `${response.failureCount} ${response.failureCount === 1 ? 'dispositivo no recibió' : 'dispositivos no recibieron'} el aviso.` : undefined;
@@ -140,7 +148,17 @@ async function sendRecipient(item: PendingRecipient) {
       await finish(item,'ERROR',message);
     }
   } catch (error) {
-    await finish(item,'ERROR',error instanceof Error ? error.message : 'Error desconocido de Firebase.');
+    const message=error instanceof Error ? error.message : 'Error desconocido de Firebase.';
+    try {
+      await finish(item,'ERROR',message);
+    } catch (finishError) {
+      console.error('No se pudo finalizar un destinatario push:',{
+        id_notificacion:item.id_notificacion,
+        id_usuario:item.id_usuario,
+        error:finishError,
+      });
+      throw finishError;
+    }
   }
 }
 
@@ -149,7 +167,17 @@ export async function dispatchPendingPushNotifications() {
   running = true;
   try {
     const pending = await claimPending();
-    for (const item of pending) await sendRecipient(item);
+    for (const item of pending) {
+      try {
+        await sendRecipient(item);
+      } catch (error) {
+        console.error('Falló un destinatario push; se continúa con los demás:',{
+          id_notificacion:item.id_notificacion,
+          id_usuario:item.id_usuario,
+          error,
+        });
+      }
+    }
     return pending.length;
   } finally {
     running = false;
