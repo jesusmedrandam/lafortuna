@@ -12,13 +12,14 @@ import { assertPermission, requirePermission } from '../../middleware/permission
 import { buildInsert, buildUpdate } from '../shared/sql.js';
 import { deleteCloudinaryImage, uploadAnimalImage } from '../../services/cloudinary.service.js';
 import { assertAnimalOperationAllowed } from '../../services/animal-operation-policy.js';
+import { notifyBirth, notifyRecordCreated, notifyTankProduction } from '../notifications/business-notifications.service.js';
 const defs = {
-    abortos: { table: 'aborto', id: 'id_aborto', animalColumn: 'id_vaca', read: 'ABORTO_CONSULTAR', write: 'ABORTO_ADMINISTRAR', operation: 'ABORTO', columns: ['id_vaca', 'fecha', 'causa', 'meses_gestacion', 'descripcion'], order: 'fecha DESC NULLS LAST' },
-    lactancias: { table: 'lactancia', id: 'id_lactancia', animalColumn: 'id_vaca', read: 'LACTANCIA_CONSULTAR', write: 'LACTANCIA_ADMINISTRAR', operation: 'LACTANCIA', columns: ['id_vaca', 'id_parto', 'fecha_inicio', 'fecha_fin', 'activa', 'observaciones'], order: 'fecha_inicio DESC' },
-    producciones: { table: 'produccion_leche', id: 'id_produccion', animalColumn: 'id_vaca', read: 'PRODUCCION_CONSULTAR', write: 'PRODUCCION_ADMINISTRAR', operation: 'PRODUCCION_LECHE', columns: ['id_vaca', 'id_lactancia', 'fecha_produccion', 'turno', 'litros', 'observaciones'], order: 'fecha_produccion DESC' },
+    abortos: { table: 'aborto', id: 'id_aborto', animalColumn: 'id_vaca', read: 'ABORTO_CONSULTAR', write: 'ABORTO_ADMINISTRAR', operation: 'ABORTO', columns: ['id_vaca', 'id_prenez', 'fecha', 'causa', 'meses_gestacion', 'descripcion'], order: 'fecha DESC NULLS LAST' },
+    lactancias: { table: 'lactancia', id: 'id_lactancia', animalColumn: 'id_vaca', read: 'LACTANCIA_CONSULTAR', write: 'LACTANCIA_ADMINISTRAR', operation: 'LACTANCIA', columns: ['id_vaca', 'id_parto', 'fecha_inicio', 'fecha_fin', 'activa', 'en_ordeno', 'observaciones'], order: 'fecha_inicio DESC' },
+    producciones: { table: 'produccion_leche', id: 'id_produccion', animalColumn: 'id_vaca', read: 'PRODUCCION_CONSULTAR', write: 'PRODUCCION_ADMINISTRAR', operation: 'PRODUCCION_LECHE', columns: ['id_vaca', 'fecha_produccion', 'turno', 'litros', 'observaciones', 'fuente', 'referencia_externa'], order: 'fecha_produccion DESC' },
     pesajes: { table: 'pesaje', id: 'id_pesaje', animalColumn: 'id_animal', read: 'PESAJE_CONSULTAR', write: 'PESAJE_ADMINISTRAR', operation: 'PESAJE', columns: ['id_animal', 'fecha_pesaje', 'peso_kg', 'metodo', 'observaciones'], order: 'fecha_pesaje DESC' },
     muertes: { table: 'muerte', id: 'id_muerte', animalColumn: 'id_animal', read: 'MUERTE_CONSULTAR', write: 'MUERTE_ADMINISTRAR', operation: 'MUERTE', columns: ['id_animal', 'fecha', 'causa', 'descripcion'], order: 'fecha DESC' },
-    tratamientos: { table: 'tratamiento_animal', id: 'id_tratamiento', animalColumn: 'id_animal', read: 'SANIDAD_CONSULTAR', write: 'SANIDAD_ADMINISTRAR', operation: 'TRATAMIENTO', columns: ['id_animal', 'id_tipo_tratamiento', 'id_medicamento', 'id_via_administracion', 'dosis', 'id_unidad_dosis', 'fecha_aplicacion', 'proxima_aplicacion', 'aplicado_por', 'descripcion', 'observaciones'], order: 'fecha_aplicacion DESC' }
+    tratamientos: { table: 'tratamiento_animal', id: 'id_tratamiento', animalColumn: 'id_animal', read: 'SANIDAD_CONSULTAR', write: 'SANIDAD_ADMINISTRAR', operation: 'TRATAMIENTO', columns: ['id_animal', 'id_condicion_salud', 'id_tipo_tratamiento', 'id_medicamento', 'id_via_administracion', 'dosis', 'id_unidad_dosis', 'fecha_aplicacion', 'proxima_aplicacion', 'aplicado_por', 'descripcion', 'observaciones'], order: 'fecha_aplicacion DESC' }
 };
 function definition(moduleName) {
     const value = moduleName ? defs[moduleName] : undefined;
@@ -33,14 +34,290 @@ function allowedBody(body, columns) {
     return data;
 }
 export const recordsRouter = Router();
+const lactationSchema = z.object({
+    id_vaca: z.string().uuid(),
+    id_parto: z.string().uuid(),
+    fecha_fin: z.string().date().nullable().optional(),
+    activa: z.boolean().default(true),
+    en_ordeno: z.boolean().default(false),
+    observaciones: z.string().trim().max(2000).nullable().optional(),
+}).superRefine((value, ctx) => {
+    if (!value.activa && !value.fecha_fin)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['fecha_fin'], message: 'Ingresa la fecha de cierre.' });
+    if (!value.activa && value.en_ordeno)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['en_ordeno'], message: 'Solo una lactancia activa puede estar en ordeño.' });
+});
+async function validateLactation(client, input, excludeId) {
+    await assertAnimalOperationAllowed(client, input.id_vaca, 'LACTANCIA');
+    const cow = (await client.query(`SELECT sexo FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR UPDATE`, [input.id_vaca])).rows[0];
+    if (!cow)
+        throw new NotFoundError('Vaca no encontrada.');
+    if (cow.sexo !== 'HEMBRA')
+        throw new ValidationError('Solo se puede registrar una lactancia para una hembra.');
+    const birth = (await client.query(`SELECT id_madre,fecha_parto::text AS fecha_parto,
+       (fecha_parto + INTERVAL '18 months')::date::text AS fecha_limite
+     FROM parto
+     WHERE id_parto=$1 AND deleted_at IS NULL FOR SHARE`, [input.id_parto])).rows[0];
+    if (!birth)
+        throw new NotFoundError('El parto relacionado no existe.');
+    if (birth.id_madre !== input.id_vaca)
+        throw new ValidationError('El parto seleccionado no pertenece a la vaca.');
+    const startDate = birth.fecha_parto;
+    if (input.fecha_fin && input.fecha_fin < startDate)
+        throw new ValidationError('La fecha de cierre no puede ser anterior al parto.');
+    if (input.fecha_fin && input.fecha_fin > birth.fecha_limite)
+        throw new ValidationError('La lactancia no puede extenderse más de 18 meses después del parto.');
+    if (input.activa && new Date().toISOString().slice(0, 10) > birth.fecha_limite)
+        throw new ValidationError('Esta lactancia superó los 18 meses desde el parto y debe registrarse como finalizada.');
+    const linked = (await client.query(`SELECT id_lactancia FROM lactancia
+     WHERE id_parto=$1 AND deleted_at IS NULL AND ($2::uuid IS NULL OR id_lactancia<>$2::uuid)
+     LIMIT 1 FOR SHARE`, [input.id_parto, excludeId ?? null])).rows[0];
+    if (linked)
+        throw new ValidationError('Este parto ya está relacionado con otra lactancia.');
+    const overlap = (await client.query(`SELECT id_lactancia FROM lactancia
+     WHERE id_vaca=$1 AND deleted_at IS NULL
+       AND ($4::uuid IS NULL OR id_lactancia<>$4::uuid)
+       AND daterange(fecha_inicio,COALESCE(fecha_fin,'infinity'::date),'[]')
+           && daterange($2::date,COALESCE($3::date,'infinity'::date),'[]')
+     LIMIT 1 FOR SHARE`, [input.id_vaca, startDate, input.activa ? null : (input.fecha_fin ?? null), excludeId ?? null])).rows[0];
+    if (overlap)
+        throw new ValidationError('La vaca ya tiene otra lactancia que coincide con esas fechas.');
+    return startDate;
+}
+async function milkingLactation(client, animalId, date) {
+    await assertAnimalOperationAllowed(client, animalId, 'PRODUCCION_LECHE');
+    const cow = (await client.query(`SELECT sexo,en_ordeno FROM animal
+     WHERE id_animal=$1 AND estado='ACTIVO' AND deleted_at IS NULL FOR SHARE`, [animalId])).rows[0];
+    if (!cow)
+        throw new NotFoundError('Vaca no encontrada o inactiva.');
+    if (cow.sexo !== 'HEMBRA')
+        throw new ValidationError('La producción de leche solo puede registrarse para una hembra.');
+    if (!cow.en_ordeno)
+        throw new ValidationError('La vaca no está marcada como en ordeño.');
+    const eligible = (await client.query(`SELECT EXISTS(
+       SELECT 1 FROM parto p
+       WHERE p.id_madre=$1 AND p.deleted_at IS NULL
+         AND p.fecha_parto<=$2::date
+         AND p.fecha_parto + INTERVAL '18 months'>=$2::date
+     ) permitido`, [animalId, date])).rows[0];
+    if (!eligible.permitido)
+        throw new ValidationError('La vaca debe tener un parto registrado dentro de los 18 meses anteriores a la fecha de producción.');
+    const rows = (await client.query(`SELECT id_lactancia FROM lactancia
+     WHERE id_vaca=$1 AND deleted_at IS NULL AND activa=TRUE
+       AND fecha_inicio<=$2::date AND fecha_inicio + INTERVAL '18 months'>=$2::date
+       AND (fecha_fin IS NULL OR fecha_fin>=$2::date)
+     ORDER BY fecha_inicio DESC FOR SHARE`, [animalId, date])).rows;
+    if (rows.length > 1)
+        throw new ValidationError('La vaca tiene más de una lactancia activa. Cierra el registro duplicado antes de continuar.');
+    return rows[0]?.id_lactancia ?? null;
+}
+async function assertUniqueMilkProduction(client, animalId, date, shift, excludeId) {
+    const duplicate = (await client.query(`SELECT id_produccion FROM produccion_leche
+     WHERE id_vaca=$1 AND fecha_produccion=$2::date AND turno=$3
+       AND deleted_at IS NULL
+       AND ($4::uuid IS NULL OR id_produccion<>$4::uuid)
+     LIMIT 1 FOR SHARE`, [animalId, date, shift, excludeId ?? null])).rows[0];
+    if (duplicate)
+        throw new ValidationError('Ya existe una producción para esta vaca en la fecha y turno seleccionados.');
+}
+async function linkedHealthCondition(client, conditionId, animalId) {
+    if (!conditionId)
+        return null;
+    const row = (await client.query(`SELECT id_condicion_salud,estado FROM condicion_salud
+     WHERE id_condicion_salud=$1 AND id_animal=$2 AND deleted_at IS NULL AND estado<>'RESUELTA' FOR UPDATE`, [conditionId, animalId])).rows[0];
+    if (!row)
+        throw new ValidationError('La condición seleccionada no pertenece al animal o ya está resuelta.');
+    return row;
+}
+const tankSchema = z.object({
+    fecha_produccion: z.string().date(), turno: z.enum(['MANANA', 'TARDE', 'NOCHE', 'UNICO']).default('UNICO'),
+    litros: z.number().min(0), fuente: z.enum(['MANUAL', 'SENSOR']).default('MANUAL'),
+    referencia_externa: z.string().trim().max(160).nullable().optional(), observaciones: z.string().nullable().optional(),
+});
+recordsRouter.get('/producciones/vacas-activas', requirePermission('PRODUCCION_CONSULTAR'), asyncHandler(async (req, res) => {
+    const date = z.string().date().catch(new Date().toISOString().slice(0, 10)).parse(req.query.fecha);
+    return ok(res, (await pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,l.id_lactancia,l.fecha_inicio,p.fecha_parto
+     FROM animal a
+     JOIN LATERAL(
+       SELECT parto.fecha_parto FROM parto
+       WHERE parto.id_madre=a.id_animal AND parto.deleted_at IS NULL
+         AND parto.fecha_parto<=$1::date
+         AND parto.fecha_parto + INTERVAL '18 months'>=$1::date
+       ORDER BY parto.fecha_parto DESC LIMIT 1
+     ) p ON TRUE
+     LEFT JOIN LATERAL(
+       SELECT lactancia.id_lactancia,lactancia.fecha_inicio FROM lactancia
+       WHERE lactancia.id_vaca=a.id_animal AND lactancia.deleted_at IS NULL
+         AND lactancia.activa=TRUE AND lactancia.fecha_inicio<=$1::date
+         AND lactancia.fecha_inicio + INTERVAL '18 months'>=$1::date
+         AND (lactancia.fecha_fin IS NULL OR lactancia.fecha_fin>=$1::date)
+       ORDER BY lactancia.fecha_inicio DESC LIMIT 1
+     ) l ON TRUE
+     WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='HEMBRA' AND a.en_ordeno=TRUE
+     ORDER BY a.nombre,a.codigo_arete`, [date])).rows);
+}));
+recordsRouter.get('/producciones/vacas-elegibles', requirePermission('PRODUCCION_CONSULTAR'), asyncHandler(async (req, res) => {
+    const date = z.string().date().catch(new Date().toISOString().slice(0, 10)).parse(req.query.fecha);
+    return ok(res, (await pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,a.en_ordeno,p.fecha_parto,
+       l.id_lactancia,l.fecha_inicio,l.activa lactancia_activa
+     FROM animal a
+     JOIN LATERAL(
+       SELECT parto.fecha_parto FROM parto
+       WHERE parto.id_madre=a.id_animal AND parto.deleted_at IS NULL
+         AND parto.fecha_parto<=$1::date
+         AND parto.fecha_parto + INTERVAL '18 months'>=$1::date
+       ORDER BY parto.fecha_parto DESC LIMIT 1
+     ) p ON TRUE
+     LEFT JOIN LATERAL(
+       SELECT lactancia.id_lactancia,lactancia.fecha_inicio,lactancia.activa
+       FROM lactancia
+       WHERE lactancia.id_vaca=a.id_animal AND lactancia.deleted_at IS NULL
+         AND lactancia.activa=TRUE AND lactancia.fecha_inicio<=$1::date
+         AND lactancia.fecha_inicio + INTERVAL '18 months'>=$1::date
+         AND (lactancia.fecha_fin IS NULL OR lactancia.fecha_fin>=$1::date)
+       ORDER BY lactancia.fecha_inicio DESC LIMIT 1
+     ) l ON TRUE
+     WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='HEMBRA'
+       AND COALESCE((
+         SELECT policy.permitido FROM operacion_categoria_animal policy
+         WHERE policy.id_categoria_animal=a.id_categoria_animal
+           AND policy.codigo_operacion='PRODUCCION_LECHE' AND policy.deleted_at IS NULL
+         LIMIT 1
+       ),TRUE)=TRUE
+     ORDER BY a.nombre,a.codigo_arete`, [date])).rows);
+}));
+const milkingStateSchema = z.object({
+    en_ordeno: z.boolean(),
+    fecha_referencia: z.string().date().optional(),
+});
+recordsRouter.put('/producciones/vacas/:id/ordeno', requirePermission('PRODUCCION_ADMINISTRAR'), asyncHandler(async (req, res) => {
+    const id = routeParam(req.params.id, 'id');
+    const input = milkingStateSchema.parse(req.body);
+    const referenceDate = input.fecha_referencia ?? new Date().toISOString().slice(0, 10);
+    const row = await transaction(async (client) => {
+        await assertAnimalOperationAllowed(client, id, 'PRODUCCION_LECHE');
+        const cow = (await client.query(`SELECT id_animal,sexo FROM animal
+       WHERE id_animal=$1 AND estado='ACTIVO' AND deleted_at IS NULL FOR UPDATE`, [id])).rows[0];
+        if (!cow)
+            throw new NotFoundError('Vaca no encontrada o inactiva.');
+        if (cow.sexo !== 'HEMBRA')
+            throw new ValidationError('Solo una hembra puede marcarse como en ordeño.');
+        if (input.en_ordeno) {
+            const recentBirth = (await client.query(`SELECT id_parto FROM parto
+         WHERE id_madre=$1 AND deleted_at IS NULL AND fecha_parto<=$2::date
+           AND fecha_parto + INTERVAL '18 months'>=$2::date
+         ORDER BY fecha_parto DESC LIMIT 1 FOR SHARE`, [id, referenceDate])).rows[0];
+            if (!recentBirth)
+                throw new ValidationError('Para iniciar el ordeño la vaca debe tener un parto registrado dentro de los últimos 18 meses.');
+        }
+        const saved = (await client.query(`UPDATE animal SET en_ordeno=$2,updated_at=NOW()
+       WHERE id_animal=$1 RETURNING id_animal,nombre,codigo_arete,en_ordeno`, [id, input.en_ordeno])).rows[0];
+        if (!input.en_ordeno) {
+            await client.query(`UPDATE lactancia SET en_ordeno=FALSE,updated_at=NOW()
+         WHERE id_vaca=$1 AND en_ordeno=TRUE AND deleted_at IS NULL`, [id]);
+        }
+        else {
+            await client.query(`UPDATE lactancia SET en_ordeno=COALESCE(id_lactancia=(
+           SELECT l2.id_lactancia FROM lactancia l2
+           JOIN parto p2 ON p2.id_parto=l2.id_parto AND p2.deleted_at IS NULL
+           WHERE l2.id_vaca=$1 AND l2.deleted_at IS NULL AND l2.activa=TRUE
+             AND p2.fecha_parto<=$2::date AND p2.fecha_parto + INTERVAL '18 months'>=$2::date
+           ORDER BY p2.fecha_parto DESC LIMIT 1
+         ),FALSE),updated_at=NOW()
+         WHERE id_vaca=$1 AND deleted_at IS NULL AND activa=TRUE`, [id, referenceDate]);
+        }
+        return saved;
+    }, req.user.id);
+    return ok(res, row);
+}));
+recordsRouter.get('/lactancias/vacas-disponibles', requirePermission('LACTANCIA_CONSULTAR'), asyncHandler(async (req, res) => {
+    const lactationId = z.string().uuid().optional().parse(req.query.id_lactancia);
+    return ok(res, (await pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,FALSE tiene_lactancia_actual
+     FROM animal a
+     WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='HEMBRA'
+       AND EXISTS(SELECT 1 FROM parto p WHERE p.id_madre=a.id_animal AND p.deleted_at IS NULL)
+       AND NOT EXISTS(
+         SELECT 1 FROM lactancia l
+         WHERE l.id_vaca=a.id_animal AND l.deleted_at IS NULL AND l.activa=TRUE
+           AND ($1::uuid IS NULL OR l.id_lactancia<>$1::uuid)
+       )
+       AND COALESCE((
+         SELECT policy.permitido
+         FROM operacion_categoria_animal policy
+         WHERE policy.id_categoria_animal=a.id_categoria_animal
+           AND policy.codigo_operacion='LACTANCIA'
+           AND policy.deleted_at IS NULL
+         LIMIT 1
+       ),TRUE)=TRUE
+     ORDER BY a.nombre,a.codigo_arete`, [lactationId ?? null])).rows);
+}));
+recordsRouter.get('/lactancias/partos', requirePermission('LACTANCIA_CONSULTAR'), asyncHandler(async (req, res) => {
+    const cowId = z.string().uuid().parse(req.query.id_vaca);
+    const lactationId = z.string().uuid().optional().parse(req.query.id_lactancia);
+    return ok(res, (await pool.query(`SELECT p.id_parto,p.fecha_parto,
+      (SELECT COUNT(*)::int FROM parto_cria pc WHERE pc.id_parto=p.id_parto AND pc.deleted_at IS NULL) total_crias,
+      EXISTS(
+        SELECT 1 FROM lactancia l
+        WHERE l.id_parto=p.id_parto AND l.deleted_at IS NULL
+          AND ($2::uuid IS NULL OR l.id_lactancia<>$2::uuid)
+      ) ya_relacionado
+     FROM parto p
+     WHERE p.id_madre=$1 AND p.deleted_at IS NULL
+       AND NOT EXISTS(
+         SELECT 1 FROM lactancia l
+         WHERE l.id_parto=p.id_parto AND l.deleted_at IS NULL
+           AND ($2::uuid IS NULL OR l.id_lactancia<>$2::uuid)
+       )
+     ORDER BY p.fecha_parto DESC,p.created_at DESC`, [cowId, lactationId ?? null])).rows);
+}));
+recordsRouter.get('/producciones/resumen/diario', requirePermission('PRODUCCION_CONSULTAR'), asyncHandler(async (req, res) => {
+    const date = z.string().date().catch(new Date().toISOString().slice(0, 10)).parse(req.query.fecha);
+    const row = (await pool.query(`SELECT
+      (SELECT COALESCE(SUM(litros),0) FROM produccion_leche WHERE fecha_produccion=$1::date AND deleted_at IS NULL) total_vacas,
+      (SELECT COALESCE(SUM(litros),0) FROM produccion_tanque WHERE fecha_produccion=$1::date AND deleted_at IS NULL) total_tanque,
+      (SELECT COUNT(DISTINCT id_vaca)::int FROM produccion_leche WHERE fecha_produccion=$1::date AND deleted_at IS NULL) vacas_registradas`, [date])).rows[0];
+    return ok(res, { fecha: date, total_vacas: row.total_vacas, total_tanque: row.total_tanque,
+        diferencia: Number(row.total_tanque) - Number(row.total_vacas), vacas_registradas: row.vacas_registradas });
+}));
+recordsRouter.get('/produccion-tanque', requirePermission('PRODUCCION_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(`SELECT * FROM produccion_tanque WHERE deleted_at IS NULL ORDER BY fecha_produccion DESC,created_at DESC`)).rows)));
+recordsRouter.post('/produccion-tanque', requirePermission('PRODUCCION_ADMINISTRAR'), asyncHandler(async (req, res) => {
+    const input = tankSchema.parse(req.body);
+    const row = await transaction(async (client) => {
+        const saved = (await client.query(buildInsert('produccion_tanque', { ...input, referencia_externa: input.referencia_externa ?? null, observaciones: input.observaciones ?? null, registrado_por: req.user.id }))).rows[0];
+        await notifyTankProduction(client, saved, req.user.id);
+        return saved;
+    }, req.user.id);
+    return created(res, row);
+}));
+recordsRouter.patch('/produccion-tanque/:id', requirePermission('PRODUCCION_ADMINISTRAR'), asyncHandler(async (req, res) => {
+    const input = tankSchema.parse(req.body);
+    const row = (await pool.query(buildUpdate('produccion_tanque', 'id_produccion_tanque', routeParam(req.params.id, 'id'), input))).rows[0];
+    if (!row)
+        throw new NotFoundError('Medición del tanque no encontrada.');
+    return ok(res, row);
+}));
+recordsRouter.delete('/produccion-tanque/:id', requirePermission('PRODUCCION_ADMINISTRAR'), asyncHandler(async (req, res) => {
+    const result = await pool.query('UPDATE produccion_tanque SET deleted_at=NOW(),updated_at=NOW() WHERE id_produccion_tanque=$1 AND deleted_at IS NULL', [routeParam(req.params.id, 'id')]);
+    if (!result.rowCount)
+        throw new NotFoundError('Medición del tanque no encontrada.');
+    return noContent(res);
+}));
 recordsRouter.get('/:module', asyncHandler(async (req, res) => {
     const d = definition(routeParam(req.params.module, 'module'));
     assertPermission(req.user, d.read);
+    const treatmentSelect = d.table === 'tratamiento_animal' ? ',cs.estado condicion_estado,cs.descripcion condicion_descripcion,tcs.nombre condicion_tipo' : '';
+    const abortionSelect = d.table === 'aborto' ? ',pr.fecha_confirmacion prenez_fecha,pr.estado prenez_estado' : '';
+    const treatmentJoins = d.table === 'tratamiento_animal'
+        ? 'LEFT JOIN condicion_salud cs ON cs.id_condicion_salud=r.id_condicion_salud LEFT JOIN tipo_condicion_salud tcs ON tcs.id_tipo_condicion_salud=cs.id_tipo_condicion_salud'
+        : '';
+    const abortionJoins = d.table === 'aborto' ? 'LEFT JOIN prenez pr ON pr.id_prenez=r.id_prenez' : '';
     const rows = (await pool.query(`SELECT r.*, a.nombre animal, a.codigo_arete,a.id_categoria_animal,
-      ca.codigo categoria_codigo,ca.nombre categoria
+      ca.codigo categoria_codigo,ca.nombre categoria ${treatmentSelect}${abortionSelect}
      FROM ${d.table} r
      LEFT JOIN animal a ON a.id_animal = r.${d.animalColumn}
      LEFT JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
+     ${treatmentJoins}
+     ${abortionJoins}
      WHERE r.deleted_at IS NULL
      ORDER BY r.${d.order}`)).rows;
     return ok(res, rows);
@@ -48,18 +325,155 @@ recordsRouter.get('/:module', asyncHandler(async (req, res) => {
 recordsRouter.post('/:module', asyncHandler(async (req, res) => {
     const d = definition(routeParam(req.params.module, 'module'));
     assertPermission(req.user, d.write);
+    if (d.table === 'lactancia') {
+        const parsed = lactationSchema.parse(req.body);
+        const input = { ...parsed, id_parto: parsed.id_parto ?? null, fecha_fin: parsed.activa ? null : (parsed.fecha_fin ?? null), observaciones: parsed.observaciones ?? null };
+        const row = await transaction(async (client) => {
+            const fechaInicio = await validateLactation(client, input);
+            const saved = (await client.query(buildInsert('lactancia', { ...input, fecha_inicio: fechaInicio, registrado_por: req.user.id }))).rows[0];
+            if (input.en_ordeno)
+                await client.query('UPDATE animal SET en_ordeno=TRUE,updated_at=NOW() WHERE id_animal=$1', [input.id_vaca]);
+            await notifyRecordCreated(client, 'lactancias', saved, req.user.id);
+            return saved;
+        }, req.user.id);
+        return created(res, row);
+    }
     const data = allowedBody(req.body, d.columns);
+    if (d.table === 'aborto' && typeof data.id_prenez === 'string') {
+        const pregnancy = (await pool.query(`SELECT id_vaca,estado FROM prenez WHERE id_prenez=$1 AND deleted_at IS NULL`, [data.id_prenez])).rows[0];
+        if (!pregnancy || pregnancy.estado !== 'CONFIRMADA')
+            throw new ValidationError('La preñez seleccionada no está confirmada o ya fue finalizada.');
+        if (data.id_vaca && data.id_vaca !== pregnancy.id_vaca)
+            throw new ValidationError('La preñez seleccionada no pertenece a la vaca.');
+        data.id_vaca = pregnancy.id_vaca;
+    }
     const animalId = data[d.animalColumn];
     if (typeof animalId !== 'string')
         throw new ValidationError('Selecciona un animal.');
     await assertAnimalOperationAllowed(pool, animalId, d.operation);
-    const row = (await pool.query(buildInsert(d.table, { ...data, registrado_por: req.user.id }))).rows[0];
+    if (d.table === 'aborto') {
+        const row = await transaction(async (client) => {
+            const saved = (await client.query(buildInsert(d.table, { ...data, id_prenez: data.id_prenez ?? null, registrado_por: req.user.id }))).rows[0];
+            if (data.id_prenez) {
+                await client.query("UPDATE prenez SET estado='CANCELADA',updated_at=NOW() WHERE id_prenez=$1", [data.id_prenez]);
+                await client.query("UPDATE proximo_parto SET estado='CANCELADO',updated_at=NOW() WHERE id_prenez=$1 AND deleted_at IS NULL", [data.id_prenez]);
+            }
+            await notifyRecordCreated(client, 'abortos', saved, req.user.id);
+            return saved;
+        }, req.user.id);
+        return created(res, row);
+    }
+    if (d.table === 'produccion_leche') {
+        const date = String(data.fecha_produccion ?? '');
+        if (!date)
+            throw new ValidationError('Selecciona la fecha de producción.');
+        const row = await transaction(async (client) => {
+            const lactationId = await milkingLactation(client, animalId, date);
+            await assertUniqueMilkProduction(client, animalId, date, String(data.turno ?? 'UNICO'));
+            const saved = (await client.query(buildInsert(d.table, { ...data, id_lactancia: lactationId, fuente: data.fuente ?? 'MANUAL', registrado_por: req.user.id }))).rows[0];
+            await notifyRecordCreated(client, 'producciones', saved, req.user.id);
+            return saved;
+        }, req.user.id);
+        return created(res, row);
+    }
+    if (d.table === 'tratamiento_animal') {
+        const row = await transaction(async (client) => {
+            const condition = await linkedHealthCondition(client, data.id_condicion_salud, animalId);
+            const saved = (await client.query(buildInsert(d.table, { ...data, id_condicion_salud: data.id_condicion_salud ?? null, registrado_por: req.user.id }))).rows[0];
+            if (condition)
+                await client.query("UPDATE condicion_salud SET estado='EN_TRATAMIENTO',updated_at=NOW() WHERE id_condicion_salud=$1", [condition.id_condicion_salud]);
+            await notifyRecordCreated(client, 'tratamientos', saved, req.user.id);
+            return saved;
+        }, req.user.id);
+        return created(res, row);
+    }
+    const row = await transaction(async (client) => {
+        const saved = (await client.query(buildInsert(d.table, { ...data, registrado_por: req.user.id }))).rows[0];
+        await notifyRecordCreated(client, routeParam(req.params.module, 'module'), saved, req.user.id);
+        return saved;
+    }, req.user.id);
     return created(res, row);
 }));
 recordsRouter.patch('/:module/:id', asyncHandler(async (req, res) => {
     const d = definition(routeParam(req.params.module, 'module'));
     assertPermission(req.user, d.write);
+    if (d.table === 'lactancia') {
+        const id = routeParam(req.params.id, 'id');
+        const parsed = lactationSchema.parse(req.body);
+        const input = { ...parsed, id_parto: parsed.id_parto ?? null, fecha_fin: parsed.activa ? null : (parsed.fecha_fin ?? null), observaciones: parsed.observaciones ?? null };
+        const row = await transaction(async (client) => {
+            const current = (await client.query('SELECT id_lactancia,id_vaca,en_ordeno FROM lactancia WHERE id_lactancia=$1 AND deleted_at IS NULL FOR UPDATE', [id])).rows[0];
+            if (!current)
+                throw new NotFoundError('Lactancia no encontrada.');
+            const fechaInicio = await validateLactation(client, input, id);
+            const saved = (await client.query(buildUpdate('lactancia', 'id_lactancia', id, { ...input, fecha_inicio: fechaInicio }))).rows[0];
+            if (input.en_ordeno)
+                await client.query('UPDATE animal SET en_ordeno=TRUE,updated_at=NOW() WHERE id_animal=$1', [input.id_vaca]);
+            else if (current.en_ordeno)
+                await client.query('UPDATE animal SET en_ordeno=FALSE,updated_at=NOW() WHERE id_animal=$1', [current.id_vaca]);
+            return saved;
+        }, req.user.id);
+        return ok(res, row);
+    }
     const data = allowedBody(req.body, d.columns);
+    if (d.table === 'aborto') {
+        const id = routeParam(req.params.id, 'id');
+        const row = await transaction(async (client) => {
+            const current = (await client.query('SELECT * FROM aborto WHERE id_aborto=$1 AND deleted_at IS NULL FOR UPDATE', [id])).rows[0];
+            if (!current)
+                throw new NotFoundError('Aborto no encontrado.');
+            const pregnancyId = (Object.prototype.hasOwnProperty.call(data, 'id_prenez') ? data.id_prenez : current.id_prenez);
+            let animalId = String(data.id_vaca ?? current.id_vaca);
+            if (pregnancyId) {
+                const pregnancy = (await client.query('SELECT id_vaca,estado FROM prenez WHERE id_prenez=$1 AND deleted_at IS NULL', [pregnancyId])).rows[0];
+                if (!pregnancy)
+                    throw new ValidationError('La preñez seleccionada no existe.');
+                if (pregnancyId !== current.id_prenez && pregnancy.estado !== 'CONFIRMADA')
+                    throw new ValidationError('La preñez seleccionada ya fue finalizada.');
+                animalId = pregnancy.id_vaca;
+                if (pregnancy.estado === 'CONFIRMADA') {
+                    await client.query("UPDATE prenez SET estado='CANCELADA',updated_at=NOW() WHERE id_prenez=$1", [pregnancyId]);
+                    await client.query("UPDATE proximo_parto SET estado='CANCELADO',updated_at=NOW() WHERE id_prenez=$1 AND deleted_at IS NULL", [pregnancyId]);
+                }
+            }
+            await assertAnimalOperationAllowed(client, animalId, d.operation);
+            return (await client.query(buildUpdate(d.table, d.id, id, { ...data, id_vaca: animalId, id_prenez: pregnancyId ?? null }))).rows[0];
+        }, req.user.id);
+        return ok(res, row);
+    }
+    if (d.table === 'produccion_leche') {
+        const id = routeParam(req.params.id, 'id');
+        const row = await transaction(async (client) => {
+            const current = (await client.query(`SELECT id_vaca,fecha_produccion::text AS fecha_produccion,turno
+         FROM produccion_leche WHERE id_produccion=$1 AND deleted_at IS NULL FOR UPDATE`, [id])).rows[0];
+            if (!current)
+                throw new NotFoundError();
+            const animalId = String(data.id_vaca ?? current.id_vaca);
+            const date = String(data.fecha_produccion ?? current.fecha_produccion);
+            await assertAnimalOperationAllowed(client, animalId, d.operation);
+            const lactationId = await milkingLactation(client, animalId, date);
+            await assertUniqueMilkProduction(client, animalId, date, String(data.turno ?? current.turno ?? 'UNICO'), id);
+            return (await client.query(buildUpdate(d.table, d.id, id, { ...data, id_vaca: animalId, id_lactancia: lactationId }))).rows[0];
+        }, req.user.id);
+        return ok(res, row);
+    }
+    if (d.table === 'tratamiento_animal') {
+        const id = routeParam(req.params.id, 'id');
+        const row = await transaction(async (client) => {
+            const current = (await client.query('SELECT * FROM tratamiento_animal WHERE id_tratamiento=$1 AND deleted_at IS NULL FOR UPDATE', [id])).rows[0];
+            if (!current)
+                throw new NotFoundError();
+            const animalId = String(data.id_animal ?? current.id_animal);
+            const conditionId = (Object.prototype.hasOwnProperty.call(data, 'id_condicion_salud') ? data.id_condicion_salud : current.id_condicion_salud);
+            await assertAnimalOperationAllowed(client, animalId, d.operation);
+            const condition = await linkedHealthCondition(client, conditionId, animalId);
+            const saved = (await client.query(buildUpdate(d.table, d.id, id, { ...data, id_animal: animalId, id_condicion_salud: conditionId ?? null }))).rows[0];
+            if (condition)
+                await client.query("UPDATE condicion_salud SET estado='EN_TRATAMIENTO',updated_at=NOW() WHERE id_condicion_salud=$1", [condition.id_condicion_salud]);
+            return saved;
+        }, req.user.id);
+        return ok(res, row);
+    }
     const row = (await pool.query(buildUpdate(d.table, d.id, routeParam(req.params.id, 'id'), data))).rows[0];
     if (!row)
         throw new NotFoundError();
@@ -88,7 +502,25 @@ const partoSchema = z.object({
             id_origen: z.string().uuid(),
             id_grupo_actual: z.string().uuid().nullable().optional(),
             id_ubicacion_actual: z.string().uuid().nullable().optional(),
-            estado: z.enum(['ACTIVO', 'MUERTO']).default('ACTIVO')
+            estado: z.enum(['ACTIVO', 'MUERTO']).default('ACTIVO'),
+            colores: z.array(z.object({
+                id: z.string().uuid(),
+                principal: z.boolean().optional(),
+            })).default([]),
+            razas: z.array(z.object({
+                id: z.string().uuid(),
+                porcentaje: z.number().min(0).max(100).nullable().optional(),
+            })).default([]),
+            propietarios: z.array(z.object({
+                id: z.string().uuid(),
+                porcentaje: z.number().min(0).max(100).nullable().optional(),
+                principal: z.boolean().optional(),
+            })).default([]).superRefine((owners, ctx) => {
+                if (owners.filter((owner) => owner.principal).length > 1)
+                    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Solo un propietario puede ser principal.' });
+                if (owners.reduce((sum, owner) => sum + (owner.porcentaje ?? 0), 0) > 100.001)
+                    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'La suma de porcentajes de propiedad no puede superar 100%.' });
+            }),
         }),
         estado_nacimiento: z.enum(['VIVA', 'MUERTA', 'DEBIL', 'DESCONOCIDO']).default('VIVA'),
         peso_nacimiento_kg: z.number().positive().nullable().optional(),
@@ -117,7 +549,20 @@ birthsRouter.get('/', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (
       'foto_perfil',(SELECT ai.secure_url FROM animal_imagen ai WHERE ai.id_animal=c.id_animal AND ai.deleted_at IS NULL ORDER BY ai.es_perfil DESC,ai.created_at DESC LIMIT 1)
    ) ORDER BY pc.orden_nacimiento)
    FROM parto_cria pc JOIN animal c ON c.id_animal=pc.id_cria
-   WHERE pc.id_parto=p.id_parto AND pc.deleted_at IS NULL),'[]') crias
+   WHERE pc.id_parto=p.id_parto AND pc.deleted_at IS NULL),'[]') crias,
+   COALESCE((SELECT jsonb_agg(jsonb_build_object(
+     'id_imagen',bi.id_imagen,'secure_url',bi.secure_url,'url',bi.url,
+     'public_id',bi.public_id,'nombre_original',bi.nombre_original,
+     'descripcion',bi.descripcion,'fecha_toma',bi.fecha_toma,
+     'created_at',bi.created_at,'tipo_archivo',bi.tipo_archivo,'es_perfil',bi.es_perfil,
+     'etiquetas',COALESCE((SELECT jsonb_agg(jsonb_build_object(
+       'id_etiqueta',bem.id_etiqueta,'codigo',bem.codigo,'nombre',bem.nombre
+     ) ORDER BY bem.nombre) FROM animal_imagen_etiqueta bie
+       JOIN etiqueta_multimedia bem ON bem.id_etiqueta=bie.id_etiqueta AND bem.deleted_at IS NULL
+       WHERE bie.id_imagen=bi.id_imagen AND bie.deleted_at IS NULL),'[]'::jsonb)
+   ) ORDER BY bi.fecha_toma DESC,bi.created_at DESC)
+   FROM animal_imagen bi
+   WHERE bi.id_parto=p.id_parto AND bi.es_perfil=FALSE AND bi.deleted_at IS NULL),'[]') imagenes
    FROM parto p JOIN animal m ON m.id_animal=p.id_madre
    JOIN categoria_animal ca ON ca.id_categoria_animal=m.id_categoria_animal
    LEFT JOIN animal pa ON pa.id_animal=p.id_padre
@@ -213,18 +658,31 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
                     if (location.id_categoria_animal !== mother.id_categoria_animal)
                         throw new ValidationError(`La ubicación de la cría ${order} no coincide con la categoría de la madre.`);
                 }
-                const childState = item.estado_nacimiento === 'MUERTA' ? 'MUERTO' : item.animal.estado;
+                const { colores, razas, propietarios, ...animalData } = item.animal;
+                const childState = item.estado_nacimiento === 'MUERTA' ? 'MUERTO' : animalData.estado;
                 const cria = (await client.query(buildInsert('animal', {
-                    ...item.animal,
+                    ...animalData,
                     id_especie: mother.id_especie,
                     id_categoria_animal: mother.id_categoria_animal,
                     estado: childState,
                     fecha_nacimiento: birthDay,
-                    fecha_ingreso: birthDay,
                     id_madre: motherId,
                     id_padre: fatherId,
                     registrado_por: req.user.id,
                 }))).rows[0];
+                for (const color of colores)
+                    await client.query(buildInsert('animal_color', {
+                        id_animal: cria.id_animal, id_color: color.id, es_principal: color.principal ?? false, registrado_por: req.user.id,
+                    }));
+                for (const breed of razas)
+                    await client.query(buildInsert('animal_raza', {
+                        id_animal: cria.id_animal, id_raza: breed.id, porcentaje: breed.porcentaje ?? null, registrado_por: req.user.id,
+                    }));
+                for (const owner of propietarios)
+                    await client.query(buildInsert('animal_propietario', {
+                        id_animal: cria.id_animal, id_usuario: owner.id, porcentaje_propiedad: owner.porcentaje ?? null,
+                        es_principal: owner.principal ?? false, fecha_desde: birthDay, registrado_por: req.user.id,
+                    }));
                 const partoCria = (await client.query(buildInsert('parto_cria', {
                     id_parto: parto.id_parto,
                     id_cria: cria.id_animal,
@@ -257,7 +715,9 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
             await client.query(`UPDATE prenez SET estado='FINALIZADA',updated_at=NOW() WHERE id_prenez=$1`, [pregnancy.id_prenez]);
             await client.query(`UPDATE proximo_parto SET estado='REGISTRADO',updated_at=NOW()
          WHERE id_prenez=$1 AND deleted_at IS NULL`, [pregnancy.id_prenez]);
-            return { ...parto, crias: createdChildren };
+            const completed = { ...parto, crias: createdChildren };
+            await notifyBirth(client, completed, req.user.id);
+            return completed;
         }, req.user.id);
         return created(res, result);
     }
@@ -269,12 +729,52 @@ birthsRouter.post('/', requirePermission('PARTO_ADMINISTRAR'), asyncHandler(asyn
         throw error;
     }
 }));
+birthsRouter.post('/:id/imagenes', requirePermission('PARTO_ADMINISTRAR'), birthImageUpload.array('imagenes', 10), asyncHandler(async (req, res) => {
+    const birthId = routeParam(req.params.id, 'id');
+    const files = req.files;
+    if (!files?.length)
+        throw new ValidationError('Debes seleccionar al menos una imagen.');
+    const birth = (await pool.query('SELECT id_madre,fecha_parto::text AS fecha_parto FROM parto WHERE id_parto=$1 AND deleted_at IS NULL', [birthId])).rows[0];
+    if (!birth)
+        throw new NotFoundError('Parto no encontrado.');
+    const uploaded = [];
+    try {
+        for (const file of files)
+            uploaded.push(await uploadAnimalImage(file.buffer, birth.id_madre));
+        const rows = await transaction(async (client) => {
+            const saved = [];
+            for (let index = 0; index < files.length; index += 1) {
+                const file = files[index];
+                const cloud = uploaded[index];
+                if (!file || !cloud)
+                    continue;
+                const image = (await client.query(buildInsert('animal_imagen', {
+                    id_animal: birth.id_madre, id_parto: birthId, public_id: cloud.public_id, url: cloud.url,
+                    secure_url: cloud.secure_url, formato: cloud.format, ancho: cloud.width, alto: cloud.height,
+                    bytes: cloud.bytes, tipo_archivo: 'IMAGEN', mime_type: file.mimetype, nombre_original: file.originalname,
+                    es_perfil: false, fecha_toma: birth.fecha_parto, registrado_por: req.user.id,
+                }))).rows[0];
+                await client.query(buildInsert('animal_imagen_relacion', { id_imagen: image.id_imagen, id_animal: birth.id_madre, registrado_por: req.user.id }));
+                await client.query(`INSERT INTO animal_imagen_etiqueta(id_imagen,id_etiqueta,registrado_por)
+             SELECT $1,id_etiqueta,$2 FROM etiqueta_multimedia
+             WHERE codigo='PARTO' AND activo=TRUE AND deleted_at IS NULL ON CONFLICT DO NOTHING`, [image.id_imagen, req.user.id]);
+                saved.push(image);
+            }
+            return saved;
+        }, req.user.id);
+        return created(res, rows);
+    }
+    catch (error) {
+        await Promise.all(uploaded.map((image) => deleteCloudinaryImage(image.public_id).catch(() => undefined)));
+        throw error;
+    }
+}));
 birthsRouter.post('/:id/crias/:childId/imagenes', requirePermission('PARTO_ADMINISTRAR'), birthImageUpload.single('imagen'), asyncHandler(async (req, res) => {
     if (!req.file)
         throw new ValidationError('Debes seleccionar una imagen.');
     const birthId = routeParam(req.params.id, 'id');
     const childId = routeParam(req.params.childId, 'childId');
-    const relation = await pool.query(`SELECT p.id_madre
+    const relation = await pool.query(`SELECT p.id_madre,p.fecha_parto::text AS fecha_parto
        FROM parto_cria pc
        JOIN parto p ON p.id_parto=pc.id_parto AND p.deleted_at IS NULL
        JOIN animal a ON a.id_animal=pc.id_cria AND a.deleted_at IS NULL
@@ -290,6 +790,7 @@ birthsRouter.post('/:id/crias/:childId/imagenes', requirePermission('PARTO_ADMIN
             }
             const image = (await client.query(buildInsert('animal_imagen', {
                 id_animal: childId,
+                id_parto: birthId,
                 public_id: cloud.public_id,
                 url: cloud.url,
                 secure_url: cloud.secure_url,
@@ -301,6 +802,7 @@ birthsRouter.post('/:id/crias/:childId/imagenes', requirePermission('PARTO_ADMIN
                 mime_type: req.file.mimetype,
                 nombre_original: req.file.originalname,
                 es_perfil: profile,
+                fecha_toma: relation.rows[0].fecha_parto,
                 descripcion: req.body.descripcion || null,
                 registrado_por: req.user.id,
             }))).rows[0];
@@ -310,6 +812,11 @@ birthsRouter.post('/:id/crias/:childId/imagenes', requirePermission('PARTO_ADMIN
                     id_imagen: image.id_imagen, id_animal: relatedId, registrado_por: req.user.id,
                 }));
             }
+            if (!profile)
+                await client.query(`INSERT INTO animal_imagen_etiqueta(id_imagen,id_etiqueta,registrado_por)
+           SELECT $1,id_etiqueta,$2 FROM etiqueta_multimedia
+           WHERE codigo='PARTO' AND activo=TRUE AND deleted_at IS NULL
+           ON CONFLICT DO NOTHING`, [image.id_imagen, req.user.id]);
             return image;
         }, req.user.id);
         return created(res, row);

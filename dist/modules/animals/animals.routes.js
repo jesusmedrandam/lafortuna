@@ -38,7 +38,6 @@ const schema = z.object({
     id_marquilla: z.string().uuid().nullable().optional(),
     id_grupo_actual: z.string().uuid().nullable().optional(),
     id_ubicacion_actual: z.string().uuid().nullable().optional(),
-    fecha_ingreso: z.string().date().nullable().optional(),
     estado: animalConditionSchema.optional(),
     colores: z.array(relation).default([]),
     razas: z.array(relation).default([]),
@@ -62,7 +61,6 @@ const animalUpdateSchema = schema.omit({
     id_categoria_animal: true,
     id_grupo_actual: true,
     id_ubicacion_actual: true,
-    fecha_ingreso: true,
     estado: true,
 }).partial();
 const conditionActionSchema = z.object({
@@ -230,7 +228,7 @@ animalsRouter.get('/opciones/propietarios', requirePermission('ANIMAL_CONSULTAR'
     return ok(res, rows);
 }));
 animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
-    const result = await pool.query(`SELECT a.*,e.nombre especie,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
+    const result = await pool.query(`SELECT a.*,e.nombre especie,oa.nombre origen,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
       mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
       COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)
        FROM marquilla_usuario mu JOIN usuario mu_u ON mu_u.id_usuario=mu.id_usuario AND mu_u.deleted_at IS NULL
@@ -240,14 +238,19 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
        ORDER BY ip.created_at DESC LIMIT 1) foto_perfil,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_imagen',i.id_imagen,'secure_url',i.secure_url,'url',i.url,'public_id',i.public_id,
-        'es_perfil',i.es_perfil,'descripcion',i.descripcion,'orden',i.orden,'created_at',i.created_at,
+        'es_perfil',i.es_perfil,'descripcion',i.descripcion,'orden',i.orden,'created_at',i.created_at,'fecha_toma',i.fecha_toma,
         'tipo_archivo',i.tipo_archivo,'mime_type',i.mime_type,'nombre_original',i.nombre_original,
+        'etiquetas',COALESCE((SELECT jsonb_agg(jsonb_build_object(
+          'id_etiqueta',em.id_etiqueta,'codigo',em.codigo,'nombre',em.nombre
+        ) ORDER BY em.nombre)
+        FROM animal_imagen_etiqueta aie JOIN etiqueta_multimedia em ON em.id_etiqueta=aie.id_etiqueta AND em.deleted_at IS NULL
+        WHERE aie.id_imagen=i.id_imagen AND aie.deleted_at IS NULL),'[]'::jsonb),
         'animales',COALESCE((SELECT jsonb_agg(jsonb_build_object(
           'id_animal',ar_a.id_animal,'nombre',ar_a.nombre,'codigo_arete',ar_a.codigo_arete
         ) ORDER BY ar_a.nombre)
         FROM animal_imagen_relacion ar JOIN animal ar_a ON ar_a.id_animal=ar.id_animal AND ar_a.deleted_at IS NULL
         WHERE ar.id_imagen=i.id_imagen AND ar.deleted_at IS NULL),'[]'::jsonb)
-      ) ORDER BY i.es_perfil DESC,i.created_at DESC,i.orden DESC)
+      ) ORDER BY i.es_perfil DESC,i.fecha_toma DESC,i.created_at DESC,i.orden DESC)
       FROM animal_imagen i WHERE i.deleted_at IS NULL AND (i.id_animal=a.id_animal OR EXISTS(
         SELECT 1 FROM animal_imagen_relacion air
         WHERE air.id_imagen=i.id_imagen AND air.id_animal=a.id_animal AND air.deleted_at IS NULL
@@ -311,9 +314,105 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       FROM animal_condicion_evento ace
       LEFT JOIN ubicacion ace_u ON ace_u.id_ubicacion=ace.id_ubicacion_destino
       LEFT JOIN grupo ace_g ON ace_g.id_grupo=ace.id_grupo_destino
-      WHERE ace.id_animal=a.id_animal AND ace.deleted_at IS NULL),'[]'::jsonb) eventos_condicion
+      WHERE ace.id_animal=a.id_animal AND ace.deleted_at IS NULL),'[]'::jsonb) eventos_condicion,
+      CASE WHEN a.sexo='HEMBRA' THEN (SELECT COUNT(*)::int FROM parto hp
+        WHERE hp.id_madre=a.id_animal AND hp.deleted_at IS NULL) ELSE 0 END total_partos,
+      (SELECT COUNT(*)::int
+       FROM animal rc
+       WHERE rc.deleted_at IS NULL
+         AND (CASE WHEN a.sexo='HEMBRA' THEN rc.id_madre=a.id_animal ELSE rc.id_padre=a.id_animal END)) total_crias,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_animal',rc.id_animal,'nombre',rc.nombre,'codigo_arete',rc.codigo_arete,'sexo',rc.sexo,
+        'fecha_nacimiento',rc.fecha_nacimiento,
+        'id_parto',(SELECT rpc.id_parto FROM parto_cria rpc JOIN parto rp ON rp.id_parto=rpc.id_parto AND rp.deleted_at IS NULL
+          WHERE rpc.id_cria=rc.id_animal AND rpc.deleted_at IS NULL ORDER BY rp.fecha_parto DESC LIMIT 1),
+        'fecha_parto',(SELECT rp.fecha_parto FROM parto_cria rpc JOIN parto rp ON rp.id_parto=rpc.id_parto AND rp.deleted_at IS NULL
+          WHERE rpc.id_cria=rc.id_animal AND rpc.deleted_at IS NULL ORDER BY rp.fecha_parto DESC LIMIT 1),
+        'parentesco',CASE WHEN a.sexo='HEMBRA' THEN 'MADRE' ELSE 'PADRE' END
+      ) ORDER BY rc.fecha_nacimiento DESC NULLS LAST,rc.created_at DESC,rc.nombre)
+      FROM animal rc
+      WHERE rc.deleted_at IS NULL
+        AND (CASE WHEN a.sexo='HEMBRA' THEN rc.id_madre=a.id_animal ELSE rc.id_padre=a.id_animal END)),'[]'::jsonb) crias_registradas,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_parto',rp.id_parto,'fecha',rp.fecha_parto,'tipo',rp.tipo_parto,
+        'rol',CASE WHEN rp.id_madre=a.id_animal THEN 'MADRE' ELSE 'PADRE' END,
+        'contraparte',CASE WHEN rp.id_madre=a.id_animal THEN rf.nombre ELSE rm.nombre END,
+        'total_crias',(SELECT COUNT(*)::int FROM parto_cria rpc WHERE rpc.id_parto=rp.id_parto AND rpc.deleted_at IS NULL)
+      ) ORDER BY rp.fecha_parto DESC)
+      FROM parto rp
+      JOIN animal rm ON rm.id_animal=rp.id_madre
+      LEFT JOIN animal rf ON rf.id_animal=rp.id_padre
+      WHERE rp.deleted_at IS NULL AND (rp.id_madre=a.id_animal OR rp.id_padre=a.id_animal)),'[]'::jsonb) historial_partos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_celo',rc.id_celo,'fecha_inicio',rc.fecha_inicio,'fecha_fin',rc.fecha_fin,
+        'rol',CASE WHEN rc.id_vaca=a.id_animal THEN 'VACA' ELSE 'TORO' END,
+        'contraparte',CASE WHEN rc.id_vaca=a.id_animal THEN rct.nombre ELSE rcv.nombre END,
+        'observaciones',rc.observaciones
+      ) ORDER BY rc.fecha_inicio DESC)
+      FROM celo rc JOIN animal rcv ON rcv.id_animal=rc.id_vaca
+      LEFT JOIN animal rct ON rct.id_animal=rc.id_toro
+      WHERE rc.deleted_at IS NULL AND (rc.id_vaca=a.id_animal OR rc.id_toro=a.id_animal)),'[]'::jsonb) historial_celos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_prenez',rp.id_prenez,'fecha',rp.fecha_confirmacion,'estado',rp.estado,
+        'metodo',rp.metodo_embarazo,'rol',CASE WHEN rp.id_vaca=a.id_animal THEN 'VACA' ELSE 'PADRE' END,
+        'contraparte',CASE WHEN rp.id_vaca=a.id_animal THEN rpf.nombre ELSE rpv.nombre END,
+        'fecha_parto_tentativa',rp.fecha_parto_tentativa
+      ) ORDER BY rp.fecha_confirmacion DESC)
+      FROM prenez rp JOIN animal rpv ON rpv.id_animal=rp.id_vaca
+      LEFT JOIN animal rpf ON rpf.id_animal=rp.id_padre
+      WHERE rp.deleted_at IS NULL AND (rp.id_vaca=a.id_animal OR rp.id_padre=a.id_animal)),'[]'::jsonb) historial_preneces,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_aborto',ra.id_aborto,'fecha',ra.fecha,'causa',ra.causa,
+        'meses_gestacion',ra.meses_gestacion,'descripcion',ra.descripcion,'id_prenez',ra.id_prenez
+      ) ORDER BY ra.fecha DESC)
+      FROM aborto ra WHERE ra.id_vaca=a.id_animal AND ra.deleted_at IS NULL),'[]'::jsonb) historial_abortos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_actividad',ha.id_actividad,'fecha',ha.fecha,'tipo',hta.nombre,'codigo',hta.codigo,
+        'descripcion',ha.descripcion,'fierro',hm.nombre,'fierro_codigo',hm.codigo
+      ) ORDER BY ha.fecha DESC,ha.created_at DESC)
+      FROM actividad_animal haa
+      JOIN actividad ha ON ha.id_actividad=haa.id_actividad AND ha.deleted_at IS NULL
+      JOIN tipo_actividad hta ON hta.id_tipo_actividad=ha.id_tipo_actividad
+      LEFT JOIN marquilla hm ON hm.id_marquilla=ha.id_marquilla_aplicada
+      WHERE haa.id_animal=a.id_animal AND haa.deleted_at IS NULL),'[]'::jsonb) historial_actividades,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_movimiento',hmv.id_movimiento,
+        'fecha',COALESCE(hmd.aplicado_en,hmv.aplicado_en,hmv.fecha_movimiento),
+        'tipo',hmv.tipo_movimiento,'motivo',COALESCE(hmm.nombre,hmv.motivo),
+        'ubicacion_origen',huo.nombre,'ubicacion_destino',hud.nombre,
+        'grupo_origen',hgo.nombre,'grupo_destino',hgd.nombre
+      ) ORDER BY COALESCE(hmd.aplicado_en,hmv.aplicado_en,hmv.fecha_movimiento) DESC)
+      FROM movimiento_animal_detalle hmd
+      JOIN movimiento_animal hmv ON hmv.id_movimiento=hmd.id_movimiento AND hmv.deleted_at IS NULL
+      LEFT JOIN motivo_movimiento hmm ON hmm.id_motivo_movimiento=hmv.id_motivo_movimiento
+      LEFT JOIN ubicacion huo ON huo.id_ubicacion=COALESCE(hmd.id_ubicacion_anterior,hmv.id_ubicacion_origen)
+      LEFT JOIN ubicacion hud ON hud.id_ubicacion=COALESCE(hmd.id_ubicacion_destino,hmv.id_ubicacion_destino)
+      LEFT JOIN grupo hgo ON hgo.id_grupo=COALESCE(hmd.id_grupo_anterior,hmv.id_grupo_origen)
+      LEFT JOIN grupo hgd ON hgd.id_grupo=COALESCE(hmd.id_grupo_destino,hmv.id_grupo_destino)
+      WHERE hmd.id_animal=a.id_animal AND hmd.seleccionado=TRUE AND hmd.estado='APLICADO'
+        AND hmd.deleted_at IS NULL AND hmv.estado='COMPLETADO'),'[]'::jsonb) historial_movimientos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_tratamiento',ht.id_tratamiento,'fecha',ht.fecha_aplicacion,
+        'tipo',htt.nombre,'medicamento',hmed.nombre_comercial,'via',hvia.nombre,
+        'dosis',ht.dosis,'unidad',COALESCE(hum.simbolo,hum.nombre),
+        'descripcion',ht.descripcion,'observaciones',ht.observaciones
+      ) ORDER BY ht.fecha_aplicacion DESC,ht.created_at DESC)
+      FROM tratamiento_animal ht
+      JOIN tipo_tratamiento htt ON htt.id_tipo_tratamiento=ht.id_tipo_tratamiento
+      JOIN medicamento hmed ON hmed.id_medicamento=ht.id_medicamento
+      JOIN via_administracion hvia ON hvia.id_via_administracion=ht.id_via_administracion
+      JOIN unidad_medida hum ON hum.id_unidad=ht.id_unidad_dosis
+      WHERE ht.id_animal=a.id_animal AND ht.deleted_at IS NULL),'[]'::jsonb) historial_tratamientos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_produccion',hpl.id_produccion,'fecha',hpl.fecha_produccion,
+        'litros',hpl.litros,'turno',hpl.turno,'fuente',hpl.fuente,
+        'observaciones',hpl.observaciones
+      ) ORDER BY hpl.fecha_produccion DESC,hpl.created_at DESC)
+      FROM produccion_leche hpl
+      WHERE hpl.id_vaca=a.id_animal AND hpl.deleted_at IS NULL),'[]'::jsonb) historial_produccion
      FROM animal a
      JOIN especie e ON e.id_especie=a.id_especie
+     JOIN origen_animal oa ON oa.id_origen=a.id_origen
      JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
      LEFT JOIN condicion_animal coa ON coa.codigo=a.estado
      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
@@ -482,6 +581,7 @@ animalsRouter.post('/', requirePermission('ANIMAL_CREAR'), createUpload.single('
                     mime_type: profilePhoto?.mimetype ?? 'image/jpeg',
                     nombre_original: profilePhoto?.originalname ?? null,
                     es_perfil: true,
+                    fecha_toma: new Date().toISOString().slice(0, 10),
                     descripcion: descripcion_foto_perfil || 'Foto de perfil registrada al crear el animal.',
                     registrado_por: req.user.id,
                 }))).rows[0];

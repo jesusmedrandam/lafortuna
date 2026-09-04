@@ -183,6 +183,22 @@ export async function resetPassword(email, code, password) {
         return { message: 'Contraseña actualizada.' };
     });
 }
+export async function changePassword(userId, currentPassword, newPassword) {
+    return transaction(async (client) => {
+        const user = (await client.query('SELECT password_hash FROM usuario WHERE id_usuario=$1 AND deleted_at IS NULL FOR UPDATE', [userId])).rows[0];
+        if (!user?.password_hash || !await bcrypt.compare(currentPassword, user.password_hash)) {
+            throw new UnauthorizedError('La contraseña actual no es correcta.');
+        }
+        if (await bcrypt.compare(newPassword, user.password_hash)) {
+            throw new ConflictError('La nueva contraseña debe ser diferente de la actual.');
+        }
+        const hash = await bcrypt.hash(newPassword, 12);
+        await client.query('UPDATE usuario SET password_hash=$2,password_changed_at=NOW(),version_sesion=version_sesion+1,updated_at=NOW() WHERE id_usuario=$1', [userId, hash]);
+        await client.query('UPDATE refresh_token SET revocado_en=COALESCE(revocado_en,NOW()) WHERE id_usuario=$1', [userId]);
+        cache.forgetModuleVersion('usuarios');
+        return { message: 'Contraseña actualizada. Por seguridad, inicia sesión nuevamente.' };
+    });
+}
 export async function profile(userId) {
     const result = await pool.query('SELECT id_usuario,nombres,apellidos,telefono,correo,fecha_nacimiento,foto_perfil_url,ultimo_acceso,created_at FROM usuario WHERE id_usuario=$1 AND deleted_at IS NULL', [userId]);
     if (!result.rows[0])

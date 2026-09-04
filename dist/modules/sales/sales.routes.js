@@ -10,6 +10,7 @@ import { requirePermission } from '../../middleware/permission.js';
 import { cache } from '../../services/cache.service.js';
 import { assertAnimalOperationAllowed } from '../../services/animal-operation-policy.js';
 import { buildInsert } from '../shared/sql.js';
+import { notifyAnimalSale, notifyProductSale } from '../notifications/business-notifications.service.js';
 const detailSchema = z.object({
     id_animal: z.string().uuid(),
     precio_individual: z.number().min(0).nullable().optional(),
@@ -18,7 +19,6 @@ const detailSchema = z.object({
 const saleSchema = z.object({
     fecha_venta: z.string().date(),
     id_comprador: z.string().uuid(),
-    destino: z.string().trim().max(220).nullable().optional(),
     precio_total: z.number().min(0).nullable().optional(),
     moneda: z.string().trim().length(3).default('USD'),
     observaciones: z.string().trim().max(2000).nullable().optional(),
@@ -27,14 +27,14 @@ const saleSchema = z.object({
 const productDetailSchema = z.object({
     id_producto_venta: z.string().uuid(),
     cantidad: z.number().positive(),
+    cantidad_complementaria: z.number().positive().nullable().optional(),
     precio_unitario: z.number().min(0),
     observaciones: z.string().trim().max(300).nullable().optional(),
 });
 const productSaleSchema = z.object({
     fecha_venta: z.string().date(),
-    periodicidad: z.enum(['DIARIA', 'SEMANAL']),
+    periodicidad: z.enum(['DIARIA', 'SEMANAL', 'OCASIONAL']),
     id_comprador: z.string().uuid(),
-    destino: z.string().trim().max(220).nullable().optional(),
     moneda: z.string().trim().length(3).default('USD'),
     observaciones: z.string().trim().max(2000).nullable().optional(),
     productos: z.array(productDetailSchema).min(1),
@@ -72,7 +72,10 @@ salesRouter.get('/productos', requirePermission('VENTA_CONSULTAR'), asyncHandler
           'id_producto_venta', p.id_producto_venta,
           'producto', p.nombre,
           'unidad', COALESCE(um.simbolo,um.nombre,p.unidad,'Sin unidad'),
+          'id_unidad_complementaria', p.id_unidad_complementaria,
+          'unidad_complementaria', COALESCE(umc.simbolo,umc.nombre),
           'cantidad', d.cantidad,
+          'cantidad_complementaria', d.cantidad_complementaria,
           'precio_unitario', d.precio_unitario,
           'subtotal', d.subtotal,
           'observaciones', d.observaciones
@@ -80,6 +83,7 @@ salesRouter.get('/productos', requirePermission('VENTA_CONSULTAR'), asyncHandler
         FROM venta_producto_detalle d
         JOIN producto_venta p ON p.id_producto_venta=d.id_producto_venta
         LEFT JOIN unidad_medida um ON um.id_unidad=p.id_unidad_venta
+        LEFT JOIN unidad_medida umc ON umc.id_unidad=p.id_unidad_complementaria
         WHERE d.id_venta_producto=v.id_venta_producto AND d.deleted_at IS NULL
       ), '[]'::jsonb) productos
      FROM venta_producto v
@@ -116,7 +120,7 @@ salesRouter.post('/', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async
             ...header,
             comprador_nombre: buyer.nombre,
             comprador_contacto: buyer.contacto ?? null,
-            destino: header.destino ?? buyer.destino ?? null,
+            destino: buyer.destino ?? null,
             moneda: header.moneda.toUpperCase(),
             registrado_por: req.user.id,
         }))).rows[0];
@@ -151,6 +155,7 @@ salesRouter.post('/', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(async
          SET fecha_hasta=$2::date
          WHERE id_animal=$1 AND fecha_hasta IS NULL AND deleted_at IS NULL`, [animal.id_animal, input.fecha_venta]);
         }
+        await notifyAnimalSale(client, row, animales.length, req.user.id);
         return row;
     }, req.user.id);
     cache.forgetModuleVersion('ventas');
@@ -168,15 +173,19 @@ salesRouter.post('/productos', requirePermission('VENTA_ADMINISTRAR'), asyncHand
        WHERE id_comprador=$1 AND deleted_at IS NULL AND activo=TRUE`, [input.id_comprador])).rows[0];
         if (!buyer)
             throw new NotFoundError('El comprador no existe o está inactivo.');
-        const products = (await client.query(`SELECT id_producto_venta,nombre
+        const products = (await client.query(`SELECT id_producto_venta,nombre,id_unidad_complementaria
        FROM producto_venta
        WHERE id_producto_venta=ANY($1::uuid[]) AND deleted_at IS NULL AND activo=TRUE`, [[...uniqueIds]])).rows;
         if (products.length !== uniqueIds.size)
             throw new NotFoundError('Uno o más productos no existen o están inactivos.');
-        const details = input.productos.map((item) => ({
-            ...item,
-            subtotal: Number((item.cantidad * item.precio_unitario).toFixed(2)),
-        }));
+        const details = input.productos.map((item) => {
+            const product = products.find((value) => value.id_producto_venta === item.id_producto_venta);
+            if (product.id_unidad_complementaria && !item.cantidad_complementaria) {
+                throw new ValidationError(`Ingresa la cantidad complementaria de ${product.nombre}.`);
+            }
+            return { ...item, cantidad_complementaria: product.id_unidad_complementaria ? item.cantidad_complementaria : null,
+                subtotal: Number((item.cantidad * item.precio_unitario).toFixed(2)) };
+        });
         const total = Number(details.reduce((sum, item) => sum + item.subtotal, 0).toFixed(2));
         const row = (await client.query(buildInsert('venta_producto', {
             fecha_venta: input.fecha_venta,
@@ -184,7 +193,7 @@ salesRouter.post('/productos', requirePermission('VENTA_ADMINISTRAR'), asyncHand
             id_comprador: input.id_comprador,
             comprador_nombre: buyer.nombre,
             comprador_contacto: buyer.contacto ?? null,
-            destino: input.destino ?? buyer.destino ?? null,
+            destino: buyer.destino ?? null,
             precio_total: total,
             moneda: input.moneda.toUpperCase(),
             observaciones: input.observaciones ?? null,
@@ -195,11 +204,13 @@ salesRouter.post('/productos', requirePermission('VENTA_ADMINISTRAR'), asyncHand
                 id_venta_producto: row.id_venta_producto,
                 id_producto_venta: detail.id_producto_venta,
                 cantidad: detail.cantidad,
+                cantidad_complementaria: detail.cantidad_complementaria,
                 precio_unitario: detail.precio_unitario,
                 subtotal: detail.subtotal,
                 observaciones: detail.observaciones ?? null,
             }));
         }
+        await notifyProductSale(client, row, details.length, req.user.id);
         return { ...row, productos: details };
     }, req.user.id);
     cache.forgetModuleVersion('ventas');
@@ -220,15 +231,22 @@ salesRouter.patch('/productos/:id', requirePermission('VENTA_ADMINISTRAR'), asyn
         const buyer = (await client.query(`SELECT id_comprador,nombre,contacto,destino FROM comprador WHERE id_comprador=$1 AND deleted_at IS NULL AND activo=TRUE`, [input.id_comprador])).rows[0];
         if (!buyer)
             throw new NotFoundError('El comprador no existe o está inactivo.');
-        const products = (await client.query(`SELECT id_producto_venta FROM producto_venta WHERE id_producto_venta=ANY($1::uuid[]) AND deleted_at IS NULL AND activo=TRUE`, [[...uniqueIds]])).rows;
+        const products = (await client.query(`SELECT id_producto_venta,nombre,id_unidad_complementaria FROM producto_venta WHERE id_producto_venta=ANY($1::uuid[]) AND deleted_at IS NULL AND activo=TRUE`, [[...uniqueIds]])).rows;
         if (products.length !== uniqueIds.size)
             throw new NotFoundError('Uno o más productos no existen o están inactivos.');
-        const details = input.productos.map((item) => ({ ...item, subtotal: Number((item.cantidad * item.precio_unitario).toFixed(2)) }));
+        const details = input.productos.map((item) => {
+            const product = products.find((value) => value.id_producto_venta === item.id_producto_venta);
+            if (product.id_unidad_complementaria && !item.cantidad_complementaria) {
+                throw new ValidationError(`Ingresa la cantidad complementaria de ${product.nombre}.`);
+            }
+            return { ...item, cantidad_complementaria: product.id_unidad_complementaria ? item.cantidad_complementaria : null,
+                subtotal: Number((item.cantidad * item.precio_unitario).toFixed(2)) };
+        });
         const total = Number(details.reduce((sum, item) => sum + item.subtotal, 0).toFixed(2));
         const row = (await client.query(`UPDATE venta_producto SET fecha_venta=$2,periodicidad=$3,id_comprador=$4,comprador_nombre=$5,
        comprador_contacto=$6,destino=$7,precio_total=$8,moneda=$9,observaciones=$10,updated_at=NOW()
        WHERE id_venta_producto=$1 RETURNING *`, [id, input.fecha_venta, input.periodicidad, input.id_comprador, buyer.nombre, buyer.contacto ?? null,
-            input.destino ?? buyer.destino ?? null, total, input.moneda.toUpperCase(), input.observaciones ?? null])).rows[0];
+            buyer.destino ?? null, total, input.moneda.toUpperCase(), input.observaciones ?? null])).rows[0];
         await client.query(`DELETE FROM venta_producto_detalle WHERE id_venta_producto=$1`, [id]);
         for (const detail of details) {
             await client.query(buildInsert('venta_producto_detalle', { ...detail, id_venta_producto: id }));
@@ -253,7 +271,7 @@ salesRouter.patch('/:id', requirePermission('VENTA_ADMINISTRAR'), asyncHandler(a
         return (await client.query(`UPDATE venta_animal SET fecha_venta=$2,id_comprador=$3,comprador_nombre=$4,comprador_contacto=$5,
        destino=$6,precio_total=$7,moneda=$8,observaciones=$9,updated_at=NOW()
        WHERE id_venta=$1 RETURNING *`, [id, input.fecha_venta, input.id_comprador, buyer.nombre, buyer.contacto ?? null,
-            input.destino ?? buyer.destino ?? null, input.precio_total ?? null, input.moneda.toUpperCase(), input.observaciones ?? null])).rows[0];
+            buyer.destino ?? null, input.precio_total ?? null, input.moneda.toUpperCase(), input.observaciones ?? null])).rows[0];
     }, req.user.id);
     cache.forgetModuleVersion('ventas');
     return ok(res, row);

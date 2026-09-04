@@ -84,6 +84,16 @@ export function uploadUserProfileImage(buffer, userId) {
         invalidate: true,
     });
 }
+export function uploadRecordImage(buffer, moduleName, recordId) {
+    const safeModule = moduleName.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    return uploadBuffer(buffer, {
+        folder: `${rootFolder}/${safeModule}/${recordId}`,
+        resource_type: 'image',
+        overwrite: false,
+        unique_filename: true,
+        use_filename: false,
+    });
+}
 export async function deleteCloudinaryImage(publicId) {
     if (!enabled || !publicId)
         return;

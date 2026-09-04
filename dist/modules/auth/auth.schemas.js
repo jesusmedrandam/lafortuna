@@ -26,6 +26,13 @@ export const resetSchema = z.object({
     codigo: z.string().regex(/^\d{6}$/),
     password,
 });
+export const changePasswordSchema = z.object({
+    password_actual: z.string().min(1),
+    password_nueva: password,
+}).refine(value => value.password_actual !== value.password_nueva, {
+    message: 'La nueva contraseña debe ser diferente de la actual.',
+    path: ['password_nueva'],
+});
 export const profileSchema = z.object({
     nombres: z.string().trim().min(2).max(80).optional(),
     apellidos: z.string().trim().min(2).max(80).optional(),

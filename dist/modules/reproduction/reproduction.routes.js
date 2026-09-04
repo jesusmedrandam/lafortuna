@@ -9,6 +9,7 @@ import { NotFoundError, ValidationError } from '../../core/errors.js';
 import { requirePermission } from '../../middleware/permission.js';
 import { buildInsert, buildUpdate } from '../shared/sql.js';
 import { assertAnimalOperationAllowed } from '../../services/animal-operation-policy.js';
+import { notifyReproductionEvent } from '../notifications/business-notifications.service.js';
 const GESTATION_DAYS = 283;
 const heatSchema = z.object({
     id_vaca: z.string().uuid(),
@@ -128,7 +129,9 @@ reproductionRouter.post('/celos', requirePermission('PARTO_ADMINISTRAR'), asyncH
             if (bull.id_especie !== cow.id_especie)
                 throw new ValidationError('El toro y la vaca deben pertenecer a la misma especie.');
         }
-        return (await client.query(buildInsert('celo', { ...input, registrado_por: req.user.id }))).rows[0];
+        const saved = (await client.query(buildInsert('celo', { ...input, registrado_por: req.user.id }))).rows[0];
+        await notifyReproductionEvent(client, 'CELO', saved, req.user.id);
+        return saved;
     }, req.user.id);
     return created(res, row);
 }));
@@ -185,6 +188,7 @@ reproductionRouter.post('/preneces', requirePermission('PARTO_ADMINISTRAR'), asy
                 estado: 'PENDIENTE',
                 registrado_por: req.user.id,
             }));
+            await notifyReproductionEvent(client, 'PRENEZ', pregnancy, req.user.id);
             return pregnancy;
         }, req.user.id);
         return created(res, row);

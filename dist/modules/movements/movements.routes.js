@@ -4,11 +4,14 @@ import { pool } from '../../database/pool.js';
 import { transaction } from '../../database/transaction.js';
 import { asyncHandler } from '../../core/async-handler.js';
 import { routeParam } from '../../core/route-param.js';
-import { created, ok } from '../../core/http.js';
+import { created, noContent, ok } from '../../core/http.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../core/errors.js';
 import { requirePermission } from '../../middleware/permission.js';
 import { assertAnimalOperationAllowed } from '../../services/animal-operation-policy.js';
 import { buildInsert } from '../shared/sql.js';
+import { deleteCloudinaryImage } from '../../services/cloudinary.service.js';
+import { deleteRecordImage, recordImageUpload, requestFiles, saveRecordImages } from '../shared/record-images.js';
+import { assessPastureTickRisk, notifyMovementApplied } from '../notifications/business-notifications.service.js';
 const movementKind = z.enum(['UBICACION', 'GRUPO', 'PROPIEDAD', 'COMBINADO']);
 const MAIN_PROPERTY = 'PROPIEDAD_PRINCIPAL';
 const movementAnimal = z.object({
@@ -76,6 +79,9 @@ function validateMovementMode(kind, mode, groupFilterId, destinationGroupId) {
         throw new ValidationError('El grupo debe conservarse al cambiar de potrero o corral.');
     }
 }
+function destinationComesFromGroup(kind) {
+    return kind === 'GRUPO' || kind === 'PROPIEDAD' || kind === 'COMBINADO';
+}
 function defaultReasonCode(kind) {
     if (kind === 'UBICACION')
         return 'ROTACION_POTRERO';
@@ -135,9 +141,14 @@ async function validateMovementSelection(database, input) {
      FROM grupo WHERE id_grupo=$1 AND deleted_at IS NULL AND activo=TRUE`, [input.id_grupo_destino])).rows[0];
     if (!group)
         throw new ValidationError('El grupo de destino no está disponible.');
-    const effectiveLocationId = input.id_ubicacion_destino ?? group.id_ubicacion_actual;
-    if (!effectiveLocationId)
-        throw new ValidationError('Seleccione la ubicación de destino del grupo.');
+    // En cambios de grupo y traslados entre propiedades el grupo es la fuente
+    // única de la ubicación. El cliente no debe poder enviar un potrero distinto.
+    const effectiveLocationId = destinationComesFromGroup(input.tipo_movimiento)
+        ? group.id_ubicacion_actual
+        : input.id_ubicacion_destino ?? group.id_ubicacion_actual;
+    if (!effectiveLocationId) {
+        throw new ValidationError('El grupo de destino no tiene un potrero o corral asignado. Configúralo antes de realizar el traslado.');
+    }
     const location = (await database.query(`SELECT u.id_ubicacion,u.tipo,u.id_categoria_animal,u.id_propiedad
      FROM ubicacion u
      JOIN propiedad_ganadera p ON p.id_propiedad=u.id_propiedad
@@ -277,10 +288,12 @@ async function applyValidatedMovement(database, id, input, validation) {
     return { cantidad: validation.currentAnimals.length };
 }
 export const movementsRouter = Router();
+const movementImageDefinition = { table: 'movimiento_imagen', idColumn: 'id_movimiento_imagen', parentColumn: 'id_movimiento', parentTable: 'movimiento_animal', parentIdColumn: 'id_movimiento', moduleName: 'movimientos' };
 movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(`SELECT m.*,COALESCE(mm.nombre,m.motivo) motivo_catalogo,
     u1.nombre ubicacion_origen,u2.nombre ubicacion_destino,g1.nombre grupo_origen,g2.nombre grupo_destino,
     p1.nombre propiedad_origen,p1.es_principal propiedad_origen_es_principal,
     p2.nombre propiedad_destino,p2.es_principal propiedad_destino_es_principal,
+    route.origen_descripcion,route.destino_descripcion,
     COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id_detalle',d.id_movimiento_detalle,'id_animal',a.id_animal,'animal',a.nombre,'nombre',a.nombre,
       'arete',a.codigo_arete,'codigo_arete',a.codigo_arete,'sexo',a.sexo,
@@ -292,7 +305,11 @@ movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler
       JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
       LEFT JOIN grupo ga ON ga.id_grupo=a.id_grupo_actual
       LEFT JOIN ubicacion ua ON ua.id_ubicacion=a.id_ubicacion_actual
-      WHERE d.id_movimiento=m.id_movimiento AND d.deleted_at IS NULL),'[]') detalles
+      WHERE d.id_movimiento=m.id_movimiento AND d.deleted_at IS NULL),'[]') detalles,
+    COALESCE((SELECT jsonb_agg(to_jsonb(mi) ORDER BY mi.created_at)
+      FROM movimiento_imagen mi WHERE mi.id_movimiento=m.id_movimiento AND mi.lado='ORIGEN' AND mi.deleted_at IS NULL),'[]') fotos_origen,
+    COALESCE((SELECT jsonb_agg(to_jsonb(mi) ORDER BY mi.created_at)
+      FROM movimiento_imagen mi WHERE mi.id_movimiento=m.id_movimiento AND mi.lado='DESTINO' AND mi.deleted_at IS NULL),'[]') fotos_destino
    FROM movimiento_animal m
    LEFT JOIN ubicacion u1 ON u1.id_ubicacion=m.id_ubicacion_origen
    LEFT JOIN ubicacion u2 ON u2.id_ubicacion=m.id_ubicacion_destino
@@ -300,8 +317,79 @@ movementsRouter.get('/', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler
    LEFT JOIN grupo g2 ON g2.id_grupo=m.id_grupo_destino
    LEFT JOIN propiedad_ganadera p1 ON p1.id_propiedad=m.id_propiedad_origen
    LEFT JOIN propiedad_ganadera p2 ON p2.id_propiedad=m.id_propiedad_destino
+   LEFT JOIN LATERAL (
+     SELECT
+       STRING_AGG(DISTINCT CASE
+         WHEN go.nombre IS NOT NULL AND uo.nombre IS NOT NULL THEN go.nombre||' ('||uo.nombre||')'
+         WHEN go.nombre IS NOT NULL THEN go.nombre
+         ELSE uo.nombre END,', ') origen_descripcion,
+       STRING_AGG(DISTINCT CASE
+         WHEN gd.nombre IS NOT NULL AND ud.nombre IS NOT NULL THEN gd.nombre||' ('||ud.nombre||')'
+         WHEN gd.nombre IS NOT NULL THEN gd.nombre
+         ELSE ud.nombre END,', ') destino_descripcion
+     FROM movimiento_animal_detalle md
+     JOIN animal ma ON ma.id_animal=md.id_animal
+     LEFT JOIN grupo go ON go.id_grupo=COALESCE(md.id_grupo_anterior,ma.id_grupo_actual,m.id_grupo_origen,m.id_grupo_filtro)
+     LEFT JOIN ubicacion uo ON uo.id_ubicacion=COALESCE(md.id_ubicacion_anterior,ma.id_ubicacion_actual,m.id_ubicacion_origen)
+     LEFT JOIN grupo gd ON gd.id_grupo=COALESCE(md.id_grupo_destino,m.id_grupo_destino)
+     LEFT JOIN ubicacion ud ON ud.id_ubicacion=COALESCE(md.id_ubicacion_destino,m.id_ubicacion_destino)
+     WHERE md.id_movimiento=m.id_movimiento AND md.seleccionado=TRUE AND md.deleted_at IS NULL
+   ) route ON TRUE
    LEFT JOIN motivo_movimiento mm ON mm.id_motivo_movimiento=m.id_motivo_movimiento
    WHERE m.deleted_at IS NULL ORDER BY m.fecha_movimiento DESC`)).rows)));
+movementsRouter.get('/:id', requirePermission('MOVIMIENTO_CONSULTAR'), asyncHandler(async (req, res) => {
+    const row = (await pool.query(`SELECT m.*,COALESCE(mm.nombre,m.motivo) motivo_catalogo,
+      u1.nombre ubicacion_origen,u2.nombre ubicacion_destino,g1.nombre grupo_origen,g2.nombre grupo_destino,
+      p1.nombre propiedad_origen,p1.es_principal propiedad_origen_es_principal,
+      p2.nombre propiedad_destino,p2.es_principal propiedad_destino_es_principal,
+      route.origen_descripcion,route.destino_descripcion,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_detalle',d.id_movimiento_detalle,'id_animal',a.id_animal,'animal',a.nombre,'nombre',a.nombre,
+        'arete',a.codigo_arete,'codigo_arete',a.codigo_arete,'sexo',a.sexo,
+        'id_categoria_animal',a.id_categoria_animal,'categoria',ca.nombre,
+        'id_grupo_actual',a.id_grupo_actual,'grupo',ga.nombre,'id_ubicacion_actual',a.id_ubicacion_actual,'ubicacion',ua.nombre,
+        'seleccionado',d.seleccionado,'estado',d.estado,'mensaje_error',d.mensaje_error,'observaciones',d.observaciones))
+        FROM movimiento_animal_detalle d
+        JOIN animal a ON a.id_animal=d.id_animal
+        JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
+        LEFT JOIN grupo ga ON ga.id_grupo=a.id_grupo_actual
+        LEFT JOIN ubicacion ua ON ua.id_ubicacion=a.id_ubicacion_actual
+        WHERE d.id_movimiento=m.id_movimiento AND d.deleted_at IS NULL),'[]') detalles,
+      COALESCE((SELECT jsonb_agg(to_jsonb(mi) ORDER BY mi.created_at)
+        FROM movimiento_imagen mi WHERE mi.id_movimiento=m.id_movimiento AND mi.lado='ORIGEN' AND mi.deleted_at IS NULL),'[]') fotos_origen,
+      COALESCE((SELECT jsonb_agg(to_jsonb(mi) ORDER BY mi.created_at)
+        FROM movimiento_imagen mi WHERE mi.id_movimiento=m.id_movimiento AND mi.lado='DESTINO' AND mi.deleted_at IS NULL),'[]') fotos_destino
+     FROM movimiento_animal m
+     LEFT JOIN ubicacion u1 ON u1.id_ubicacion=m.id_ubicacion_origen
+     LEFT JOIN ubicacion u2 ON u2.id_ubicacion=m.id_ubicacion_destino
+     LEFT JOIN grupo g1 ON g1.id_grupo=m.id_grupo_origen
+     LEFT JOIN grupo g2 ON g2.id_grupo=m.id_grupo_destino
+     LEFT JOIN propiedad_ganadera p1 ON p1.id_propiedad=m.id_propiedad_origen
+     LEFT JOIN propiedad_ganadera p2 ON p2.id_propiedad=m.id_propiedad_destino
+     LEFT JOIN LATERAL (
+       SELECT
+         STRING_AGG(DISTINCT CASE
+           WHEN go.nombre IS NOT NULL AND uo.nombre IS NOT NULL THEN go.nombre||' ('||uo.nombre||')'
+           WHEN go.nombre IS NOT NULL THEN go.nombre
+           ELSE uo.nombre END,', ') origen_descripcion,
+         STRING_AGG(DISTINCT CASE
+           WHEN gd.nombre IS NOT NULL AND ud.nombre IS NOT NULL THEN gd.nombre||' ('||ud.nombre||')'
+           WHEN gd.nombre IS NOT NULL THEN gd.nombre
+           ELSE ud.nombre END,', ') destino_descripcion
+       FROM movimiento_animal_detalle md
+       JOIN animal ma ON ma.id_animal=md.id_animal
+       LEFT JOIN grupo go ON go.id_grupo=COALESCE(md.id_grupo_anterior,ma.id_grupo_actual,m.id_grupo_origen,m.id_grupo_filtro)
+       LEFT JOIN ubicacion uo ON uo.id_ubicacion=COALESCE(md.id_ubicacion_anterior,ma.id_ubicacion_actual,m.id_ubicacion_origen)
+       LEFT JOIN grupo gd ON gd.id_grupo=COALESCE(md.id_grupo_destino,m.id_grupo_destino)
+       LEFT JOIN ubicacion ud ON ud.id_ubicacion=COALESCE(md.id_ubicacion_destino,m.id_ubicacion_destino)
+       WHERE md.id_movimiento=m.id_movimiento AND md.seleccionado=TRUE AND md.deleted_at IS NULL
+     ) route ON TRUE
+     LEFT JOIN motivo_movimiento mm ON mm.id_motivo_movimiento=m.id_motivo_movimiento
+     WHERE m.id_movimiento=$1 AND m.deleted_at IS NULL`, [routeParam(req.params.id, 'id')])).rows[0];
+    if (!row)
+        throw new NotFoundError('Movimiento no encontrado.');
+    return ok(res, row);
+}));
 movementsRouter.post('/', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(async (req, res) => {
     const input = movement.parse(req.body);
     validateMovementMode(input.tipo_movimiento, input.modo_seleccion, input.id_grupo_filtro, input.id_grupo_destino);
@@ -319,7 +407,10 @@ movementsRouter.post('/', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(as
             ? input.id_grupo_filtro
             : input.id_grupo_destino;
         const destinationGroup = await groupOrigin(client, destinationGroupId);
-        const destinationLocationProperty = await locationProperty(client, input.id_ubicacion_destino);
+        const destinationLocationId = destinationGroup && destinationComesFromGroup(input.tipo_movimiento)
+            ? destinationGroup.id_ubicacion_actual
+            : input.id_ubicacion_destino;
+        const destinationLocationProperty = await locationProperty(client, destinationLocationId);
         if (destinationGroup && destinationLocationProperty && destinationGroup.id_propiedad !== destinationLocationProperty) {
             throw new ValidationError('El grupo y la ubicación de destino pertenecen a propiedades diferentes.');
         }
@@ -331,6 +422,7 @@ movementsRouter.post('/', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(as
         const row = (await client.query(buildInsert('movimiento_animal', {
             ...head,
             id_ubicacion_origen: input.id_ubicacion_origen ?? source?.id_ubicacion_actual ?? null,
+            id_ubicacion_destino: destinationLocationId ?? null,
             id_grupo_origen: input.tipo_movimiento === 'UBICACION' ? input.id_grupo_filtro ?? null : input.id_grupo_origen ?? null,
             id_grupo_destino: destinationGroupId ?? null,
             id_propiedad_origen: requestedSourceProperty ?? source?.id_propiedad ?? null,
@@ -345,7 +437,7 @@ movementsRouter.post('/', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(as
         for (const animal of animals)
             await client.query(buildInsert('movimiento_animal_detalle', {
                 ...animal,
-                id_ubicacion_destino: input.id_ubicacion_destino ?? null,
+                id_ubicacion_destino: destinationLocationId ?? null,
                 id_grupo_destino: destinationGroupId ?? null,
                 id_movimiento: row.id_movimiento,
             }));
@@ -383,8 +475,11 @@ movementsRouter.patch('/:id', requirePermission('MOVIMIENTO_CREAR'), asyncHandle
                 ? found.id_ubicacion_origen ?? source?.id_ubicacion_actual ?? null
                 : input.id_ubicacion_origen;
             validateMovementMode(nextKind, nextMode, nextGroupFilter, nextDestinationGroup);
-            const nextDestinationLocation = input.id_ubicacion_destino === undefined ? found.id_ubicacion_destino : input.id_ubicacion_destino;
             const destinationGroup = await groupOrigin(client, nextDestinationGroup);
+            const requestedDestinationLocation = input.id_ubicacion_destino === undefined ? found.id_ubicacion_destino : input.id_ubicacion_destino;
+            const nextDestinationLocation = destinationGroup && destinationComesFromGroup(nextKind)
+                ? destinationGroup.id_ubicacion_actual
+                : requestedDestinationLocation;
             const destinationLocationProperty = await locationProperty(client, nextDestinationLocation);
             if (destinationGroup && destinationLocationProperty && destinationGroup.id_propiedad !== destinationLocationProperty) {
                 throw new ValidationError('El grupo y la ubicación de destino pertenecen a propiedades diferentes.');
@@ -439,7 +534,15 @@ movementsRouter.post('/:id/aplicar', requirePermission('MOVIMIENTO_CREAR'), asyn
     const row = await transaction(async (client) => {
         const input = await loadMovementForValidation(client, id);
         const validation = await validateMovementSelection(client, input);
-        return applyValidatedMovement(client, id, input, validation);
+        const tickRisk = input.tipo_movimiento === 'UBICACION'
+            ? await assessPastureTickRisk(client, validation.effectiveLocationId, input.fecha_movimiento)
+            : null;
+        const applied = await applyValidatedMovement(client, id, input, validation);
+        await notifyMovementApplied(client, {
+            id, tipo: input.tipo_movimiento, fecha: input.fecha_movimiento, cantidad: applied.cantidad,
+            destinoId: validation.effectiveLocationId, actor: req.user.id, tickRisk,
+        });
+        return applied;
     }, req.user.id);
     return ok(res, row);
 }));
@@ -448,5 +551,23 @@ movementsRouter.post('/:id/cancelar', requirePermission('MOVIMIENTO_ANULAR'), as
     if (!row)
         throw new NotFoundError();
     return ok(res, row);
+}));
+movementsRouter.post('/:id/imagenes/:lado', requirePermission('MOVIMIENTO_CREAR'), recordImageUpload.array('imagenes', 3), asyncHandler(async (req, res) => {
+    const id = routeParam(req.params.id, 'id');
+    const side = z.enum(['ORIGEN', 'DESTINO']).parse(routeParam(req.params.lado, 'lado').toUpperCase());
+    const rows = await transaction(async (client) => {
+        const movement = (await client.query(`SELECT tipo_movimiento FROM movimiento_animal WHERE id_movimiento=$1 AND deleted_at IS NULL FOR SHARE`, [id])).rows[0];
+        if (!movement)
+            throw new NotFoundError('Movimiento no encontrado.');
+        if (movement.tipo_movimiento !== 'UBICACION')
+            throw new ValidationError('Las fotografías de origen y destino corresponden únicamente a cambios de potrero o corral.');
+        return saveRecordImages(client, movementImageDefinition, id, requestFiles(req), req.user.id, { lado: side });
+    }, req.user.id);
+    return created(res, rows);
+}));
+movementsRouter.delete('/imagenes/:imageId', requirePermission('MOVIMIENTO_CREAR'), asyncHandler(async (req, res) => {
+    const image = await transaction(client => deleteRecordImage(client, movementImageDefinition, routeParam(req.params.imageId, 'imageId')), req.user.id);
+    await deleteCloudinaryImage(image.public_id);
+    return noContent(res);
 }));
 //# sourceMappingURL=movements.routes.js.map

@@ -26,8 +26,12 @@ const definitions = {
     'tipos-tratamiento': { table: 'tipo_tratamiento', id: 'id_tipo_tratamiento', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
     vias: { table: 'via_administracion', id: 'id_via_administracion', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
     medicamentos: { table: 'medicamento', id: 'id_medicamento', columns: ['nombre_comercial', 'principio_activo', 'fabricante', 'id_unidad_predeterminada', 'dias_retiro_leche', 'dias_retiro_carne', 'activo'], order: 'nombre_comercial' },
-    'productos-venta': { table: 'producto_venta', id: 'id_producto_venta', columns: ['codigo', 'nombre', 'id_unidad_venta', 'descripcion', 'activo'], order: 'nombre' },
-    compradores: { table: 'comprador', id: 'id_comprador', columns: ['codigo', 'nombre', 'contacto', 'destino', 'descripcion', 'activo'], order: 'nombre' }
+    'productos-venta': { table: 'producto_venta', id: 'id_producto_venta', columns: ['codigo', 'nombre', 'id_unidad_venta', 'id_unidad_complementaria', 'descripcion', 'activo'], order: 'nombre' },
+    compradores: { table: 'comprador', id: 'id_comprador', columns: ['codigo', 'nombre', 'contacto', 'destino', 'descripcion', 'activo'], order: 'nombre' },
+    'etiquetas-multimedia': { table: 'etiqueta_multimedia', id: 'id_etiqueta', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
+    'tipos-producto-compra': { table: 'tipo_producto_compra', id: 'id_tipo_producto_compra', columns: ['codigo', 'nombre', 'es_animal', 'descripcion', 'activo'], order: 'nombre' },
+    'tipos-actividad': { table: 'tipo_actividad', id: 'id_tipo_actividad', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' },
+    'tipos-condicion-salud': { table: 'tipo_condicion_salud', id: 'id_tipo_condicion_salud', columns: ['codigo', 'nombre', 'descripcion', 'activo'], order: 'nombre' }
 };
 const nameSchema = z.enum(Object.keys(definitions));
 const protectedAnimalConditions = new Set(['ACTIVO', 'INACTIVO', 'VENDIDO', 'TRASLADADO', 'DESAPARECIDO', 'MUERTO']);
@@ -40,6 +44,13 @@ function normalizeCatalogData(name, body) {
         data.codigo = code;
         if (!/^[A-Z0-9_]+$/.test(code)) {
             throw new ValidationError('El código solo puede contener letras, números y guion bajo.');
+        }
+    }
+    if (name === 'productos-venta') {
+        if (data.id_unidad_complementaria === '')
+            data.id_unidad_complementaria = null;
+        if (data.id_unidad_venta && data.id_unidad_complementaria === data.id_unidad_venta) {
+            throw new ValidationError('La unidad complementaria debe ser diferente de la unidad principal.');
         }
     }
     return data;
