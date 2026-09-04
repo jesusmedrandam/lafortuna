@@ -26,9 +26,11 @@ function number(value: unknown) {
 }
 
 function animalLabel(row: Row) {
-  const name = String(row.nombre ?? 'Animal');
-  const tag = String(row.codigo_arete ?? '').trim();
-  return tag ? `${name} (arete ${tag})` : name;
+  return String(row.nombre ?? 'Animal');
+}
+
+function countLabel(value: number, singular: string, plural: string) {
+  return `${value.toLocaleString('es-EC')} ${value === 1 ? singular : plural}`;
 }
 
 async function currentEcuadorDate(client: PoolClient) {
@@ -57,13 +59,13 @@ async function notifyUpcomingBirths(client: PoolClient, today: string) {
     const stage = days < 0 ? 'ATRASADO' : days <= 2 ? 'DOS_DIAS' : days <= 7 ? 'SIETE_DIAS' : 'CATORCE_DIAS';
     const priority = days < 0 || days <= 2 ? 'URGENTE' : days <= 7 ? 'IMPORTANTE' : 'INFO';
     const timing = days < 0
-      ? `La fecha estimada pasó hace ${Math.abs(days)} día(s)`
-      : days === 0 ? 'La fecha estimada es hoy' : `Faltan aproximadamente ${days} día(s)`;
+      ? `La fecha estimada pasó hace ${countLabel(Math.abs(days),'día','días')}`
+      : days === 0 ? 'La fecha estimada es hoy' : `Faltan aproximadamente ${countLabel(days,'día','días')}`;
     await emitNotification(client, {
       tipo: 'PROXIMO_PARTO', categoria: 'REPRODUCCION', prioridad: priority,
       titulo: days < 0 ? 'Parto estimado atrasado' : 'Próximo parto',
       mensaje: `${animalLabel(row)} · ${timing} (${dueDate}).`, permiso: 'PARTO_CONSULTAR',
-      entidadTipo: 'PROXIMO_PARTO', entidadId: String(row.id_proximo_parto), ruta: '/partos',
+      entidadTipo: 'PROXIMO_PARTO', entidadId: String(row.id_proximo_parto), ruta: `/partos?prenez=${row.id_prenez}&tab=pregnancies`,
       datos: { id_animal: row.id_animal, id_prenez: row.id_prenez, fecha_tentativa: dueDate, dias_restantes: days },
       claveDedupe: `CALC:PARTO:${row.id_proximo_parto}:${stage}`,
     });
@@ -85,7 +87,7 @@ async function notifyBirthdays(client: PoolClient, today: string) {
   for (const row of rows) {
     await emitNotification(client, {
       tipo: 'CUMPLEANOS_ANIMAL', categoria: 'ANIMALES', prioridad: 'INFO',
-      titulo: 'Cumpleaños del animal', mensaje: `${animalLabel(row)} cumple ${number(row.edad)} año(s) hoy.`,
+      titulo: 'Cumpleaños del animal', mensaje: `${animalLabel(row)} cumple ${countLabel(number(row.edad),'año','años')} hoy.`,
       permiso: 'ANIMAL_CONSULTAR', entidadTipo: 'ANIMAL', entidadId: String(row.id_animal),
       ruta: `/animales/${row.id_animal}`, datos: { edad: number(row.edad), fecha_nacimiento: row.fecha_nacimiento },
       claveDedupe: `CALC:CUMPLE:${row.id_animal}:${year}`,
@@ -128,7 +130,7 @@ async function notifyProductionVariation(client: PoolClient, yesterday: string) 
     prioridad: decrease && variation <= -30 ? 'URGENTE' : 'IMPORTANTE',
     titulo: decrease ? 'Caída de producción de leche' : 'Aumento de producción de leche',
     mensaje: `${yesterday}: ${current.toLocaleString('es-EC', { maximumFractionDigits: 2 })} L, ${Math.abs(variation).toLocaleString('es-EC', { maximumFractionDigits: 1 })}% ${decrease ? 'por debajo' : 'por encima'} del promedio de días con registros.`,
-    permiso: 'PRODUCCION_CONSULTAR', entidadTipo: 'PRODUCCION_DIARIA', ruta: '/produccion',
+    permiso: 'PRODUCCION_CONSULTAR', entidadTipo: 'PRODUCCION_DIARIA', ruta: `/produccion?fecha=${yesterday}`,
     datos: { fecha: yesterday, total_litros: current, promedio_litros: average, variacion_porcentaje: variation, fuente: row.fuente },
     claveDedupe: `CALC:PRODUCCION:${yesterday}`,
   });
@@ -160,8 +162,8 @@ async function notifyOverdueCleanings(client: PoolClient, today: string) {
       titulo: never ? 'Potrero sin limpieza registrada' : 'Limpieza de potrero pendiente',
       mensaje: never
         ? `${row.nombre} no tiene una limpieza completada registrada.`
-        : `${row.nombre} lleva ${number(row.dias)} día(s) desde la última limpieza completada.`,
-      permiso: 'LIMPIEZA_CONSULTAR', entidadTipo: 'POTRERO', entidadId: String(row.id_potrero), ruta: '/limpiezas',
+        : `${row.nombre} lleva ${countLabel(number(row.dias),'día','días')} desde la última limpieza completada.`,
+      permiso: 'LIMPIEZA_CONSULTAR', entidadTipo: 'POTRERO', entidadId: String(row.id_potrero), ruta: `/limpiezas?potrero=${row.id_potrero}`,
       datos: { ultima_limpieza: row.ultima_limpieza, dias: row.dias, umbral_dias: env.CLEANING_ALERT_DAYS },
       claveDedupe: `CALC:LIMPIEZA:${row.id_potrero}:${month}`,
     });
@@ -191,7 +193,7 @@ async function notifyTreatmentDates(client: PoolClient, today: string) {
       tipo: 'TRATAMIENTO_PENDIENTE', categoria: 'SANIDAD', prioridad: days <= 0 ? 'URGENTE' : 'IMPORTANTE',
       titulo: days < 0 ? 'Tratamiento atrasado' : days === 0 ? 'Tratamiento programado para hoy' : 'Próximo tratamiento',
       mensaje: `${animalLabel(row)} · ${String(row.tratamiento ?? 'Tratamiento')} · ${next}${days > 0 ? ` (faltan ${days} días)` : days < 0 ? ` (${Math.abs(days)} días de atraso)` : ''}.`,
-      permiso: 'SANIDAD_CONSULTAR', entidadTipo: 'TRATAMIENTO', entidadId: String(row.id_tratamiento), ruta: '/sanidad',
+      permiso: 'SANIDAD_CONSULTAR', entidadTipo: 'TRATAMIENTO', entidadId: String(row.id_tratamiento), ruta: `/sanidad?tratamiento=${row.id_tratamiento}`,
       datos: { id_animal: row.id_animal, proxima_aplicacion: next, dias_restantes: days },
       claveDedupe: `CALC:TRATAMIENTO:${row.id_tratamiento}:${stage}`,
     });

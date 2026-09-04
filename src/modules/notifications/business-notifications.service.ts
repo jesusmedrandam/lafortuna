@@ -44,9 +44,29 @@ function money(value: unknown, currency = 'USD') {
 
 function animalLabel(row: Row | undefined) {
   if (!row) return 'Animal';
-  const name = text(row.nombre, 'Animal');
-  const tag = text(row.codigo_arete);
-  return tag ? `${name} (arete ${tag})` : name;
+  return text(row.nombre, 'Animal');
+}
+
+function countLabel(value: number, singular: string, plural: string) {
+  return `${value.toLocaleString('es-EC')} ${value === 1 ? singular : plural}`;
+}
+
+function joinNames(values: unknown[]) {
+  const names = values.map(value => text(value)).filter(Boolean);
+  if (names.length < 2) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} y ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')} y ${names.at(-1)}`;
+}
+
+function animalSubject(count: number, values: unknown) {
+  const names = Array.isArray(values) ? values.map(value => text(value)).filter(Boolean) : [];
+  return count <= 3 && names.length === count
+    ? joinNames(names)
+    : countLabel(count, 'animal', 'animales');
+}
+
+function detailRoute(base: string, key: string, id: unknown, extra = '') {
+  return `${base}?${key}=${encodeURIComponent(text(id))}${extra}`;
 }
 
 async function emitBusinessNotification(
@@ -85,7 +105,7 @@ export async function notifyRecordCreated(
       dedupe: 'PRODUCCION_VACA', tipo: 'PRODUCCION_VACA_REGISTRADA', categoria: 'PRODUCCION', prioridad: 'INFO',
       titulo: 'Producción de leche registrada',
       mensaje: `${label} · ${number(row.litros).toLocaleString('es-EC')} litros · ${text(row.fecha_produccion)}${row.turno ? ` · ${text(row.turno).toLowerCase()}` : ''}.`,
-      permiso: 'PRODUCCION_CONSULTAR', entidadTipo: 'PRODUCCION_LECHE', ruta: '/produccion',
+      permiso: 'PRODUCCION_CONSULTAR', entidadTipo: 'PRODUCCION_LECHE', ruta: detailRoute('/produccion','registro',row.id_produccion),
       datos: { id_animal: animalId, litros: number(row.litros), fecha: row.fecha_produccion, turno: row.turno ?? null },
     });
   }
@@ -95,7 +115,7 @@ export async function notifyRecordCreated(
       dedupe: 'ABORTO', tipo: 'ABORTO_REGISTRADO', categoria: 'REPRODUCCION', prioridad: 'URGENTE',
       titulo: 'Aborto registrado',
       mensaje: `${label} · ${text(row.fecha, 'fecha no indicada')}${text(row.causa) ? ` · ${text(row.causa)}` : ''}.`,
-      permiso: 'ABORTO_CONSULTAR', entidadTipo: 'ABORTO', ruta: '/partos',
+      permiso: 'ABORTO_CONSULTAR', entidadTipo: 'ABORTO', ruta: detailRoute('/partos','aborto',row.id_aborto,'&tab=abortions'),
       datos: { id_animal: animalId },
     });
   }
@@ -104,7 +124,7 @@ export async function notifyRecordCreated(
       dedupe: 'MUERTE', tipo: 'MUERTE_REGISTRADA', categoria: 'ANIMALES', prioridad: 'URGENTE',
       titulo: 'Muerte registrada',
       mensaje: `${label} · ${text(row.fecha, 'fecha no indicada')}${text(row.causa) ? ` · ${text(row.causa)}` : ''}.`,
-      permiso: 'MUERTE_CONSULTAR', entidadTipo: 'MUERTE', ruta: '/muertes',
+      permiso: 'MUERTE_CONSULTAR', entidadTipo: 'MUERTE', ruta: detailRoute('/muertes','registro',row.id_muerte),
       datos: { id_animal: animalId },
     });
   }
@@ -113,7 +133,7 @@ export async function notifyRecordCreated(
       dedupe: 'PESAJE', tipo: 'PESAJE_REGISTRADO', categoria: 'PESAJES', prioridad: 'INFO',
       titulo: 'Nuevo pesaje',
       mensaje: `${label} · ${number(row.peso_kg).toLocaleString('es-EC')} kg · ${text(row.fecha_pesaje)}.`,
-      permiso: 'PESAJE_CONSULTAR', entidadTipo: 'PESAJE', ruta: '/pesajes',
+      permiso: 'PESAJE_CONSULTAR', entidadTipo: 'PESAJE', ruta: detailRoute('/pesajes','registro',row.id_pesaje),
       datos: { id_animal: animalId, peso_kg: number(row.peso_kg) },
     });
   }
@@ -122,7 +142,7 @@ export async function notifyRecordCreated(
       dedupe: 'TRATAMIENTO', tipo: 'TRATAMIENTO_APLICADO', categoria: 'SANIDAD', prioridad: 'IMPORTANTE',
       titulo: 'Tratamiento aplicado',
       mensaje: `${label} · aplicación ${text(row.fecha_aplicacion)}${row.proxima_aplicacion ? ` · próxima ${text(row.proxima_aplicacion)}` : ''}.`,
-      permiso: 'SANIDAD_CONSULTAR', entidadTipo: 'TRATAMIENTO', ruta: '/sanidad',
+      permiso: 'SANIDAD_CONSULTAR', entidadTipo: 'TRATAMIENTO', ruta: detailRoute('/sanidad','tratamiento',row.id_tratamiento),
       datos: { id_animal: animalId, proxima_aplicacion: row.proxima_aplicacion ?? null },
     });
   }
@@ -131,7 +151,7 @@ export async function notifyRecordCreated(
       dedupe: 'LACTANCIA', tipo: 'LACTANCIA_REGISTRADA', categoria: 'PRODUCCION', prioridad: 'INFO',
       titulo: row.activa === false ? 'Lactancia registrada' : 'Lactancia iniciada',
       mensaje: `${label} · inicio ${text(row.fecha_inicio)}${row.en_ordeno ? ' · incluida en ordeño' : ''}.`,
-      permiso: 'LACTANCIA_CONSULTAR', entidadTipo: 'LACTANCIA', ruta: '/produccion',
+      permiso: 'LACTANCIA_CONSULTAR', entidadTipo: 'LACTANCIA', ruta: detailRoute('/produccion','lactancia',row.id_lactancia,'&tab=lactations'),
       datos: { id_animal: animalId, activa: row.activa, en_ordeno: row.en_ordeno },
     });
   }
@@ -143,7 +163,7 @@ export async function notifyTankProduction(database: Queryable, row: Row, actor:
     dedupe: 'PRODUCCION_TANQUE', tipo: 'PRODUCCION_TANQUE_REGISTRADA', categoria: 'PRODUCCION', prioridad: 'INFO',
     titulo: 'Producción de tanque registrada',
     mensaje: `${number(row.litros).toLocaleString('es-EC')} litros · ${text(row.fecha_produccion)}${row.turno ? ` · ${text(row.turno)}` : ''}.`,
-    permiso: 'PRODUCCION_CONSULTAR', entidadTipo: 'PRODUCCION_TANQUE', ruta: '/produccion',
+    permiso: 'PRODUCCION_CONSULTAR', entidadTipo: 'PRODUCCION_TANQUE', ruta: detailRoute('/produccion','tanque',row.id_produccion_tanque),
     datos: { litros: number(row.litros), fecha: row.fecha_produccion, turno: row.turno ?? null },
   });
 }
@@ -153,11 +173,15 @@ export async function notifyBirth(database: Queryable, row: Row, actor: string) 
   const children = Array.isArray(row.crias) ? row.crias as Row[] : [];
   const live = children.filter(child => text(child.estado_nacimiento) !== 'MUERTA').length;
   const dead = children.length - live;
+  const result = [
+    live ? countLabel(live, 'cría viva', 'crías vivas') : '',
+    dead ? countLabel(dead, 'cría muerta', 'crías muertas') : '',
+  ].filter(Boolean).join(' y ');
   return emitBusinessNotification(database, actor, text(row.id_parto), {
     dedupe: 'PARTO', tipo: 'PARTO_REGISTRADO', categoria: 'REPRODUCCION', prioridad: dead ? 'IMPORTANTE' : 'INFO',
     titulo: 'Parto registrado',
-    mensaje: `${animalLabel(mother)} · ${children.length} cría(s), ${live} viva(s)${dead ? ` y ${dead} muerta(s)` : ''}.`,
-    permiso: 'PARTO_CONSULTAR', entidadTipo: 'PARTO', ruta: '/partos',
+    mensaje: `${animalLabel(mother)} · ${result || 'sin crías registradas'}.`,
+    permiso: 'PARTO_CONSULTAR', entidadTipo: 'PARTO', ruta: detailRoute('/partos','parto',row.id_parto,'&tab=births'),
     datos: { id_madre: row.id_madre, crias: children.length, vivas: live, muertas: dead },
   });
 }
@@ -166,18 +190,29 @@ export async function notifyAnimalSale(database: Queryable, row: Row, count: num
   return emitBusinessNotification(database, actor, text(row.id_venta), {
     dedupe: 'VENTA_ANIMALES', tipo: 'VENTA_ANIMALES_REGISTRADA', categoria: 'VENTAS', prioridad: 'IMPORTANTE',
     titulo: 'Venta de animales registrada',
-    mensaje: `${count} animal(es) · ${text(row.comprador_nombre, 'comprador no indicado')} · ${money(row.precio_total, text(row.moneda, 'USD'))}.`,
-    permiso: 'VENTA_CONSULTAR', entidadTipo: 'VENTA_ANIMAL', ruta: '/ventas',
+    mensaje: `${countLabel(count,'animal','animales')} · ${text(row.comprador_nombre, 'comprador no indicado')} · ${money(row.precio_total, text(row.moneda, 'USD'))}.`,
+    permiso: 'VENTA_CONSULTAR', entidadTipo: 'VENTA_ANIMAL', ruta: detailRoute('/ventas','venta',row.id_venta,'&tipo=animales'),
     datos: { cantidad: count, total: number(row.precio_total), moneda: text(row.moneda, 'USD') },
   });
 }
 
 export async function notifyProductSale(database: Queryable, row: Row, count: number, actor: string) {
+  const products = (await database.query(
+    `SELECT d.cantidad,p.nombre,COALESCE(um.simbolo,um.nombre,p.unidad,'unidad') unidad
+     FROM venta_producto_detalle d
+     JOIN producto_venta p ON p.id_producto_venta=d.id_producto_venta
+     LEFT JOIN unidad_medida um ON um.id_unidad=p.id_unidad_venta
+     WHERE d.id_venta_producto=$1 AND d.deleted_at IS NULL
+     ORDER BY p.nombre`, [row.id_venta_producto],
+  )).rows as Row[];
+  const productSummary = products.length <= 3
+    ? products.map(product => `${number(product.cantidad).toLocaleString('es-EC')} ${text(product.unidad)} ${text(product.nombre)}`).join(' · ')
+    : countLabel(count,'producto','productos');
   return emitBusinessNotification(database, actor, text(row.id_venta_producto), {
     dedupe: 'VENTA_PRODUCTOS', tipo: 'VENTA_PRODUCTOS_REGISTRADA', categoria: 'VENTAS', prioridad: 'INFO',
     titulo: 'Venta de productos registrada',
-    mensaje: `${count} producto(s) · ${text(row.comprador_nombre, 'comprador no indicado')} · ${money(row.precio_total, text(row.moneda, 'USD'))}.`,
-    permiso: 'VENTA_CONSULTAR', entidadTipo: 'VENTA_PRODUCTO', ruta: '/ventas',
+    mensaje: `${productSummary} · ${text(row.comprador_nombre, 'comprador no indicado')} · ${money(row.precio_total, text(row.moneda, 'USD'))}.`,
+    permiso: 'VENTA_CONSULTAR', entidadTipo: 'VENTA_PRODUCTO', ruta: detailRoute('/ventas','venta_producto',row.id_venta_producto,'&tipo=productos'),
     datos: { cantidad: count, total: number(row.precio_total), moneda: text(row.moneda, 'USD') },
   });
 }
@@ -187,7 +222,7 @@ export async function notifyPurchase(database: Queryable, row: Row, actor: strin
     dedupe: 'COMPRA', tipo: 'COMPRA_REGISTRADA', categoria: 'COMPRAS', prioridad: 'INFO',
     titulo: 'Compra registrada',
     mensaje: `${text(row.producto ?? row.animal, 'Compra')} · ${text(row.proveedor)} · ${money(row.valor_total, text(row.moneda, 'USD'))}.`,
-    permiso: 'COMPRA_CONSULTAR', entidadTipo: 'COMPRA', ruta: '/compras',
+    permiso: 'COMPRA_CONSULTAR', entidadTipo: 'COMPRA', ruta: detailRoute('/compras','compra',row.id_compra),
     datos: { total: number(row.valor_total), moneda: text(row.moneda, 'USD'), id_animal: row.id_animal ?? null },
   });
 }
@@ -202,7 +237,7 @@ export async function notifyCleaning(database: Queryable, row: Row, actor: strin
     dedupe: 'LIMPIEZA', tipo: 'LIMPIEZA_POTRERO_REGISTRADA', categoria: 'MANTENIMIENTO',
     prioridad: state === 'COMPLETADO' ? 'INFO' : 'IMPORTANTE', titulo: 'Limpieza de potrero registrada',
     mensaje: `${text(pasture?.nombre, 'Potrero')} · ${text(row.fecha_inicio)} · estado ${state.toLowerCase().replaceAll('_', ' ')}.`,
-    permiso: 'LIMPIEZA_CONSULTAR', entidadTipo: 'LIMPIEZA_POTRERO', ruta: '/limpiezas',
+    permiso: 'LIMPIEZA_CONSULTAR', entidadTipo: 'LIMPIEZA_POTRERO', ruta: detailRoute('/limpiezas','limpieza',row.id_limpieza),
     datos: { id_potrero: row.id_potrero, estado: state },
   });
 }
@@ -212,8 +247,8 @@ export async function notifyActivity(database: Queryable, row: Row, count: numbe
   return emitBusinessNotification(database, actor, text(row.id_actividad), {
     dedupe: 'ACTIVIDAD', tipo: 'ACTIVIDAD_REGISTRADA', categoria: 'ACTIVIDADES', prioridad: 'INFO',
     titulo: 'Actividad registrada',
-    mensaje: `${text(type?.nombre, 'Actividad')} · ${count} animal(es) · ${text(row.fecha)}.`,
-    permiso: 'ACTIVIDAD_CONSULTAR', entidadTipo: 'ACTIVIDAD', ruta: '/actividades',
+    mensaje: `${text(type?.nombre, 'Actividad')} · ${countLabel(count,'animal','animales')} · ${text(row.fecha)}.`,
+    permiso: 'ACTIVIDAD_CONSULTAR', entidadTipo: 'ACTIVIDAD', ruta: detailRoute('/actividades','actividad',row.id_actividad),
     datos: { cantidad_animales: count, id_tipo_actividad: row.id_tipo_actividad },
   });
 }
@@ -229,8 +264,8 @@ export async function notifySanitaryCampaign(database: Queryable, id: string, co
   return emitBusinessNotification(database, actor, id, {
     dedupe: 'JORNADA_SANITARIA', tipo: 'JORNADA_SANITARIA_APLICADA', categoria: 'SANIDAD', prioridad: 'IMPORTANTE',
     titulo: 'Jornada sanitaria aplicada',
-    mensaje: `${text(campaign?.tipo, 'Tratamiento')} · ${text(campaign?.medicamento)} · ${count} animal(es).`,
-    permiso: 'SANIDAD_CONSULTAR', entidadTipo: 'JORNADA_SANITARIA', ruta: '/sanidad',
+    mensaje: `${text(campaign?.tipo, 'Tratamiento')} · ${text(campaign?.medicamento)} · ${countLabel(count,'animal','animales')}.`,
+    permiso: 'SANIDAD_CONSULTAR', entidadTipo: 'JORNADA_SANITARIA', ruta: detailRoute('/sanidad','jornada',id),
     datos: { cantidad_animales: count, fecha: campaign?.fecha_aplicacion ?? null },
   });
 }
@@ -254,7 +289,7 @@ export async function notifyHealthCondition(
     categoria: 'SANIDAD', prioridad: resolved ? 'INFO' : 'URGENTE',
     titulo: resolved ? 'Condición de salud resuelta' : 'Condición de salud detectada',
     mensaje: `${animalLabel(context)} · ${text(context?.tipo, text(row.descripcion, 'condición sin clasificar'))}${resolved ? ' · marcada como resuelta' : ''}.`,
-    permiso: 'SANIDAD_CONSULTAR', entidadTipo: 'CONDICION_SALUD', ruta: '/sanidad',
+    permiso: 'SANIDAD_CONSULTAR', entidadTipo: 'CONDICION_SALUD', ruta: detailRoute('/sanidad','condicion',row.id_condicion_salud),
     datos: { id_animal: row.id_animal, estado: resolved ? 'RESUELTA' : row.estado },
   });
 }
@@ -271,14 +306,14 @@ export async function notifyReproductionEvent(
     return emitBusinessNotification(database, actor, text(row.id_celo), {
       dedupe: 'CELO', tipo: 'CELO_REGISTRADO', categoria: 'REPRODUCCION', prioridad: 'INFO',
       titulo: 'Celo registrado', mensaje: `${animalLabel(animal)} · inicio ${text(row.fecha_inicio)}.`,
-      permiso: 'PARTO_CONSULTAR', entidadTipo: 'CELO', ruta: '/partos', datos: { id_animal: animalId },
+      permiso: 'PARTO_CONSULTAR', entidadTipo: 'CELO', ruta: detailRoute('/partos','celo',row.id_celo,'&tab=heats'), datos: { id_animal: animalId },
     });
   }
   return emitBusinessNotification(database, actor, text(row.id_prenez), {
     dedupe: 'PRENEZ', tipo: 'PRENEZ_CONFIRMADA', categoria: 'REPRODUCCION', prioridad: 'IMPORTANTE',
     titulo: 'Preñez confirmada',
     mensaje: `${animalLabel(animal)}${row.fecha_parto_tentativa ? ` · parto estimado ${text(row.fecha_parto_tentativa)}` : ' · sin fecha estimada de parto'}.`,
-    permiso: 'PARTO_CONSULTAR', entidadTipo: 'PRENEZ', ruta: '/partos',
+    permiso: 'PARTO_CONSULTAR', entidadTipo: 'PRENEZ', ruta: detailRoute('/partos','prenez',row.id_prenez,'&tab=pregnancies'),
     datos: { id_animal: animalId, fecha_parto_tentativa: row.fecha_parto_tentativa ?? null },
   });
 }
@@ -335,19 +370,19 @@ function tickMessage(risk: TickRisk): { title: string; message: string; priority
   };
   if (risk.dias_descanso < earliestHatch) return {
     title: `Fase previa a la eclosión: ${risk.nombre}`, priority: 'IMPORTANTE', level: 'PRE_ECLOSION',
-    message: `${risk.nombre} lleva ${risk.dias_descanso} día(s) desocupado. Está en la fase inicial: es probable que las larvas todavía no hayan emergido, aunque pueden quedar huevos que eclosionen mientras el grupo permanezca allí.`,
+    message: `${risk.nombre} lleva ${countLabel(risk.dias_descanso,'día','días')} desocupado. Está en la fase inicial: es probable que las larvas todavía no hayan emergido, aunque pueden quedar huevos que eclosionen mientras el grupo permanezca allí.`,
   };
   if (risk.dias_descanso < minimumRest) return {
     title: `Riesgo alto de garrapata: ${risk.nombre}`, priority: 'URGENTE', level: 'ALTO',
-    message: `${risk.nombre} lleva ${risk.dias_descanso} día(s) desocupado y está dentro de la ventana en que pueden comenzar a emerger larvas. Los animales podrían infestarse.`,
+    message: `${risk.nombre} lleva ${countLabel(risk.dias_descanso,'día','días')} desocupado y está dentro de la ventana en que pueden comenzar a emerger larvas. Los animales podrían infestarse.`,
   };
   if (risk.dias_descanso < reducedRisk) return {
     title: `Riesgo moderado de garrapata: ${risk.nombre}`, priority: 'IMPORTANTE', level: 'MODERADO',
-    message: `${risk.nombre} descansó ${risk.dias_descanso} día(s). Un descanso de ${minimumRest} días puede reducir la carga, pero todavía pueden persistir larvas capaces de infestar hasta el margen conservador de ${reducedRisk} días.`,
+    message: `${risk.nombre} descansó ${countLabel(risk.dias_descanso,'día','días')}. Un descanso de ${countLabel(minimumRest,'día','días')} puede reducir la carga, pero todavía pueden persistir larvas capaces de infestar hasta el margen conservador de ${countLabel(reducedRisk,'día','días')}.`,
   };
   return {
     title: `Riesgo reducido de garrapata: ${risk.nombre}`, priority: 'INFO', level: 'REDUCIDO',
-    message: `${risk.nombre} descansó ${risk.dias_descanso} día(s) y superó el margen conservador de ${reducedRisk} días. El riesgo baja, pero el potrero no se considera libre de garrapatas.`,
+    message: `${risk.nombre} descansó ${countLabel(risk.dias_descanso,'día','días')} y superó el margen conservador de ${countLabel(reducedRisk,'día','días')}. El riesgo baja, pero el potrero no se considera libre de garrapatas.`,
   };
 }
 
@@ -356,6 +391,7 @@ export async function notifyMovementApplied(database: Queryable, input: Movement
     `SELECT m.tipo_movimiento,u1.nombre ubicacion_origen,COALESCE(u2.nombre,ud.nombre) ubicacion_destino,
        g1.nombre grupo_origen,g2.nombre grupo_destino,p1.nombre propiedad_origen,p2.nombre propiedad_destino,
        route.origen_descripcion,route.destino_descripcion
+       ,route.animal_nombres
      FROM movimiento_animal m
      LEFT JOIN ubicacion u1 ON u1.id_ubicacion=m.id_ubicacion_origen
      LEFT JOIN ubicacion u2 ON u2.id_ubicacion=m.id_ubicacion_destino
@@ -373,7 +409,8 @@ export async function notifyMovementApplied(database: Queryable, input: Movement
          STRING_AGG(DISTINCT CASE
            WHEN gd.nombre IS NOT NULL AND udd.nombre IS NOT NULL THEN gd.nombre||' ('||udd.nombre||')'
            WHEN gd.nombre IS NOT NULL THEN gd.nombre
-           ELSE udd.nombre END,', ') destino_descripcion
+           ELSE udd.nombre END,', ') destino_descripcion,
+         ARRAY_AGG(DISTINCT ma.nombre ORDER BY ma.nombre) FILTER (WHERE ma.nombre IS NOT NULL) animal_nombres
        FROM movimiento_animal_detalle md
        JOIN animal ma ON ma.id_animal=md.id_animal
        LEFT JOIN grupo go ON go.id_grupo=COALESCE(md.id_grupo_anterior,ma.id_grupo_actual,m.id_grupo_origen,m.id_grupo_filtro)
@@ -385,25 +422,26 @@ export async function notifyMovementApplied(database: Queryable, input: Movement
      WHERE m.id_movimiento=$1`, [input.id,input.destinoId],
   )).rows[0] as Row | undefined;
   const kind=text(context?.tipo_movimiento,input.tipo);
+  const subject=animalSubject(input.cantidad,context?.animal_nombres);
   let title='Movimiento aplicado';
-  let message=`${input.cantidad} animal(es) trasladado(s).`;
+  let message=`${subject} trasladado${input.cantidad === 1 ? '' : 's'}.`;
   if(kind==='UBICACION') {
     title='Cambio de potrero aplicado';
-    message=`${input.cantidad} animal(es) · ${text(context?.origen_descripcion,`${text(context?.grupo_origen,'Grupo')} (${text(context?.ubicacion_origen,'potrero de origen no indicado')})`)} → ${text(context?.destino_descripcion,`${text(context?.grupo_destino ?? context?.grupo_origen,'Grupo')} (${text(context?.ubicacion_destino,'potrero de destino no indicado')})`)}.`;
+    message=`${subject} · ${text(context?.ubicacion_origen,'potrero de origen no indicado')} → ${text(context?.ubicacion_destino,'potrero de destino no indicado')}.`;
   } else if(kind==='GRUPO') {
     title='Cambio de grupo aplicado';
-    message=`${input.cantidad} animal(es) · ${text(context?.origen_descripcion,'grupo de origen no indicado')} → ${text(context?.destino_descripcion,`${text(context?.grupo_destino,'grupo de destino no indicado')} (${text(context?.ubicacion_destino,'potrero no indicado')})`)}.`;
+    message=`${subject} · ${text(context?.origen_descripcion,'grupo de origen no indicado')} → ${text(context?.destino_descripcion,`${text(context?.grupo_destino,'grupo de destino no indicado')} (${text(context?.ubicacion_destino,'potrero no indicado')})`)}.`;
   } else if(kind==='PROPIEDAD') {
     title='Traslado de propiedad aplicado';
-    message=`${input.cantidad} animal(es) · ${text(context?.propiedad_origen,'propiedad de origen no indicada')} → ${text(context?.propiedad_destino,'propiedad de destino no indicada')}.`;
+    message=`${subject} · ${text(context?.propiedad_origen,'propiedad de origen no indicada')} → ${text(context?.propiedad_destino,'propiedad de destino no indicada')} (${text(context?.grupo_destino,'grupo no indicado')}).`;
   } else if(kind==='COMBINADO') {
-    title='Traslado combinado aplicado';
-    message=`${input.cantidad} animal(es) · ${text(context?.propiedad_origen,'propiedad de origen no indicada')} → ${text(context?.propiedad_destino,'propiedad de destino no indicada')} · grupo ${text(context?.grupo_destino,'no indicado')}.`;
+    title='Traslado de propiedad aplicado';
+    message=`${subject} · ${text(context?.propiedad_origen,'propiedad de origen no indicada')} → ${text(context?.propiedad_destino,'propiedad de destino no indicada')} (${text(context?.grupo_destino,'grupo no indicado')}).`;
   }
   await emitBusinessNotification(database, input.actor, input.id, {
     dedupe: 'MOVIMIENTO', tipo: 'MOVIMIENTO_APLICADO', categoria: 'MOVIMIENTOS', prioridad: 'INFO',
     titulo: title, mensaje: message,
-    permiso: 'MOVIMIENTO_CONSULTAR', entidadTipo: 'MOVIMIENTO', ruta: '/movimientos',
+    permiso: 'MOVIMIENTO_CONSULTAR', entidadTipo: 'MOVIMIENTO', ruta: detailRoute('/movimientos','movimiento',input.id),
     datos: { tipo: input.tipo, fecha: input.fecha, cantidad: input.cantidad },
   });
   if (!input.tickRisk) return;
@@ -411,7 +449,7 @@ export async function notifyMovementApplied(database: Queryable, input: Movement
   await emitBusinessNotification(database, input.actor, input.id, {
     dedupe: 'RIESGO_GARRAPATA', tipo: 'RIESGO_GARRAPATA_POTRERO', categoria: 'SANIDAD',
     prioridad: risk.priority, titulo: risk.title, mensaje: risk.message,
-    permiso: 'MOVIMIENTO_CONSULTAR', entidadTipo: 'MOVIMIENTO', ruta: '/potreros',
+    permiso: 'MOVIMIENTO_CONSULTAR', entidadTipo: 'MOVIMIENTO', ruta: detailRoute('/movimientos','movimiento',input.id),
     datos: {
       id_potrero: input.tickRisk.id_potrero,
       id_ubicacion: input.destinoId,

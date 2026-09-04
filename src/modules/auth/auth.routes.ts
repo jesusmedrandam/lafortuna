@@ -9,7 +9,7 @@ import { pool } from '../../database/pool.js';
 import { authenticate } from '../../middleware/auth.js';
 import { cache } from '../../services/cache.service.js';
 import { uploadUserProfileImage } from '../../services/cloudinary.service.js';
-import { codeSchema, emailSchema, loginSchema, profileSchema, refreshSchema, registerSchema, resetSchema } from './auth.schemas.js';
+import { changePasswordSchema, codeSchema, emailSchema, loginSchema, profileSchema, refreshSchema, registerSchema, resetSchema } from './auth.schemas.js';
 import * as service from './auth.service.js';
 
 export const authRouter = Router();
@@ -54,6 +54,10 @@ authRouter.post('/reset-password', asyncHandler(async (req, res) => {
 }));
 authRouter.get('/me', authenticate, asyncHandler(async (req, res) => ok(res, await service.profile(req.user!.id))));
 authRouter.patch('/me', authenticate, asyncHandler(async (req, res) => ok(res, await service.updateProfile(req.user!.id, profileSchema.parse(req.body)))));
+authRouter.put('/me/password', authenticate, asyncHandler(async (req, res) => {
+  const input = changePasswordSchema.parse(req.body);
+  return ok(res, await service.changePassword(req.user!.id,input.password_actual,input.password_nueva));
+}));
 authRouter.post('/me/photo', authenticate, profilePhotoUpload.single('imagen'), asyncHandler(async (req, res) => {
   if (!req.file) throw new ValidationError('Debes seleccionar una imagen.');
   const uploaded = await uploadUserProfileImage(req.file.buffer, req.user!.id);

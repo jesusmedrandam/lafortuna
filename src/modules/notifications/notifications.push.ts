@@ -118,7 +118,7 @@ async function sendRecipient(item: PendingRecipient) {
     });
     await deactivateInvalidTokens(tokens,response);
     if (response.successCount > 0) {
-      const partial = response.failureCount ? `${response.failureCount} dispositivo(s) no recibieron el aviso.` : undefined;
+      const partial = response.failureCount ? `${response.failureCount} ${response.failureCount === 1 ? 'dispositivo no recibió' : 'dispositivos no recibieron'} el aviso.` : undefined;
       await finish(item,'ENVIADA',partial);
     } else {
       const message = response.responses.find(value=>value.error)?.error?.message ?? 'Firebase rechazó todos los dispositivos.';
