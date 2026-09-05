@@ -32,6 +32,7 @@ import { purchasesRouter } from './modules/purchases/purchases.routes.js';
 import { activitiesRouter } from './modules/activities/activities.routes.js';
 import { healthRouter } from './modules/health/health.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
+import { publicAnimalsRouter } from './modules/animals/public-animals.routes.js';
 
 export const app=express();
 app.set('trust proxy',1);
@@ -48,6 +49,7 @@ app.get('/health', asyncHandler(async (_req, res) => {
 const api=express.Router();
 api.use('/auth',authRouter);
 api.use('/versiones',versionsRouter);
+api.use('/publico/animales',publicAnimalsRouter);
 api.use(authenticate);
 api.use('/dashboard',dashboardRouter);
 api.use('/catalogos',catalogsRouter);

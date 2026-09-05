@@ -108,6 +108,16 @@ function createPayload(body: unknown) {
 
 export const animalsRouter = Router();
 
+function sharedAnimalUrl(token: string) {
+  const origins = env.FRONTEND_URL.split(',')
+    .map((value) => value.trim().replace(/\/$/, ''))
+    .filter((value) => /^https?:\/\//i.test(value));
+  const base = origins.find((value) => !/localhost|127\.0\.0\.1/i.test(value))
+    ?? origins[0]
+    ?? 'http://localhost:5173';
+  return `${base}/animal-publico/${token}`;
+}
+
 animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
   const p = paginationSchema.extend({
     sexo: z.enum(['MACHO', 'HEMBRA']).optional(),
@@ -739,6 +749,106 @@ animalsRouter.post('/:id/condicion', requirePermission('ANIMAL_MODIFICAR'), asyn
     return updated;
   }, req.user!.id);
   return ok(res, result);
+}));
+
+animalsRouter.get('/:id/ubicacion-historica', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
+  const id = routeParam(req.params.id, 'id');
+  const { fecha } = z.object({ fecha: z.string().date() }).parse(req.query);
+  const [animalResult, locationResult, groupResult] = await Promise.all([
+    pool.query(
+      `SELECT a.id_animal,a.nombre,a.created_at,a.id_ubicacion_actual,a.id_grupo_actual
+       FROM animal a WHERE a.id_animal=$1 AND a.deleted_at IS NULL`,
+      [id],
+    ),
+    pool.query(
+      `SELECT h.fecha_desde,h.fecha_hasta,u.id_ubicacion,u.nombre ubicacion,u.tipo tipo_ubicacion,
+         p.id_propiedad,p.nombre propiedad
+       FROM animal_ubicacion_historial h
+       LEFT JOIN ubicacion u ON u.id_ubicacion=h.id_ubicacion
+       LEFT JOIN propiedad_ganadera p ON p.id_propiedad=u.id_propiedad
+       WHERE h.id_animal=$1 AND h.deleted_at IS NULL
+         AND h.fecha_desde<($2::date+INTERVAL '1 day')
+         AND (h.fecha_hasta IS NULL OR h.fecha_hasta>=$2::date)
+       ORDER BY h.fecha_desde DESC LIMIT 1`,
+      [id, fecha],
+    ),
+    pool.query(
+      `SELECT h.fecha_desde,h.fecha_hasta,g.id_grupo,g.nombre grupo,
+         p.id_propiedad,p.nombre propiedad
+       FROM animal_grupo_historial h
+       LEFT JOIN grupo g ON g.id_grupo=h.id_grupo
+       LEFT JOIN propiedad_ganadera p ON p.id_propiedad=g.id_propiedad
+       WHERE h.id_animal=$1 AND h.deleted_at IS NULL
+         AND h.fecha_desde<($2::date+INTERVAL '1 day')
+         AND (h.fecha_hasta IS NULL OR h.fecha_hasta>=$2::date)
+       ORDER BY h.fecha_desde DESC LIMIT 1`,
+      [id, fecha],
+    ),
+  ]);
+  const animal = animalResult.rows[0];
+  if (!animal) throw new NotFoundError('Animal no encontrado.');
+  const location = locationResult.rows[0] ?? null;
+  const group = groupResult.rows[0] ?? null;
+  return ok(res, {
+    fecha,
+    encontrado: Boolean(location || group),
+    propiedad: location?.propiedad ?? group?.propiedad ?? null,
+    id_propiedad: location?.id_propiedad ?? group?.id_propiedad ?? null,
+    ubicacion: location?.ubicacion ?? null,
+    id_ubicacion: location?.id_ubicacion ?? null,
+    tipo_ubicacion: location?.tipo_ubicacion ?? null,
+    grupo: group?.grupo ?? null,
+    id_grupo: group?.id_grupo ?? null,
+    periodo_ubicacion: location ? { desde: location.fecha_desde, hasta: location.fecha_hasta } : null,
+    periodo_grupo: group ? { desde: group.fecha_desde, hasta: group.fecha_hasta } : null,
+  });
+}));
+
+animalsRouter.get('/:id/compartir', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
+  const id = routeParam(req.params.id, 'id');
+  const row = (await pool.query(
+    `SELECT token,created_at FROM animal_compartido
+     WHERE id_animal=$1 AND activo=TRUE AND revocado_at IS NULL
+     ORDER BY created_at DESC LIMIT 1`,
+    [id],
+  )).rows[0];
+  return ok(res, row ? { activo: true, token: row.token, url: sharedAnimalUrl(row.token), created_at: row.created_at } : { activo: false });
+}));
+
+animalsRouter.post('/:id/compartir', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
+  const id = routeParam(req.params.id, 'id');
+  const result = await transaction(async (client) => {
+    const animal = (await client.query(
+      'SELECT id_animal FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR SHARE',
+      [id],
+    )).rows[0];
+    if (!animal) throw new NotFoundError('Animal no encontrado.');
+    const current = (await client.query(
+      `SELECT token,created_at FROM animal_compartido
+       WHERE id_animal=$1 AND activo=TRUE AND revocado_at IS NULL
+       ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+      [id],
+    )).rows[0];
+    if (current) return current;
+    const token = randomUUID();
+    return (await client.query(
+      `INSERT INTO animal_compartido(id_animal,token,creado_por)
+       VALUES($1,$2,$3) RETURNING token,created_at`,
+      [id, token, req.user!.id],
+    )).rows[0];
+  }, req.user!.id);
+  return ok(res, { activo: true, token: result.token, url: sharedAnimalUrl(result.token), created_at: result.created_at });
+}));
+
+animalsRouter.delete('/:id/compartir', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
+  const result = await pool.query(
+    `UPDATE animal_compartido
+     SET activo=FALSE,revocado_at=NOW(),updated_at=NOW()
+     WHERE id_animal=$1 AND activo=TRUE AND revocado_at IS NULL`,
+    [routeParam(req.params.id, 'id')],
+  );
+  if (!result.rowCount) throw new NotFoundError('El animal no tiene un enlace público activo.');
+  return noContent(res);
 }));
 
 animalsRouter.patch('/:id', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
