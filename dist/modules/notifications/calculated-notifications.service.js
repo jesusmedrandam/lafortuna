@@ -5,7 +5,32 @@ import { scheduleNotificationPushDispatch } from './notifications.push.js';
 let running = false;
 let timer = null;
 function localDate(value) {
-    return String(value ?? '').slice(0, 10);
+    if (value instanceof Date && Number.isFinite(value.getTime()))
+        return value.toISOString().slice(0, 10);
+    const raw = String(value ?? '').trim();
+    const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match)
+        return match[1];
+    const parsed = new Date(raw);
+    return Number.isFinite(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : '';
+}
+function shortDate(value) {
+    const date = localDate(value);
+    if (!date)
+        return 'fecha no indicada';
+    return new Intl.DateTimeFormat('es-EC', {
+        day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+    }).format(new Date(`${date}T12:00:00Z`)).replaceAll('.', '');
+}
+function decimal(value, maximumFractionDigits = 2) {
+    return number(value).toLocaleString('es-EC', { maximumFractionDigits });
+}
+function notificationData(data, row) {
+    const original = String(row.foto_perfil ?? '').trim();
+    const image = original.includes('/image/upload/')
+        ? original.replace('/image/upload/', '/image/upload/c_fill,w_192,h_192,q_auto/')
+        : original;
+    return image ? { ...data, imagen_url: image } : data;
 }
 function dateDiff(later, earlier) {
     const a = new Date(`${later}T12:00:00Z`).getTime();
@@ -29,7 +54,9 @@ async function currentEcuadorDate(client) {
 }
 async function notifyUpcomingBirths(client, today) {
     const rows = (await client.query(`SELECT pp.id_proximo_parto,pp.id_prenez,pp.fecha_tentativa::text,
-            v.id_animal,v.nombre,v.codigo_arete
+            v.id_animal,v.nombre,v.codigo_arete,
+            (SELECT ai.secure_url FROM animal_imagen ai WHERE ai.id_animal=v.id_animal AND ai.deleted_at IS NULL
+             ORDER BY ai.es_perfil DESC,ai.created_at DESC LIMIT 1) foto_perfil
      FROM proximo_parto pp
      JOIN prenez p ON p.id_prenez=pp.id_prenez AND p.estado='CONFIRMADA' AND p.deleted_at IS NULL
      JOIN animal v ON v.id_animal=pp.id_vaca AND v.estado='ACTIVO' AND v.deleted_at IS NULL
@@ -46,69 +73,84 @@ async function notifyUpcomingBirths(client, today) {
             : days === 0 ? 'La fecha estimada es hoy' : `Faltan aproximadamente ${countLabel(days, 'día', 'días')}`;
         await emitNotification(client, {
             tipo: 'PROXIMO_PARTO', categoria: 'REPRODUCCION', prioridad: priority,
-            titulo: days < 0 ? 'Parto estimado atrasado' : 'Próximo parto',
-            mensaje: `${animalLabel(row)} · ${timing} (${dueDate}).`, permiso: 'PARTO_CONSULTAR',
+            titulo: days < 0 ? `El parto de ${animalLabel(row)} está atrasado` : `Se acerca el parto de ${animalLabel(row)}`,
+            mensaje: `${timing} · Fecha estimada: ${shortDate(dueDate)}.`, permiso: 'PARTO_CONSULTAR',
             entidadTipo: 'PROXIMO_PARTO', entidadId: String(row.id_proximo_parto), ruta: `/partos?prenez=${row.id_prenez}&tab=pregnancies`,
-            datos: { id_animal: row.id_animal, id_prenez: row.id_prenez, fecha_tentativa: dueDate, dias_restantes: days },
+            datos: notificationData({ id_animal: row.id_animal, id_prenez: row.id_prenez, fecha_tentativa: dueDate, dias_restantes: days }, row),
             claveDedupe: `CALC:PARTO:${row.id_proximo_parto}:${stage}`,
         });
     }
 }
 async function notifyBirthdays(client, today) {
-    const rows = (await client.query(`SELECT id_animal,nombre,codigo_arete,fecha_nacimiento::text,
-            DATE_PART('year',AGE($1::date,fecha_nacimiento))::int edad
-     FROM animal
-     WHERE estado='ACTIVO' AND deleted_at IS NULL AND fecha_nacimiento IS NOT NULL
-       AND EXTRACT(MONTH FROM fecha_nacimiento)=EXTRACT(MONTH FROM $1::date)
-       AND EXTRACT(DAY FROM fecha_nacimiento)=EXTRACT(DAY FROM $1::date)
-       AND fecha_nacimiento<$1::date`, [today])).rows;
-    const year = today.slice(0, 4);
+    const rows = (await client.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,a.fecha_nacimiento::text,
+            DATE_PART('year',AGE($1::date,a.fecha_nacimiento))::int edad_anios,
+            (DATE_PART('year',AGE($1::date,a.fecha_nacimiento))*12+DATE_PART('month',AGE($1::date,a.fecha_nacimiento)))::int edad_meses,
+            CASE
+              WHEN (a.fecha_nacimiento+INTERVAL '1 month')::date=$1::date THEN '1_MES'
+              WHEN (a.fecha_nacimiento+INTERVAL '3 months')::date=$1::date THEN '3_MESES'
+              WHEN (a.fecha_nacimiento+INTERVAL '6 months')::date=$1::date THEN '6_MESES'
+              ELSE 'ANUAL'
+            END hito,
+            (SELECT ai.secure_url FROM animal_imagen ai WHERE ai.id_animal=a.id_animal AND ai.deleted_at IS NULL
+             ORDER BY ai.es_perfil DESC,ai.created_at DESC LIMIT 1) foto_perfil
+     FROM animal a
+     WHERE a.estado='ACTIVO' AND a.deleted_at IS NULL AND a.fecha_nacimiento IS NOT NULL
+       AND a.fecha_nacimiento<$1::date
+       AND (
+         (a.fecha_nacimiento+INTERVAL '1 month')::date=$1::date
+         OR (a.fecha_nacimiento+INTERVAL '3 months')::date=$1::date
+         OR (a.fecha_nacimiento+INTERVAL '6 months')::date=$1::date
+         OR (EXTRACT(MONTH FROM a.fecha_nacimiento)=EXTRACT(MONTH FROM $1::date)
+             AND EXTRACT(DAY FROM a.fecha_nacimiento)=EXTRACT(DAY FROM $1::date)
+             AND DATE_PART('year',AGE($1::date,a.fecha_nacimiento))>=1)
+       )`, [today])).rows;
     for (const row of rows) {
+        const months = number(row.edad_meses);
+        const years = number(row.edad_anios);
+        const age = years >= 1 ? countLabel(years, 'año', 'años') : countLabel(months, 'mes', 'meses');
+        const dedupe = row.hito === 'ANUAL'
+            ? `CALC:CUMPLE:${row.id_animal}:${today.slice(0, 4)}`
+            : `CALC:CUMPLE:${row.id_animal}:${row.hito}:${today}`;
         await emitNotification(client, {
             tipo: 'CUMPLEANOS_ANIMAL', categoria: 'ANIMALES', prioridad: 'INFO',
-            titulo: 'Cumpleaños del animal', mensaje: `${animalLabel(row)} cumple ${countLabel(number(row.edad), 'año', 'años')} hoy.`,
+            titulo: `${animalLabel(row)} cumple ${age}`, mensaje: `Fecha de nacimiento: ${shortDate(row.fecha_nacimiento)}.`,
             permiso: 'ANIMAL_CONSULTAR', entidadTipo: 'ANIMAL', entidadId: String(row.id_animal),
-            ruta: `/animales/${row.id_animal}`, datos: { edad: number(row.edad), fecha_nacimiento: row.fecha_nacimiento },
-            claveDedupe: `CALC:CUMPLE:${row.id_animal}:${year}`,
+            ruta: `/animales/${row.id_animal}`, datos: notificationData({ edad_anios: years, edad_meses: months, fecha_nacimiento: localDate(row.fecha_nacimiento) }, row),
+            claveDedupe: dedupe,
         });
     }
 }
 async function notifyProductionVariation(client, yesterday) {
-    const row = (await client.query(`WITH current_values AS (
+    const row = (await client.query(`WITH values_by_day AS (
        SELECT
          (SELECT COUNT(*)::int FROM produccion_tanque WHERE fecha_produccion=$1::date AND deleted_at IS NULL) tanque_registros,
          (SELECT COALESCE(SUM(litros),0) FROM produccion_tanque WHERE fecha_produccion=$1::date AND deleted_at IS NULL) tanque_total,
+         (SELECT COALESCE(SUM(litros),0) FROM produccion_tanque WHERE fecha_produccion=$1::date-1 AND deleted_at IS NULL) tanque_anterior,
          (SELECT COUNT(*)::int FROM produccion_leche WHERE fecha_produccion=$1::date AND deleted_at IS NULL) vacas_registros,
-         (SELECT COALESCE(SUM(litros),0) FROM produccion_leche WHERE fecha_produccion=$1::date AND deleted_at IS NULL) vacas_total
-     ), history AS (
-       SELECT
-         (SELECT AVG(total) FROM (SELECT SUM(litros) total FROM produccion_tanque
-           WHERE fecha_produccion BETWEEN $1::date-INTERVAL '7 days' AND $1::date-INTERVAL '1 day'
-             AND deleted_at IS NULL GROUP BY fecha_produccion) t) tanque_promedio,
-         (SELECT AVG(total) FROM (SELECT SUM(litros) total FROM produccion_leche
-           WHERE fecha_produccion BETWEEN $1::date-INTERVAL '7 days' AND $1::date-INTERVAL '1 day'
-             AND deleted_at IS NULL GROUP BY fecha_produccion) v) vacas_promedio
+         (SELECT COALESCE(SUM(litros),0) FROM produccion_leche WHERE fecha_produccion=$1::date AND deleted_at IS NULL) vacas_total,
+         (SELECT COALESCE(SUM(litros),0) FROM produccion_leche WHERE fecha_produccion=$1::date-1 AND deleted_at IS NULL) vacas_anterior
      )
      SELECT *,CASE WHEN tanque_registros>0 THEN 'TANQUE' ELSE 'VACAS' END fuente,
        CASE WHEN tanque_registros>0 THEN tanque_total ELSE vacas_total END total_actual,
-       CASE WHEN tanque_registros>0 THEN tanque_promedio ELSE vacas_promedio END promedio
-     FROM current_values CROSS JOIN history`, [yesterday])).rows[0];
+       CASE WHEN tanque_registros>0 THEN tanque_anterior ELSE vacas_anterior END total_anterior
+     FROM values_by_day`, [yesterday])).rows[0];
     const records = textSource(row.fuente) === 'TANQUE' ? number(row.tanque_registros) : number(row.vacas_registros);
     const current = number(row.total_actual);
-    const average = number(row.promedio);
-    if (!records || average <= 0)
+    const previous = number(row.total_anterior);
+    if (!records || previous <= 0)
         return;
-    const variation = ((current - average) / average) * 100;
+    const difference = current - previous;
+    const variation = (difference / previous) * 100;
     if (Math.abs(variation) < env.PRODUCTION_VARIATION_ALERT_PERCENT)
         return;
     const decrease = variation < 0;
     await emitNotification(client, {
         tipo: 'VARIACION_PRODUCCION', categoria: 'PRODUCCION',
         prioridad: decrease && variation <= -30 ? 'URGENTE' : 'IMPORTANTE',
-        titulo: decrease ? 'Caída de producción de leche' : 'Aumento de producción de leche',
-        mensaje: `${yesterday}: ${current.toLocaleString('es-EC', { maximumFractionDigits: 2 })} L, ${Math.abs(variation).toLocaleString('es-EC', { maximumFractionDigits: 1 })}% ${decrease ? 'por debajo' : 'por encima'} del promedio de días con registros.`,
+        titulo: decrease ? 'La producción de leche disminuyó' : 'La producción de leche aumentó',
+        mensaje: `Ayer se registraron ${decimal(current)} L, ${decimal(Math.abs(difference))} L ${decrease ? 'menos' : 'más'} que el día anterior.`,
         permiso: 'PRODUCCION_CONSULTAR', entidadTipo: 'PRODUCCION_DIARIA', ruta: `/produccion?fecha=${yesterday}`,
-        datos: { fecha: yesterday, total_litros: current, promedio_litros: average, variacion_porcentaje: variation, fuente: row.fuente },
+        datos: { fecha: yesterday, total_litros: current, total_anterior_litros: previous, diferencia_litros: difference, variacion_porcentaje: variation, fuente: row.fuente },
         claveDedupe: `CALC:PRODUCCION:${yesterday}`,
     });
 }
@@ -143,7 +185,9 @@ async function notifyOverdueCleanings(client, today) {
 }
 async function notifyTreatmentDates(client, today) {
     const rows = (await client.query(`SELECT t.id_tratamiento,t.id_animal,t.id_tipo_tratamiento,t.proxima_aplicacion::text,
-            a.nombre,a.codigo_arete,tt.nombre tratamiento
+            a.nombre,a.codigo_arete,tt.nombre tratamiento,
+            (SELECT ai.secure_url FROM animal_imagen ai WHERE ai.id_animal=a.id_animal AND ai.deleted_at IS NULL
+             ORDER BY ai.es_perfil DESC,ai.created_at DESC LIMIT 1) foto_perfil
      FROM tratamiento_animal t
      JOIN animal a ON a.id_animal=t.id_animal AND a.estado='ACTIVO' AND a.deleted_at IS NULL
      LEFT JOIN tipo_tratamiento tt ON tt.id_tipo_tratamiento=t.id_tipo_tratamiento
@@ -159,10 +203,10 @@ async function notifyTreatmentDates(client, today) {
         const stage = days < 0 ? 'ATRASADO' : days === 0 ? 'HOY' : 'PROXIMO';
         await emitNotification(client, {
             tipo: 'TRATAMIENTO_PENDIENTE', categoria: 'SANIDAD', prioridad: days <= 0 ? 'URGENTE' : 'IMPORTANTE',
-            titulo: days < 0 ? 'Tratamiento atrasado' : days === 0 ? 'Tratamiento programado para hoy' : 'Próximo tratamiento',
-            mensaje: `${animalLabel(row)} · ${String(row.tratamiento ?? 'Tratamiento')} · ${next}${days > 0 ? ` (faltan ${days} días)` : days < 0 ? ` (${Math.abs(days)} días de atraso)` : ''}.`,
+            titulo: days < 0 ? `${animalLabel(row)} tiene un tratamiento atrasado` : days === 0 ? `${animalLabel(row)} tiene tratamiento hoy` : `Se acerca el tratamiento de ${animalLabel(row)}`,
+            mensaje: `${String(row.tratamiento ?? 'Tratamiento')} · ${shortDate(next)}${days > 0 ? ` · Faltan ${countLabel(days, 'día', 'días')}` : days < 0 ? ` · ${countLabel(Math.abs(days), 'día', 'días')} de atraso` : ''}.`,
             permiso: 'SANIDAD_CONSULTAR', entidadTipo: 'TRATAMIENTO', entidadId: String(row.id_tratamiento), ruta: `/sanidad?tratamiento=${row.id_tratamiento}`,
-            datos: { id_animal: row.id_animal, proxima_aplicacion: next, dias_restantes: days },
+            datos: notificationData({ id_animal: row.id_animal, proxima_aplicacion: next, dias_restantes: days }, row),
             claveDedupe: `CALC:TRATAMIENTO:${row.id_tratamiento}:${stage}`,
         });
     }

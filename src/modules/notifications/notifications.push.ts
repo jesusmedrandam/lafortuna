@@ -12,6 +12,7 @@ interface PendingRecipient {
   titulo: string;
   mensaje: string;
   ruta: string | null;
+  imagen_url: string | null;
 }
 
 let running = false;
@@ -57,7 +58,7 @@ async function claimPending(limit = 50): Promise<PendingRecipient[]> {
         RETURNING nu.id_notificacion,nu.id_usuario
       )
       SELECT r.id_notificacion,r.id_usuario,n.tipo,n.categoria,n.prioridad,
-             n.titulo,n.mensaje,n.ruta
+             n.titulo,n.mensaje,n.ruta,NULLIF(n.datos->>'imagen_url','') imagen_url
       FROM reclamados r
       JOIN notificacion n ON n.id_notificacion=r.id_notificacion
     `,[limit]);
@@ -126,9 +127,10 @@ async function sendRecipient(item: PendingRecipient) {
         titulo: item.titulo,
         mensaje: item.mensaje,
         ruta: item.ruta ?? '',
+        imagen_url: item.imagen_url ?? '',
       },
       android: {
-        priority: item.prioridad === 'INFO' ? 'normal' : 'high',
+        priority: 'high',
         ttl: 24 * 60 * 60 * 1000,
       },
     });

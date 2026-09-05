@@ -42,6 +42,92 @@ function money(value: unknown, currency = 'USD') {
   return new Intl.NumberFormat('es-EC', { style: 'currency', currency }).format(number(value));
 }
 
+function decimal(value: unknown, maximumFractionDigits = 2) {
+  return number(value).toLocaleString('es-EC', { maximumFractionDigits });
+}
+
+function isoDate(value: unknown) {
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString().slice(0, 10);
+  const raw = String(value ?? '').trim();
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) return match[1];
+  const parsed = new Date(raw);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : '';
+}
+
+function shortDate(value: unknown) {
+  const date = isoDate(value);
+  if (!date) return 'fecha no indicada';
+  return new Intl.DateTimeFormat('es-EC', {
+    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+  }).format(new Date(`${date}T12:00:00Z`)).replaceAll('.', '');
+}
+
+function ecuadorToday() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Guayaquil', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+
+function addDays(value: string, days: number) {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function dayLabel(value: unknown) {
+  const date = isoDate(value);
+  const today = ecuadorToday();
+  if (date === today) return 'Hoy';
+  if (date === addDays(today, -1)) return 'Ayer';
+  return shortDate(date);
+}
+
+function enumLabel(value: unknown, fallback = '') {
+  const raw = text(value, fallback).toLocaleLowerCase('es').replaceAll('_', ' ');
+  return raw ? raw.charAt(0).toLocaleUpperCase('es') + raw.slice(1) : '';
+}
+
+function profileUrl(row: Row | undefined) {
+  const url = text(row?.foto_perfil);
+  if (!url) return null;
+  return url.includes('/image/upload/')
+    ? url.replace('/image/upload/', '/image/upload/c_fill,w_192,h_192,q_auto/')
+    : url;
+}
+
+function withProfile(data: Record<string, unknown>, animal: Row | undefined) {
+  const image = profileUrl(animal);
+  return image ? { ...data, imagen_url: image } : data;
+}
+
+async function animalContext(database: Queryable, animalId: string) {
+  if (!animalId) return undefined;
+  return (await database.query(
+    `SELECT a.id_animal,a.nombre,a.codigo_arete,a.sexo,e.nombre especie,
+       (SELECT ai.secure_url FROM animal_imagen ai
+        WHERE ai.id_animal=a.id_animal AND ai.deleted_at IS NULL
+        ORDER BY ai.es_perfil DESC,ai.created_at DESC LIMIT 1) foto_perfil
+     FROM animal a
+     LEFT JOIN especie e ON e.id_especie=a.id_especie
+     WHERE a.id_animal=$1`, [animalId],
+  )).rows[0] as Row | undefined;
+}
+
+function productionComparison(current: number, previous: number, previousLabel = 'ayer') {
+  if (previous <= 0) return '';
+  const difference = current - previous;
+  if (Math.abs(difference) < 0.005) return `, igual que ${previousLabel}`;
+  return `, ${decimal(Math.abs(difference))} L ${difference > 0 ? 'más' : 'menos'} que ${previousLabel}`;
+}
+
+function productionTitle(subject: string, current: number, previous: number) {
+  if (previous <= 0) return `${subject} registró su producción`;
+  const difference = current - previous;
+  if (Math.abs(difference) < 0.005) return `${subject} mantuvo su producción`;
+  return `${subject} ${difference > 0 ? 'aumentó' : 'redujo'} su producción`;
+}
+
 function animalLabel(row: Row | undefined) {
   if (!row) return 'Animal';
   return text(row.nombre, 'Animal');
@@ -49,20 +135,6 @@ function animalLabel(row: Row | undefined) {
 
 function countLabel(value: number, singular: string, plural: string) {
   return `${value.toLocaleString('es-EC')} ${value === 1 ? singular : plural}`;
-}
-
-function joinNames(values: unknown[]) {
-  const names = values.map(value => text(value)).filter(Boolean);
-  if (names.length < 2) return names[0] ?? '';
-  if (names.length === 2) return `${names[0]} y ${names[1]}`;
-  return `${names.slice(0, -1).join(', ')} y ${names.at(-1)}`;
-}
-
-function animalSubject(count: number, values: unknown) {
-  const names = Array.isArray(values) ? values.map(value => text(value)).filter(Boolean) : [];
-  return count <= 3 && names.length === count
-    ? joinNames(names)
-    : countLabel(count, 'animal', 'animales');
 }
 
 function detailRoute(base: string, key: string, id: unknown, extra = '') {
@@ -95,104 +167,176 @@ export async function notifyRecordCreated(
   actor: string,
 ) {
   const animalId = text(row.id_animal ?? row.id_vaca);
-  const animal = animalId
-    ? (await database.query('SELECT nombre,codigo_arete FROM animal WHERE id_animal=$1', [animalId])).rows[0] as Row | undefined
-    : undefined;
+  const animal = await animalContext(database, animalId);
   const label = animalLabel(animal);
 
   if (moduleName === 'producciones') {
+    const productionDate = isoDate(row.fecha_produccion);
+    const totals = (await database.query(
+      `SELECT
+         COALESCE(SUM(litros) FILTER(WHERE fecha_produccion=$2::date),0) actual,
+         COALESCE(SUM(litros) FILTER(WHERE fecha_produccion=$2::date-1),0) anterior
+       FROM produccion_leche
+       WHERE id_vaca=$1 AND fecha_produccion BETWEEN $2::date-1 AND $2::date
+         AND deleted_at IS NULL`, [animalId, productionDate],
+    )).rows[0] as Row;
+    const current = number(totals.actual);
+    const previous = number(totals.anterior);
+    const previousLabel = productionDate === ecuadorToday() ? 'ayer' : 'el día anterior';
     return emitBusinessNotification(database, actor, text(row.id_produccion), {
       dedupe: 'PRODUCCION_VACA', tipo: 'PRODUCCION_VACA_REGISTRADA', categoria: 'PRODUCCION', prioridad: 'INFO',
-      titulo: 'Producción de leche registrada',
-      mensaje: `${label} · ${number(row.litros).toLocaleString('es-EC')} litros · ${text(row.fecha_produccion)}${row.turno ? ` · ${text(row.turno).toLowerCase()}` : ''}.`,
+      titulo: productionTitle(label, current, previous),
+      mensaje: `${dayLabel(productionDate)} registró ${decimal(current)} L${productionComparison(current, previous, previousLabel)}.`,
       permiso: 'PRODUCCION_CONSULTAR', entidadTipo: 'PRODUCCION_LECHE', ruta: detailRoute('/produccion','registro',row.id_produccion),
-      datos: { id_animal: animalId, litros: number(row.litros), fecha: row.fecha_produccion, turno: row.turno ?? null },
+      datos: withProfile({ id_animal: animalId, litros: number(row.litros), total_dia: current, diferencia_dia_anterior: previous > 0 ? current - previous : null, fecha: productionDate, turno: row.turno ?? null }, animal),
     });
   }
 
   if (moduleName === 'abortos') {
     return emitBusinessNotification(database, actor, text(row.id_aborto), {
       dedupe: 'ABORTO', tipo: 'ABORTO_REGISTRADO', categoria: 'REPRODUCCION', prioridad: 'URGENTE',
-      titulo: 'Aborto registrado',
-      mensaje: `${label} · ${text(row.fecha, 'fecha no indicada')}${text(row.causa) ? ` · ${text(row.causa)}` : ''}.`,
+      titulo: `${label} perdió su cría`,
+      mensaje: `Aborto registrado el ${shortDate(row.fecha)}${text(row.causa) ? ` · ${text(row.causa)}` : ''}.`,
       permiso: 'ABORTO_CONSULTAR', entidadTipo: 'ABORTO', ruta: detailRoute('/partos','aborto',row.id_aborto,'&tab=abortions'),
-      datos: { id_animal: animalId },
+      datos: withProfile({ id_animal: animalId }, animal),
     });
   }
   if (moduleName === 'muertes') {
     return emitBusinessNotification(database, actor, text(row.id_muerte), {
       dedupe: 'MUERTE', tipo: 'MUERTE_REGISTRADA', categoria: 'ANIMALES', prioridad: 'URGENTE',
-      titulo: 'Muerte registrada',
-      mensaje: `${label} · ${text(row.fecha, 'fecha no indicada')}${text(row.causa) ? ` · ${text(row.causa)}` : ''}.`,
+      titulo: `${label} falleció`,
+      mensaje: `${shortDate(row.fecha)}${text(row.causa) ? ` · ${text(row.causa)}` : ''}.`,
       permiso: 'MUERTE_CONSULTAR', entidadTipo: 'MUERTE', ruta: detailRoute('/muertes','registro',row.id_muerte),
-      datos: { id_animal: animalId },
+      datos: withProfile({ id_animal: animalId }, animal),
     });
   }
   if (moduleName === 'pesajes') {
     return emitBusinessNotification(database, actor, text(row.id_pesaje), {
       dedupe: 'PESAJE', tipo: 'PESAJE_REGISTRADO', categoria: 'PESAJES', prioridad: 'INFO',
-      titulo: 'Nuevo pesaje',
-      mensaje: `${label} · ${number(row.peso_kg).toLocaleString('es-EC')} kg · ${text(row.fecha_pesaje)}.`,
+      titulo: `${label} fue pesad${text(animal?.sexo) === 'MACHO' ? 'o' : 'a'}`,
+      mensaje: `Registró ${decimal(row.peso_kg)} kg el ${shortDate(row.fecha_pesaje)}.`,
       permiso: 'PESAJE_CONSULTAR', entidadTipo: 'PESAJE', ruta: detailRoute('/pesajes','registro',row.id_pesaje),
-      datos: { id_animal: animalId, peso_kg: number(row.peso_kg) },
+      datos: withProfile({ id_animal: animalId, peso_kg: number(row.peso_kg) }, animal),
     });
   }
   if (moduleName === 'tratamientos') {
+    const treatment = (await database.query(
+      `SELECT tt.nombre tipo,m.nombre_comercial medicamento
+       FROM tratamiento_animal t
+       LEFT JOIN tipo_tratamiento tt ON tt.id_tipo_tratamiento=t.id_tipo_tratamiento
+       LEFT JOIN medicamento m ON m.id_medicamento=t.id_medicamento
+       WHERE t.id_tratamiento=$1`, [row.id_tratamiento],
+    )).rows[0] as Row | undefined;
     return emitBusinessNotification(database, actor, text(row.id_tratamiento), {
       dedupe: 'TRATAMIENTO', tipo: 'TRATAMIENTO_APLICADO', categoria: 'SANIDAD', prioridad: 'IMPORTANTE',
-      titulo: 'Tratamiento aplicado',
-      mensaje: `${label} · aplicación ${text(row.fecha_aplicacion)}${row.proxima_aplicacion ? ` · próxima ${text(row.proxima_aplicacion)}` : ''}.`,
+      titulo: `${label} recibió tratamiento`,
+      mensaje: `${text(treatment?.tipo, 'Tratamiento')}${text(treatment?.medicamento) ? ` · ${text(treatment?.medicamento)}` : ''} · ${shortDate(row.fecha_aplicacion)}${row.proxima_aplicacion ? ` · Próxima: ${shortDate(row.proxima_aplicacion)}` : ''}.`,
       permiso: 'SANIDAD_CONSULTAR', entidadTipo: 'TRATAMIENTO', ruta: detailRoute('/sanidad','tratamiento',row.id_tratamiento),
-      datos: { id_animal: animalId, proxima_aplicacion: row.proxima_aplicacion ?? null },
+      datos: withProfile({ id_animal: animalId, proxima_aplicacion: isoDate(row.proxima_aplicacion) || null }, animal),
     });
   }
   if (moduleName === 'lactancias') {
+    const start = isoDate(row.fecha_inicio);
+    const end = isoDate(row.fecha_fin);
+    let duration = '';
+    if (row.activa === false && start && end) {
+      const age = (await database.query(
+        `SELECT (DATE_PART('year',AGE($2::date,$1::date))*12+DATE_PART('month',AGE($2::date,$1::date)))::int meses,
+                DATE_PART('day',AGE($2::date,$1::date))::int dias`, [start, end],
+      )).rows[0] as Row;
+      const parts = [number(age.meses) ? countLabel(number(age.meses),'mes','meses') : '', number(age.dias) ? countLabel(number(age.dias),'día','días') : ''].filter(Boolean);
+      duration = parts.join(' y ') || 'menos de un día';
+    }
     return emitBusinessNotification(database, actor, text(row.id_lactancia), {
-      dedupe: 'LACTANCIA', tipo: 'LACTANCIA_REGISTRADA', categoria: 'PRODUCCION', prioridad: 'INFO',
-      titulo: row.activa === false ? 'Lactancia registrada' : 'Lactancia iniciada',
-      mensaje: `${label} · inicio ${text(row.fecha_inicio)}${row.en_ordeno ? ' · incluida en ordeño' : ''}.`,
+      dedupe: row.activa === false ? 'LACTANCIA_FIN' : 'LACTANCIA_INICIO', tipo: row.activa === false ? 'LACTANCIA_FINALIZADA' : 'LACTANCIA_INICIADA', categoria: 'PRODUCCION', prioridad: 'INFO',
+      titulo: row.activa === false ? `${label} finalizó su lactancia` : `${label} inició su lactancia`,
+      mensaje: row.activa === false
+        ? `Estuvo en lactancia durante ${duration}.`
+        : `Comenzó el ${shortDate(start)}${row.en_ordeno ? ' · Incluida en ordeño' : ''}.`,
       permiso: 'LACTANCIA_CONSULTAR', entidadTipo: 'LACTANCIA', ruta: detailRoute('/produccion','lactancia',row.id_lactancia,'&tab=lactations'),
-      datos: { id_animal: animalId, activa: row.activa, en_ordeno: row.en_ordeno },
+      datos: withProfile({ id_animal: animalId, activa: row.activa, en_ordeno: row.en_ordeno, fecha_inicio: start, fecha_fin: end || null }, animal),
     });
   }
   return null;
 }
 
 export async function notifyTankProduction(database: Queryable, row: Row, actor: string) {
+  const productionDate = isoDate(row.fecha_produccion);
+  const totals = (await database.query(
+    `SELECT
+       COALESCE(SUM(litros) FILTER(WHERE fecha_produccion=$1::date),0) actual,
+       COALESCE(SUM(litros) FILTER(WHERE fecha_produccion=$1::date-1),0) anterior
+     FROM produccion_tanque
+     WHERE fecha_produccion BETWEEN $1::date-1 AND $1::date AND deleted_at IS NULL`,
+    [productionDate],
+  )).rows[0] as Row;
+  const current = number(totals.actual);
+  const previous = number(totals.anterior);
+  const difference = current - previous;
+  const title = previous <= 0 ? 'Producción de leche registrada'
+    : Math.abs(difference) < 0.005 ? 'Producción de leche se mantuvo'
+      : `Producción de leche ${difference > 0 ? 'aumentó' : 'disminuyó'}`;
+  const previousLabel = productionDate === ecuadorToday() ? 'ayer' : 'el día anterior';
   return emitBusinessNotification(database, actor, text(row.id_produccion_tanque), {
     dedupe: 'PRODUCCION_TANQUE', tipo: 'PRODUCCION_TANQUE_REGISTRADA', categoria: 'PRODUCCION', prioridad: 'INFO',
-    titulo: 'Producción de tanque registrada',
-    mensaje: `${number(row.litros).toLocaleString('es-EC')} litros · ${text(row.fecha_produccion)}${row.turno ? ` · ${text(row.turno)}` : ''}.`,
+    titulo: title,
+    mensaje: `${dayLabel(productionDate)} se registraron ${decimal(current)} L${productionComparison(current, previous, previousLabel)}.`,
     permiso: 'PRODUCCION_CONSULTAR', entidadTipo: 'PRODUCCION_TANQUE', ruta: detailRoute('/produccion','tanque',row.id_produccion_tanque),
-    datos: { litros: number(row.litros), fecha: row.fecha_produccion, turno: row.turno ?? null },
+    datos: { litros: number(row.litros), total_dia: current, diferencia_dia_anterior: previous > 0 ? difference : null, fecha: productionDate, turno: row.turno ?? null },
   });
 }
 
 export async function notifyBirth(database: Queryable, row: Row, actor: string) {
-  const mother = (await database.query('SELECT nombre,codigo_arete FROM animal WHERE id_animal=$1', [row.id_madre])).rows[0] as Row | undefined;
+  const mother = await animalContext(database, text(row.id_madre));
   const children = Array.isArray(row.crias) ? row.crias as Row[] : [];
   const live = children.filter(child => text(child.estado_nacimiento) !== 'MUERTA').length;
   const dead = children.length - live;
-  const result = [
-    live ? countLabel(live, 'cría viva', 'crías vivas') : '',
-    dead ? countLabel(dead, 'cría muerta', 'crías muertas') : '',
-  ].filter(Boolean).join(' y ');
+  const species = text(mother?.especie).toLocaleUpperCase('es');
+  const groups = new Map<string, { count: number; noun: string; plural: string; adjective: string; pluralAdjective: string }>();
+  for (const child of children) {
+    const female = text(child.sexo) === 'HEMBRA';
+    const state = text(child.estado_nacimiento, 'DESCONOCIDO');
+    const noun = species.includes('CAPR') ? (female ? 'chiva' : 'chivo')
+      : species.includes('BOV') ? (female ? 'ternera' : 'ternero')
+        : female ? 'cría hembra' : text(child.sexo) === 'MACHO' ? 'cría macho' : 'cría';
+    const plural = species.includes('CAPR') ? (female ? 'chivas' : 'chivos')
+      : species.includes('BOV') ? (female ? 'terneras' : 'terneros')
+        : female ? 'crías hembras' : text(child.sexo) === 'MACHO' ? 'crías machos' : 'crías';
+    const adjective = state === 'MUERTA' ? (female ? 'muerta' : 'muerto')
+      : state === 'DEBIL' ? 'débil' : state === 'DESCONOCIDO' ? 'con estado desconocido' : (female ? 'viva' : 'vivo');
+    const pluralAdjective = state === 'MUERTA' ? (female ? 'muertas' : 'muertos')
+      : state === 'DEBIL' ? 'débiles' : state === 'DESCONOCIDO' ? 'con estado desconocido' : (female ? 'vivas' : 'vivos');
+    const key = `${noun}:${state}`;
+    const current = groups.get(key);
+    groups.set(key, current ? { ...current, count: current.count + 1 } : { count: 1, noun, plural, adjective, pluralAdjective });
+  }
+  const result = [...groups.values()].map(item => `${item.count} ${item.count === 1 ? item.noun : item.plural} ${item.count === 1 ? item.adjective : item.pluralAdjective}`).join(' y ');
+  const birthType = enumLabel(row.tipo_parto, 'DESCONOCIDO').toLocaleLowerCase('es');
   return emitBusinessNotification(database, actor, text(row.id_parto), {
     dedupe: 'PARTO', tipo: 'PARTO_REGISTRADO', categoria: 'REPRODUCCION', prioridad: dead ? 'IMPORTANTE' : 'INFO',
-    titulo: 'Parto registrado',
-    mensaje: `${animalLabel(mother)} · ${result || 'sin crías registradas'}.`,
+    titulo: `${animalLabel(mother)} parió`,
+    mensaje: `${result || 'Sin crías registradas'} · Parto ${birthType} · ${shortDate(row.fecha_parto)}.`,
     permiso: 'PARTO_CONSULTAR', entidadTipo: 'PARTO', ruta: detailRoute('/partos','parto',row.id_parto,'&tab=births'),
-    datos: { id_madre: row.id_madre, crias: children.length, vivas: live, muertas: dead },
+    datos: withProfile({ id_madre: row.id_madre, crias: children.length, vivas: live, muertas: dead, tipo_parto: row.tipo_parto, fecha: isoDate(row.fecha_parto) }, mother),
   });
 }
 
 export async function notifyAnimalSale(database: Queryable, row: Row, count: number, actor: string) {
+  const animals = (await database.query(
+    `SELECT a.id_animal,a.nombre,a.sexo,
+       (SELECT ai.secure_url FROM animal_imagen ai WHERE ai.id_animal=a.id_animal AND ai.deleted_at IS NULL
+        ORDER BY ai.es_perfil DESC,ai.created_at DESC LIMIT 1) foto_perfil
+     FROM venta_animal_detalle d JOIN animal a ON a.id_animal=d.id_animal
+     WHERE d.id_venta=$1 AND d.deleted_at IS NULL ORDER BY a.nombre`, [row.id_venta],
+  )).rows as Row[];
+  const single = count === 1 ? animals[0] : undefined;
+  const subject = single ? animalLabel(single) : countLabel(count,'animal','animales');
   return emitBusinessNotification(database, actor, text(row.id_venta), {
     dedupe: 'VENTA_ANIMALES', tipo: 'VENTA_ANIMALES_REGISTRADA', categoria: 'VENTAS', prioridad: 'IMPORTANTE',
-    titulo: 'Venta de animales registrada',
-    mensaje: `${countLabel(count,'animal','animales')} · ${text(row.comprador_nombre, 'comprador no indicado')} · ${money(row.precio_total, text(row.moneda, 'USD'))}.`,
+    titulo: single ? `${subject} fue vendido${text(single.sexo) === 'HEMBRA' ? 'a' : ''}` : `${subject} vendidos`,
+    mensaje: `${text(row.comprador_nombre, 'Comprador no indicado')} · ${money(row.precio_total, text(row.moneda, 'USD'))} · ${shortDate(row.fecha_venta)}.`,
     permiso: 'VENTA_CONSULTAR', entidadTipo: 'VENTA_ANIMAL', ruta: detailRoute('/ventas','venta',row.id_venta,'&tipo=animales'),
-    datos: { cantidad: count, total: number(row.precio_total), moneda: text(row.moneda, 'USD') },
+    datos: withProfile({ cantidad: count, total: number(row.precio_total), moneda: text(row.moneda, 'USD'), id_animal: single?.id_animal ?? null }, single),
   });
 }
 
@@ -210,20 +354,27 @@ export async function notifyProductSale(database: Queryable, row: Row, count: nu
     : countLabel(count,'producto','productos');
   return emitBusinessNotification(database, actor, text(row.id_venta_producto), {
     dedupe: 'VENTA_PRODUCTOS', tipo: 'VENTA_PRODUCTOS_REGISTRADA', categoria: 'VENTAS', prioridad: 'INFO',
-    titulo: 'Venta de productos registrada',
-    mensaje: `${productSummary} · ${text(row.comprador_nombre, 'comprador no indicado')} · ${money(row.precio_total, text(row.moneda, 'USD'))}.`,
+    titulo: products.length === 1 ? `${text(products[0]?.nombre, 'Producto')} vendido` : 'Venta de productos registrada',
+    mensaje: `${productSummary} · ${text(row.comprador_nombre, 'Comprador no indicado')} · ${money(row.precio_total, text(row.moneda, 'USD'))}.`,
     permiso: 'VENTA_CONSULTAR', entidadTipo: 'VENTA_PRODUCTO', ruta: detailRoute('/ventas','venta_producto',row.id_venta_producto,'&tipo=productos'),
     datos: { cantidad: count, total: number(row.precio_total), moneda: text(row.moneda, 'USD') },
   });
 }
 
 export async function notifyPurchase(database: Queryable, row: Row, actor: string) {
+  const animal = row.id_animal ? await animalContext(database, text(row.id_animal)) : undefined;
+  const context = (await database.query(
+    `SELECT t.nombre tipo,COALESCE(u.simbolo,u.nombre,'unidades') unidad
+     FROM compra c JOIN tipo_producto_compra t ON t.id_tipo_producto_compra=c.id_tipo_producto_compra
+     LEFT JOIN unidad_medida u ON u.id_unidad=c.id_unidad WHERE c.id_compra=$1`, [row.id_compra],
+  )).rows[0] as Row | undefined;
+  const product = text(row.producto ?? row.animal, text(context?.tipo, 'Compra'));
   return emitBusinessNotification(database, actor, text(row.id_compra), {
     dedupe: 'COMPRA', tipo: 'COMPRA_REGISTRADA', categoria: 'COMPRAS', prioridad: 'INFO',
-    titulo: 'Compra registrada',
-    mensaje: `${text(row.producto ?? row.animal, 'Compra')} · ${text(row.proveedor)} · ${money(row.valor_total, text(row.moneda, 'USD'))}.`,
+    titulo: animal ? `${animalLabel(animal)} fue comprado${text(animal.sexo) === 'HEMBRA' ? 'a' : ''}` : `Compra de ${product}`,
+    mensaje: `${animal ? '' : `${decimal(row.cantidad)} ${text(context?.unidad)} · `}${text(row.proveedor, 'Proveedor no indicado')} · ${money(row.valor_total, text(row.moneda, 'USD'))}.`,
     permiso: 'COMPRA_CONSULTAR', entidadTipo: 'COMPRA', ruta: detailRoute('/compras','compra',row.id_compra),
-    datos: { total: number(row.valor_total), moneda: text(row.moneda, 'USD'), id_animal: row.id_animal ?? null },
+    datos: withProfile({ total: number(row.valor_total), moneda: text(row.moneda, 'USD'), id_animal: row.id_animal ?? null }, animal),
   });
 }
 
@@ -235,8 +386,8 @@ export async function notifyCleaning(database: Queryable, row: Row, actor: strin
   const state = text(row.estado, 'COMPLETADO');
   return emitBusinessNotification(database, actor, text(row.id_limpieza), {
     dedupe: 'LIMPIEZA', tipo: 'LIMPIEZA_POTRERO_REGISTRADA', categoria: 'MANTENIMIENTO',
-    prioridad: state === 'COMPLETADO' ? 'INFO' : 'IMPORTANTE', titulo: 'Limpieza de potrero registrada',
-    mensaje: `${text(pasture?.nombre, 'Potrero')} · ${text(row.fecha_inicio)} · estado ${state.toLowerCase().replaceAll('_', ' ')}.`,
+    prioridad: state === 'COMPLETADO' ? 'INFO' : 'IMPORTANTE', titulo: `${text(pasture?.nombre, 'Potrero')} recibió mantenimiento`,
+    mensaje: `${shortDate(row.fecha_inicio)} · ${enumLabel(state)}.`,
     permiso: 'LIMPIEZA_CONSULTAR', entidadTipo: 'LIMPIEZA_POTRERO', ruta: detailRoute('/limpiezas','limpieza',row.id_limpieza),
     datos: { id_potrero: row.id_potrero, estado: state },
   });
@@ -244,12 +395,21 @@ export async function notifyCleaning(database: Queryable, row: Row, actor: strin
 
 export async function notifyActivity(database: Queryable, row: Row, count: number, actor: string) {
   const type = (await database.query('SELECT nombre FROM tipo_actividad WHERE id_tipo_actividad=$1', [row.id_tipo_actividad])).rows[0] as Row | undefined;
+  const animals = count === 1 ? (await database.query(
+    `SELECT a.id_animal,a.nombre,a.sexo,
+       (SELECT ai.secure_url FROM animal_imagen ai WHERE ai.id_animal=a.id_animal AND ai.deleted_at IS NULL
+        ORDER BY ai.es_perfil DESC,ai.created_at DESC LIMIT 1) foto_perfil
+     FROM actividad_animal aa JOIN animal a ON a.id_animal=aa.id_animal
+     WHERE aa.id_actividad=$1 AND aa.deleted_at IS NULL LIMIT 1`, [row.id_actividad],
+  )).rows as Row[] : [];
+  const single = animals[0];
+  const activity = text(type?.nombre, 'Actividad');
   return emitBusinessNotification(database, actor, text(row.id_actividad), {
     dedupe: 'ACTIVIDAD', tipo: 'ACTIVIDAD_REGISTRADA', categoria: 'ACTIVIDADES', prioridad: 'INFO',
-    titulo: 'Actividad registrada',
-    mensaje: `${text(type?.nombre, 'Actividad')} · ${countLabel(count,'animal','animales')} · ${text(row.fecha)}.`,
+    titulo: single ? `${activity} para ${animalLabel(single)}` : `${activity} para ${countLabel(count,'animal','animales')}`,
+    mensaje: `${shortDate(row.fecha)}${text(row.descripcion) ? ` · ${text(row.descripcion)}` : ''}.`,
     permiso: 'ACTIVIDAD_CONSULTAR', entidadTipo: 'ACTIVIDAD', ruta: detailRoute('/actividades','actividad',row.id_actividad),
-    datos: { cantidad_animales: count, id_tipo_actividad: row.id_tipo_actividad },
+    datos: withProfile({ cantidad_animales: count, id_tipo_actividad: row.id_tipo_actividad, id_animal: single?.id_animal ?? null }, single),
   });
 }
 
@@ -261,12 +421,20 @@ export async function notifySanitaryCampaign(database: Queryable, id: string, co
      JOIN medicamento m ON m.id_medicamento=j.id_medicamento
      WHERE j.id_jornada=$1`, [id],
   )).rows[0] as Row | undefined;
+  const animals = count === 1 ? (await database.query(
+    `SELECT a.id_animal,a.nombre,a.sexo,
+       (SELECT ai.secure_url FROM animal_imagen ai WHERE ai.id_animal=a.id_animal AND ai.deleted_at IS NULL
+        ORDER BY ai.es_perfil DESC,ai.created_at DESC LIMIT 1) foto_perfil
+     FROM jornada_sanitaria_detalle d JOIN animal a ON a.id_animal=d.id_animal
+     WHERE d.id_jornada=$1 AND d.seleccionado=TRUE AND d.deleted_at IS NULL LIMIT 1`, [id],
+  )).rows as Row[] : [];
+  const single = animals[0];
   return emitBusinessNotification(database, actor, id, {
     dedupe: 'JORNADA_SANITARIA', tipo: 'JORNADA_SANITARIA_APLICADA', categoria: 'SANIDAD', prioridad: 'IMPORTANTE',
-    titulo: 'Jornada sanitaria aplicada',
-    mensaje: `${text(campaign?.tipo, 'Tratamiento')} · ${text(campaign?.medicamento)} · ${countLabel(count,'animal','animales')}.`,
+    titulo: single ? `${animalLabel(single)} recibió ${text(campaign?.tipo, 'tratamiento').toLocaleLowerCase('es')}` : `${text(campaign?.tipo, 'Tratamiento')} aplicado a ${countLabel(count,'animal','animales')}`,
+    mensaje: `${text(campaign?.medicamento)} · ${shortDate(campaign?.fecha_aplicacion)}.`,
     permiso: 'SANIDAD_CONSULTAR', entidadTipo: 'JORNADA_SANITARIA', ruta: detailRoute('/sanidad','jornada',id),
-    datos: { cantidad_animales: count, fecha: campaign?.fecha_aplicacion ?? null },
+    datos: withProfile({ cantidad_animales: count, fecha: isoDate(campaign?.fecha_aplicacion), id_animal: single?.id_animal ?? null }, single),
   });
 }
 
@@ -277,7 +445,9 @@ export async function notifyHealthCondition(
   resolved = false,
 ) {
   const context = (await database.query(
-    `SELECT a.nombre,a.codigo_arete,t.nombre tipo
+    `SELECT a.nombre,a.codigo_arete,a.sexo,t.nombre tipo,
+       (SELECT ai.secure_url FROM animal_imagen ai WHERE ai.id_animal=a.id_animal AND ai.deleted_at IS NULL
+        ORDER BY ai.es_perfil DESC,ai.created_at DESC LIMIT 1) foto_perfil
      FROM animal a
      LEFT JOIN tipo_condicion_salud t ON t.id_tipo_condicion_salud=$2
      WHERE a.id_animal=$1`,
@@ -287,10 +457,12 @@ export async function notifyHealthCondition(
     dedupe: resolved ? 'CONDICION_RESUELTA' : 'CONDICION_DETECTADA',
     tipo: resolved ? 'CONDICION_SALUD_RESUELTA' : 'CONDICION_SALUD_DETECTADA',
     categoria: 'SANIDAD', prioridad: resolved ? 'INFO' : 'URGENTE',
-    titulo: resolved ? 'Condición de salud resuelta' : 'Condición de salud detectada',
-    mensaje: `${animalLabel(context)} · ${text(context?.tipo, text(row.descripcion, 'condición sin clasificar'))}${resolved ? ' · marcada como resuelta' : ''}.`,
+    titulo: resolved
+      ? `${animalLabel(context)} se recuperó de ${text(context?.tipo, 'su condición').toLocaleLowerCase('es')}`
+      : `${animalLabel(context)} presenta ${text(context?.tipo, 'una condición de salud').toLocaleLowerCase('es')}`,
+    mensaje: resolved ? 'La condición fue marcada como resuelta.' : `${text(row.descripcion, 'Requiere revisión')}.`,
     permiso: 'SANIDAD_CONSULTAR', entidadTipo: 'CONDICION_SALUD', ruta: detailRoute('/sanidad','condicion',row.id_condicion_salud),
-    datos: { id_animal: row.id_animal, estado: resolved ? 'RESUELTA' : row.estado },
+    datos: withProfile({ id_animal: row.id_animal, estado: resolved ? 'RESUELTA' : row.estado }, context),
   });
 }
 
@@ -301,20 +473,20 @@ export async function notifyReproductionEvent(
   actor: string,
 ) {
   const animalId = text(row.id_vaca);
-  const animal = (await database.query('SELECT nombre,codigo_arete FROM animal WHERE id_animal=$1', [animalId])).rows[0] as Row | undefined;
+  const animal = await animalContext(database, animalId);
   if (kind === 'CELO') {
     return emitBusinessNotification(database, actor, text(row.id_celo), {
       dedupe: 'CELO', tipo: 'CELO_REGISTRADO', categoria: 'REPRODUCCION', prioridad: 'INFO',
-      titulo: 'Celo registrado', mensaje: `${animalLabel(animal)} · inicio ${text(row.fecha_inicio)}.`,
-      permiso: 'PARTO_CONSULTAR', entidadTipo: 'CELO', ruta: detailRoute('/partos','celo',row.id_celo,'&tab=heats'), datos: { id_animal: animalId },
+      titulo: `${animalLabel(animal)} entró en celo`, mensaje: `Inició el ${shortDate(row.fecha_inicio)}.`,
+      permiso: 'PARTO_CONSULTAR', entidadTipo: 'CELO', ruta: detailRoute('/partos','celo',row.id_celo,'&tab=heats'), datos: withProfile({ id_animal: animalId }, animal),
     });
   }
   return emitBusinessNotification(database, actor, text(row.id_prenez), {
     dedupe: 'PRENEZ', tipo: 'PRENEZ_CONFIRMADA', categoria: 'REPRODUCCION', prioridad: 'IMPORTANTE',
-    titulo: 'Preñez confirmada',
-    mensaje: `${animalLabel(animal)}${row.fecha_parto_tentativa ? ` · parto estimado ${text(row.fecha_parto_tentativa)}` : ' · sin fecha estimada de parto'}.`,
+    titulo: `${animalLabel(animal)} está preñada`,
+    mensaje: `${row.fecha_parto_tentativa ? `Parto estimado: ${shortDate(row.fecha_parto_tentativa)}` : 'Sin fecha estimada de parto'} · ${enumLabel(row.metodo_confirmacion, 'Método no indicado')}.`,
     permiso: 'PARTO_CONSULTAR', entidadTipo: 'PRENEZ', ruta: detailRoute('/partos','prenez',row.id_prenez,'&tab=pregnancies'),
-    datos: { id_animal: animalId, fecha_parto_tentativa: row.fecha_parto_tentativa ?? null },
+    datos: withProfile({ id_animal: animalId, fecha_parto_tentativa: isoDate(row.fecha_parto_tentativa) || null, metodo_confirmacion: row.metodo_confirmacion ?? null }, animal),
   });
 }
 
@@ -391,7 +563,7 @@ export async function notifyMovementApplied(database: Queryable, input: Movement
     `SELECT m.tipo_movimiento,u1.nombre ubicacion_origen,COALESCE(u2.nombre,ud.nombre) ubicacion_destino,
        g1.nombre grupo_origen,g2.nombre grupo_destino,p1.nombre propiedad_origen,p2.nombre propiedad_destino,
        route.origen_descripcion,route.destino_descripcion
-       ,route.animal_nombres
+       ,route.animal_nombres,route.animal_ids
      FROM movimiento_animal m
      LEFT JOIN ubicacion u1 ON u1.id_ubicacion=m.id_ubicacion_origen
      LEFT JOIN ubicacion u2 ON u2.id_ubicacion=m.id_ubicacion_destino
@@ -411,6 +583,7 @@ export async function notifyMovementApplied(database: Queryable, input: Movement
            WHEN gd.nombre IS NOT NULL THEN gd.nombre
            ELSE udd.nombre END,', ') destino_descripcion,
          ARRAY_AGG(DISTINCT ma.nombre ORDER BY ma.nombre) FILTER (WHERE ma.nombre IS NOT NULL) animal_nombres
+         ,ARRAY_AGG(DISTINCT ma.id_animal) FILTER (WHERE ma.id_animal IS NOT NULL) animal_ids
        FROM movimiento_animal_detalle md
        JOIN animal ma ON ma.id_animal=md.id_animal
        LEFT JOIN grupo go ON go.id_grupo=COALESCE(md.id_grupo_anterior,ma.id_grupo_actual,m.id_grupo_origen,m.id_grupo_filtro)
@@ -422,27 +595,30 @@ export async function notifyMovementApplied(database: Queryable, input: Movement
      WHERE m.id_movimiento=$1`, [input.id,input.destinoId],
   )).rows[0] as Row | undefined;
   const kind=text(context?.tipo_movimiento,input.tipo);
-  const subject=animalSubject(input.cantidad,context?.animal_nombres);
+  const animalIds = Array.isArray(context?.animal_ids) ? context.animal_ids.map(value => text(value)).filter(Boolean) : [];
+  const singleAnimal = input.cantidad === 1 && animalIds[0] ? await animalContext(database, animalIds[0]) : undefined;
+  const singleName = animalLabel(singleAnimal);
   let title='Movimiento aplicado';
-  let message=`${subject} trasladado${input.cantidad === 1 ? '' : 's'}.`;
+  let message=`${countLabel(input.cantidad,'animal trasladado','animales trasladados')}.`;
   if(kind==='UBICACION') {
-    title='Cambio de potrero aplicado';
-    message=`${subject} · ${text(context?.ubicacion_origen,'potrero de origen no indicado')} → ${text(context?.ubicacion_destino,'potrero de destino no indicado')}.`;
+    const groupName=text(context?.grupo_origen,'El grupo');
+    title=`${groupName} fueron cambiad${/^\S*as\b/i.test(groupName) ? 'as' : 'os'} de potrero`;
+    message=`${countLabel(input.cantidad,'animal','animales')} · ${text(context?.ubicacion_origen,'potrero de origen no indicado')} → ${text(context?.ubicacion_destino,'potrero de destino no indicado')}.`;
   } else if(kind==='GRUPO') {
-    title='Cambio de grupo aplicado';
-    message=`${subject} · ${text(context?.origen_descripcion,'grupo de origen no indicado')} → ${text(context?.destino_descripcion,`${text(context?.grupo_destino,'grupo de destino no indicado')} (${text(context?.ubicacion_destino,'potrero no indicado')})`)}.`;
+    title=input.cantidad === 1 ? `${singleName} se cambió de grupo` : `${countLabel(input.cantidad,'animal cambiado','animales cambiados')} de grupo`;
+    message=`${text(context?.origen_descripcion,'grupo de origen no indicado')} → ${text(context?.destino_descripcion,`${text(context?.grupo_destino,'grupo de destino no indicado')} (${text(context?.ubicacion_destino,'potrero no indicado')})`)}.`;
   } else if(kind==='PROPIEDAD') {
-    title='Traslado de propiedad aplicado';
-    message=`${subject} · ${text(context?.propiedad_origen,'propiedad de origen no indicada')} → ${text(context?.propiedad_destino,'propiedad de destino no indicada')} (${text(context?.grupo_destino,'grupo no indicado')}).`;
+    title=input.cantidad === 1 ? `${singleName} se cambió de propiedad` : `${countLabel(input.cantidad,'animal cambiado','animales cambiados')} de propiedad`;
+    message=`${text(context?.propiedad_origen,'propiedad de origen no indicada')} → ${text(context?.propiedad_destino,'propiedad de destino no indicada')} (${text(context?.grupo_destino,'grupo no indicado')}).`;
   } else if(kind==='COMBINADO') {
-    title='Traslado de propiedad aplicado';
-    message=`${subject} · ${text(context?.propiedad_origen,'propiedad de origen no indicada')} → ${text(context?.propiedad_destino,'propiedad de destino no indicada')} (${text(context?.grupo_destino,'grupo no indicado')}).`;
+    title=input.cantidad === 1 ? `${singleName} se cambió de propiedad` : `${countLabel(input.cantidad,'animal cambiado','animales cambiados')} de propiedad`;
+    message=`${text(context?.propiedad_origen,'propiedad de origen no indicada')} → ${text(context?.propiedad_destino,'propiedad de destino no indicada')} (${text(context?.grupo_destino,'grupo no indicado')}).`;
   }
   await emitBusinessNotification(database, input.actor, input.id, {
     dedupe: 'MOVIMIENTO', tipo: 'MOVIMIENTO_APLICADO', categoria: 'MOVIMIENTOS', prioridad: 'INFO',
     titulo: title, mensaje: message,
     permiso: 'MOVIMIENTO_CONSULTAR', entidadTipo: 'MOVIMIENTO', ruta: detailRoute('/movimientos','movimiento',input.id),
-    datos: { tipo: input.tipo, fecha: input.fecha, cantidad: input.cantidad },
+    datos: withProfile({ tipo: input.tipo, fecha: isoDate(input.fecha), cantidad: input.cantidad, id_animal: singleAnimal?.id_animal ?? null }, singleAnimal),
   });
   if (!input.tickRisk) return;
   const risk = tickMessage(input.tickRisk);

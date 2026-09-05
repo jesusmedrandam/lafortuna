@@ -461,13 +461,14 @@ recordsRouter.patch('/:module/:id', asyncHandler(async (req, res) => {
     const input={...parsed,id_parto:parsed.id_parto??null,fecha_fin:parsed.activa?null:(parsed.fecha_fin??null),observaciones:parsed.observaciones??null};
     const row=await transaction(async client=>{
       const current=(await client.query(
-        'SELECT id_lactancia,id_vaca,en_ordeno FROM lactancia WHERE id_lactancia=$1 AND deleted_at IS NULL FOR UPDATE',[id],
-      )).rows[0] as {id_lactancia:string;id_vaca:string;en_ordeno:boolean}|undefined;
+        'SELECT id_lactancia,id_vaca,en_ordeno,activa FROM lactancia WHERE id_lactancia=$1 AND deleted_at IS NULL FOR UPDATE',[id],
+      )).rows[0] as {id_lactancia:string;id_vaca:string;en_ordeno:boolean;activa:boolean}|undefined;
       if(!current)throw new NotFoundError('Lactancia no encontrada.');
       const fechaInicio=await validateLactation(client,input,id);
       const saved=(await client.query(buildUpdate('lactancia','id_lactancia',id,{...input,fecha_inicio:fechaInicio}))).rows[0];
       if(input.en_ordeno)await client.query('UPDATE animal SET en_ordeno=TRUE,updated_at=NOW() WHERE id_animal=$1',[input.id_vaca]);
       else if(current.en_ordeno)await client.query('UPDATE animal SET en_ordeno=FALSE,updated_at=NOW() WHERE id_animal=$1',[current.id_vaca]);
+      if(current.activa&&saved.activa===false)await notifyRecordCreated(client,'lactancias',saved,req.user!.id);
       return saved;
     },req.user!.id);
     return ok(res,row);
