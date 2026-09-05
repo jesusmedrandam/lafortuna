@@ -139,6 +139,29 @@ export interface Animal {
   total?: number;
 }
 
+export interface PublicAnimal {
+  id_animal: string;
+  nombre: string;
+  codigo_arete: string | null;
+  descripcion: string | null;
+  sexo: 'MACHO' | 'HEMBRA';
+  fecha_nacimiento: string | null;
+  estado: string;
+  especie: string;
+  origen: string | null;
+  madre: string | null;
+  padre: string | null;
+  marquilla_codigo: string | null;
+  foto_perfil: string | null;
+  razas: Array<{ nombre: string; porcentaje: number | string | null }>;
+  colores: Array<{ nombre: string; es_principal: boolean }>;
+  ultimo_pesaje: { peso_kg: number | string; fecha: string } | null;
+  total_partos: number;
+  total_crias: number;
+  prenez_confirmada: boolean;
+  compartido_desde: string;
+}
+
 export interface AnimalRegisteredChild { id_animal:string;nombre:string;codigo_arete:string|null;sexo:'MACHO'|'HEMBRA';fecha_nacimiento:string|null;id_parto:string|null;fecha_parto:string|null;parentesco:'MADRE'|'PADRE' }
 export interface AnimalReproductiveBirth { id_parto:string;fecha:string;tipo:string;rol:'MADRE'|'PADRE';contraparte:string|null;total_crias:number }
 export interface AnimalReproductiveHeat { id_celo:string;fecha_inicio:string;fecha_fin:string|null;rol:'VACA'|'TORO';contraparte:string|null;observaciones:string|null }
@@ -411,17 +434,30 @@ export interface Pasture {
 }
 
 export interface PastureOccupationPeriod {
+  periodo: number;
   inicio: string;
   fin: string | null;
   total_animales: number;
   descanso_previo_desde: string | null;
   dias_ocupacion: number;
   dias_descanso_previo: number | null;
+  animales: Array<{
+    id_animal: string;
+    nombre: string;
+    codigo_arete: string | null;
+    foto_perfil: string | null;
+  }>;
 }
 
 export interface PastureDetail extends Pasture {
   ocupacion: {
     estado: 'OCUPADO' | 'DESCANSO';
+    fecha_ocupacion_actual: string | null;
+    dias_ocupacion_actual: number | null;
+    fecha_ocupacion_anterior: string | null;
+    fecha_fin_ocupacion_anterior: string | null;
+    dias_ocupacion_anterior: number | null;
+    carga_anterior: number | null;
     fecha_ultima_ocupacion: string | null;
     dias_ultima_ocupacion: number | null;
     fecha_ultimo_descanso: string | null;

@@ -12,6 +12,7 @@ import { AuthLayout } from '../pages/auth/AuthLayout';
 import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import { AnimalsPage } from '../pages/animals/AnimalsPage';
 import { AnimalDetailPage } from '../pages/animals/AnimalDetailPage';
+import { PublicAnimalPage } from '../pages/animals/PublicAnimalPage';
 import { GroupsPage } from '../pages/groups/GroupsPage';
 import { PasturesPage } from '../pages/locations/PasturesPage';
 import { CorralsPage } from '../pages/locations/CorralsPage';
@@ -60,6 +61,7 @@ function PermissionRoute({ permissions, children }: { permissions: string[]; chi
 export function AppRouter() {
   return <BrowserRouter>
     <Routes>
+      <Route path="/animal-publico/:token" element={<PublicAnimalPage />} />
       <Route element={<AuthLayout />}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/registro" element={<RegisterPage />} />

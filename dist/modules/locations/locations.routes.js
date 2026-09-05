@@ -186,20 +186,44 @@ pasturesRouter.get('/:id/resumen', requirePermission('POTRERO_CONSULTAR'), async
         CASE WHEN BOOL_OR(fecha_hasta IS NULL) THEN NULL ELSE MAX(fecha_hasta) END fin,
         COUNT(DISTINCT id_animal)::int total_animales
       FROM islands GROUP BY periodo
+    ), period_animals AS (
+      SELECT members.periodo,
+        jsonb_agg(jsonb_build_object(
+          'id_animal',a.id_animal,
+          'nombre',a.nombre,
+          'codigo_arete',a.codigo_arete,
+          'foto_perfil',profile.secure_url
+        ) ORDER BY a.nombre,a.codigo_arete) animales
+      FROM (SELECT DISTINCT periodo,id_animal FROM islands) members
+      JOIN animal a ON a.id_animal=members.id_animal
+      LEFT JOIN LATERAL (
+        SELECT ai.secure_url
+        FROM animal_imagen ai
+        WHERE ai.id_animal=a.id_animal AND ai.es_perfil=TRUE AND ai.deleted_at IS NULL
+        ORDER BY ai.created_at DESC LIMIT 1
+      ) profile ON TRUE
+      GROUP BY members.periodo
     ), rested AS (
       SELECT periods.*,LAG(fin) OVER (ORDER BY inicio) descanso_previo_desde
       FROM periods
     )
-    SELECT inicio,fin,total_animales,descanso_previo_desde,
+    SELECT rested.periodo,inicio,fin,total_animales,descanso_previo_desde,
       GREATEST(0,(COALESCE(fin,NOW())::date-inicio::date))::int dias_ocupacion,
       CASE WHEN descanso_previo_desde IS NULL THEN NULL
-        ELSE GREATEST(0,(inicio::date-descanso_previo_desde::date))::int END dias_descanso_previo
-    FROM rested ORDER BY inicio DESC
+        ELSE GREATEST(0,(inicio::date-descanso_previo_desde::date))::int END dias_descanso_previo,
+      COALESCE(period_animals.animales,'[]'::jsonb) animales
+    FROM rested
+    LEFT JOIN period_animals ON period_animals.periodo=rested.periodo
+    ORDER BY inicio DESC
   `, [pasture.id_ubicacion])).rows;
     const latest = history[0];
     const occupied = Number(pasture.total_animales) > 0;
+    const currentOccupation = occupied
+        ? history.find(period => period.fin == null) ?? null
+        : null;
+    const previousOccupation = history.find(period => period.fin != null) ?? null;
     const restStart = occupied
-        ? (latest?.descanso_previo_desde ?? pasture.fecha_ultimo_descanso)
+        ? (currentOccupation?.descanso_previo_desde ?? pasture.fecha_ultimo_descanso)
         : (latest?.fin ?? pasture.fecha_ultimo_descanso);
     const currentRestDays = !occupied && restStart
         ? Math.max(0, Math.floor((Date.now() - new Date(restStart).getTime()) / 86_400_000))
@@ -208,10 +232,18 @@ pasturesRouter.get('/:id/resumen', requirePermission('POTRERO_CONSULTAR'), async
         ...pasture,
         ocupacion: {
             estado: occupied ? 'OCUPADO' : 'DESCANSO',
-            fecha_ultima_ocupacion: latest?.inicio ?? null,
-            dias_ultima_ocupacion: latest?.dias_ocupacion ?? null,
+            fecha_ocupacion_actual: currentOccupation?.inicio ?? null,
+            dias_ocupacion_actual: currentOccupation?.dias_ocupacion ?? null,
+            fecha_ocupacion_anterior: previousOccupation?.inicio ?? null,
+            fecha_fin_ocupacion_anterior: previousOccupation?.fin ?? null,
+            dias_ocupacion_anterior: previousOccupation?.dias_ocupacion ?? null,
+            carga_anterior: previousOccupation?.total_animales ?? null,
+            // Se conservan durante una versión para clientes anteriores. Desde ahora
+            // siempre describen el período cerrado anterior, no la ocupación actual.
+            fecha_ultima_ocupacion: previousOccupation?.inicio ?? null,
+            dias_ultima_ocupacion: previousOccupation?.dias_ocupacion ?? null,
             fecha_ultimo_descanso: restStart ?? null,
-            dias_descanso: occupied ? (latest?.dias_descanso_previo ?? null) : currentRestDays,
+            dias_descanso: occupied ? (currentOccupation?.dias_descanso_previo ?? null) : currentRestDays,
             total_animales: Number(pasture.total_animales),
         },
         historial_ocupaciones: history,

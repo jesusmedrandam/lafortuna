@@ -35,7 +35,12 @@ import {
 } from "../../components/ui";
 import { itemId, itemLabel, useCatalog } from "../../hooks/useCatalog";
 import { useListControls } from "../../hooks/useListControls";
-import type { Location, Pasture, PastureDetail } from "../../types/api";
+import type {
+  Location,
+  Pasture,
+  PastureDetail,
+  PastureOccupationPeriod,
+} from "../../types/api";
 import {
   formatDate,
   formatNumber,
@@ -864,6 +869,8 @@ export function PasturesPage() {
 
 function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
   const status = pasture.ocupacion.estado;
+  const [selectedOccupation, setSelectedOccupation] =
+    useState<PastureOccupationPeriod | null>(null);
   return (
     <div className="pasture-detail">
       <div className="pasture-detail-heading">
@@ -903,17 +910,30 @@ function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
         <div>
           <CalendarDays size={19} />
           <span>
-            <small>Última ocupación</small>
+            <small>Ocupación anterior</small>
             <strong>
-              {formatDate(pasture.ocupacion.fecha_ultima_ocupacion)}
+              {pasture.ocupacion.fecha_ocupacion_anterior
+                ? `${formatDate(pasture.ocupacion.fecha_ocupacion_anterior)} – ${formatDate(pasture.ocupacion.fecha_fin_ocupacion_anterior)}`
+                : "—"}
             </strong>
           </span>
         </div>
         <div>
           <Clock3 size={19} />
           <span>
-            <small>Días de última ocupación</small>
-            <strong>{pasture.ocupacion.dias_ultima_ocupacion ?? "—"}</strong>
+            <small>Días de ocupación anterior</small>
+            <strong>{pasture.ocupacion.dias_ocupacion_anterior ?? "—"}</strong>
+          </span>
+        </div>
+        <div>
+          <Users size={19} />
+          <span>
+            <small>Carga anterior</small>
+            <strong>
+              {pasture.ocupacion.carga_anterior != null
+                ? `${pasture.ocupacion.carga_anterior} animales`
+                : "—"}
+            </strong>
           </span>
         </div>
         <div>
@@ -1003,9 +1023,11 @@ function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
               <span>Descanso previo</span>
             </div>
             {pasture.historial_ocupaciones.map((period, index) => (
-              <div
+              <button
+                type="button"
                 className="pasture-history-row"
                 key={`${period.inicio}-${index}`}
+                onClick={() => setSelectedOccupation(period)}
               >
                 <span>
                   <strong>{formatDate(period.inicio)}</strong>
@@ -1032,7 +1054,8 @@ function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
                       : ""}
                   </small>
                 </span>
-              </div>
+                <ChevronRight size={18} />
+              </button>
             ))}
           </div>
         ) : (
@@ -1043,6 +1066,73 @@ function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
           />
         )}
       </section>
+      {selectedOccupation ? (
+        <Modal
+          title="Detalle de la ocupación"
+          onClose={() => setSelectedOccupation(null)}
+          wide
+          footer={
+            <Button variant="ghost" onClick={() => setSelectedOccupation(null)}>
+              Cerrar
+            </Button>
+          }
+        >
+          <div className="occupation-detail">
+            <div className="detail-grid">
+              <div>
+                <small>Inicio</small>
+                <strong>{formatDate(selectedOccupation.inicio)}</strong>
+              </div>
+              <div>
+                <small>Fin</small>
+                <strong>
+                  {selectedOccupation.fin
+                    ? formatDate(selectedOccupation.fin)
+                    : "Actualmente ocupado"}
+                </strong>
+              </div>
+              <div>
+                <small>Duración</small>
+                <strong>{selectedOccupation.dias_ocupacion} días</strong>
+              </div>
+              <div>
+                <small>Carga registrada</small>
+                <strong>{selectedOccupation.total_animales} animales</strong>
+              </div>
+            </div>
+            <section>
+              <h3>Animales que estuvieron en esta ocupación</h3>
+              {selectedOccupation.animales.length ? (
+                <div className="occupation-animal-list">
+                  {selectedOccupation.animales.map((animal) => (
+                    <div key={animal.id_animal}>
+                      {animal.foto_perfil ? (
+                        <img src={animal.foto_perfil} alt="" />
+                      ) : (
+                        <span className="occupation-animal-placeholder">
+                          <Users size={18} />
+                        </span>
+                      )}
+                      <span>
+                        <strong>{animal.nombre}</strong>
+                        <small>
+                          {animal.codigo_arete
+                            ? `Arete ${animal.codigo_arete}`
+                            : "Sin arete"}
+                        </small>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">
+                  No se encontraron animales vinculados a este período.
+                </p>
+              )}
+            </section>
+          </div>
+        </Modal>
+      ) : null}
     </div>
   );
 }
