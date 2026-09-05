@@ -1,0 +1,892 @@
+import { randomUUID } from 'node:crypto';
+import { Router } from 'express';
+import type { PoolClient } from 'pg';
+import multer from 'multer';
+import { z } from 'zod';
+import { env } from '../../config/env.js';
+import { pool } from '../../database/pool.js';
+import { transaction } from '../../database/transaction.js';
+import { asyncHandler } from '../../core/async-handler.js';
+import { routeParam } from '../../core/route-param.js';
+import { created, noContent, ok } from '../../core/http.js';
+import { ConflictError, NotFoundError, ValidationError } from '../../core/errors.js';
+import { paginationSchema, offset } from '../../core/pagination.js';
+import { requirePermission } from '../../middleware/permission.js';
+import { deleteCloudinaryImage, uploadAnimalImage } from '../../services/cloudinary.service.js';
+import { buildInsert, buildUpdate } from '../shared/sql.js';
+
+const relation = z.object({
+  id: z.string().uuid(),
+  porcentaje: z.number().min(0).max(100).nullable().optional(),
+  principal: z.boolean().optional(),
+});
+
+const ownerRelation = z.object({
+  id: z.string().uuid(),
+  porcentaje: z.number().min(0).max(100).nullable().optional(),
+  principal: z.boolean().optional(),
+});
+
+const animalConditionSchema = z.string().trim().transform((value) => value.toUpperCase().replace(/\s+/g, '_')).pipe(
+  z.string().min(1).max(40).regex(/^[A-Z0-9_]+$/, 'La condición del animal no es válida.'),
+);
+
+const schema = z.object({
+  codigo_arete: z.string().max(60).nullable().optional(),
+  nombre: z.string().trim().min(1).max(120),
+  descripcion: z.string().max(300).nullable().optional(),
+  id_especie: z.string().uuid(),
+  sexo: z.enum(['MACHO', 'HEMBRA']),
+  fecha_nacimiento: z.string().date().nullable().optional(),
+  id_madre: z.string().uuid().nullable().optional(),
+  id_padre: z.string().uuid().nullable().optional(),
+  id_origen: z.string().uuid(),
+  id_categoria_animal: z.string().uuid(),
+  id_marquilla: z.string().uuid().nullable().optional(),
+  id_grupo_actual: z.string().uuid().nullable().optional(),
+  id_ubicacion_actual: z.string().uuid().nullable().optional(),
+  estado: animalConditionSchema.optional(),
+  colores: z.array(relation).default([]),
+  razas: z.array(relation).default([]),
+  propietarios: z.array(ownerRelation).default([]).superRefine((items, ctx) => {
+    if (items.filter((item) => item.principal).length > 1) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Solo un propietario puede ser principal.' });
+    }
+    const total = items.reduce((sum, item) => sum + (item.porcentaje ?? 0), 0);
+    if (total > 100.001) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'La suma de porcentajes no puede superar 100%.' });
+  }),
+});
+
+const createSchema = schema.extend({
+  peso_inicial_kg: z.number().positive().max(5000).nullable().optional(),
+  fecha_pesaje_inicial: z.string().min(1).nullable().optional(),
+  metodo_pesaje_inicial: z.string().trim().max(80).nullable().optional(),
+  observaciones_pesaje_inicial: z.string().trim().max(300).nullable().optional(),
+  descripcion_foto_perfil: z.string().trim().max(300).nullable().optional(),
+});
+
+const animalUpdateSchema = schema.omit({
+  id_categoria_animal: true,
+  id_grupo_actual: true,
+  id_ubicacion_actual: true,
+  estado: true,
+}).partial();
+
+const conditionActionSchema = z.object({
+  accion: z.enum(['DESACTIVAR', 'REACTIVAR', 'REPORTAR_DESAPARICION', 'REGISTRAR_HALLAZGO']),
+  fecha_evento: z.string().date(),
+  id_grupo_actual: z.string().uuid().nullable().optional(),
+  id_ubicacion_actual: z.string().uuid().nullable().optional(),
+  observaciones: z.string().trim().max(1000).nullable().optional(),
+});
+
+const createUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: env.MAX_IMAGE_MB * 1024 * 1024 },
+  fileFilter: (_req, file, callback) => {
+    if (!file.mimetype.startsWith('image/')) {
+      callback(new ValidationError('La foto de perfil debe ser una imagen.'));
+      return;
+    }
+    callback(null, true);
+  },
+});
+
+function createPayload(body: unknown) {
+  if (typeof body === 'object' && body !== null && 'data' in body) {
+    const raw = (body as { data?: unknown }).data;
+    if (typeof raw !== 'string') throw new ValidationError('Los datos del animal no son válidos.');
+    try {
+      return createSchema.parse(JSON.parse(raw));
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new ValidationError('Los datos del animal no contienen un JSON válido.');
+      throw error;
+    }
+  }
+  return createSchema.parse(body);
+}
+
+export const animalsRouter = Router();
+
+function sharedAnimalUrl(token: string) {
+  const origins = env.FRONTEND_URL.split(',')
+    .map((value) => value.trim().replace(/\/$/, ''))
+    .filter((value) => /^https?:\/\//i.test(value));
+  const base = origins.find((value) => !/localhost|127\.0\.0\.1/i.test(value))
+    ?? origins[0]
+    ?? 'http://localhost:5173';
+  return `${base}/animal-publico/${token}`;
+}
+
+animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
+  const p = paginationSchema.extend({
+    sexo: z.enum(['MACHO', 'HEMBRA']).optional(),
+    estado: animalConditionSchema.optional(),
+    id_grupo: z.string().uuid().optional(),
+    id_ubicacion: z.string().uuid().optional(),
+    id_especie: z.string().uuid().optional(),
+    id_categoria_animal: z.string().uuid().optional(),
+    id_propietario: z.string().uuid().optional(),
+    id_raza: z.string().uuid().optional(),
+    id_color: z.string().uuid().optional(),
+    id_marquilla: z.string().uuid().optional(),
+    nacimiento_desde: z.string().date().optional(),
+    nacimiento_hasta: z.string().date().optional(),
+  }).superRefine((filters, ctx) => {
+    if (filters.nacimiento_desde && filters.nacimiento_hasta && filters.nacimiento_desde > filters.nacimiento_hasta) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'La fecha inicial de nacimiento no puede ser posterior a la fecha final.' });
+    }
+  }).parse(req.query);
+  const params: unknown[] = [];
+  const where = ['a.deleted_at IS NULL'];
+  const add = (condition: string, value: unknown) => {
+    params.push(value);
+    where.push(condition.replace('?', `$${params.length}`));
+  };
+  if (p.q) {
+    params.push(`%${p.q}%`);
+    where.push(`(a.nombre ILIKE $${params.length} OR a.codigo_arete ILIKE $${params.length} OR COALESCE(a.descripcion,'') ILIKE $${params.length})`);
+  }
+  if (p.sexo) add('a.sexo=?', p.sexo);
+  if (p.estado) add('a.estado=?', p.estado);
+  if (p.id_grupo) add('a.id_grupo_actual=?', p.id_grupo);
+  if (p.id_ubicacion) add('a.id_ubicacion_actual=?', p.id_ubicacion);
+  if (p.id_especie) add('a.id_especie=?', p.id_especie);
+  if (p.id_categoria_animal) add('a.id_categoria_animal=?', p.id_categoria_animal);
+  if (p.id_propietario) add(`EXISTS (
+    SELECT 1 FROM animal_propietario apf
+    WHERE apf.id_animal=a.id_animal AND apf.id_usuario=?
+      AND apf.fecha_hasta IS NULL AND apf.deleted_at IS NULL
+  )`, p.id_propietario);
+  if (p.id_raza) add(`EXISTS (
+    SELECT 1 FROM animal_raza arf
+    WHERE arf.id_animal=a.id_animal AND arf.id_raza=? AND arf.deleted_at IS NULL
+  )`, p.id_raza);
+  if (p.id_color) add(`EXISTS (
+    SELECT 1 FROM animal_color acf
+    WHERE acf.id_animal=a.id_animal AND acf.id_color=? AND acf.deleted_at IS NULL
+  )`, p.id_color);
+  if (p.id_marquilla) add('a.id_marquilla=?', p.id_marquilla);
+  if (p.nacimiento_desde) add('a.fecha_nacimiento>=?', p.nacimiento_desde);
+  if (p.nacimiento_hasta) add('a.fecha_nacimiento<=?', p.nacimiento_hasta);
+  params.push(p.limit, offset(p.page, p.limit));
+  const limitIndex = params.length - 1;
+  const offsetIndex = params.length;
+  const result = await pool.query(
+    `SELECT a.*,e.nombre especie,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,im.secure_url foto_perfil,
+      mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
+      COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)
+       FROM marquilla_usuario mu JOIN usuario mu_u ON mu_u.id_usuario=mu.id_usuario AND mu_u.deleted_at IS NULL
+       WHERE mu.id_marquilla=mq.id_marquilla AND mu.deleted_at IS NULL),'') marquilla_usuario,
+      (SELECT TRIM(CONCAT(up.nombres,' ',up.apellidos))
+       FROM animal_propietario ap
+       JOIN usuario up ON up.id_usuario=ap.id_usuario
+       WHERE ap.id_animal=a.id_animal AND ap.fecha_hasta IS NULL AND ap.deleted_at IS NULL
+       ORDER BY ap.es_principal DESC,up.nombres,up.apellidos LIMIT 1) propietario_principal,
+      (SELECT jsonb_build_object('peso_kg',p.peso_kg,'fecha',p.fecha_pesaje)
+       FROM pesaje p
+       WHERE p.id_animal=a.id_animal AND p.deleted_at IS NULL
+       ORDER BY p.fecha_pesaje DESC LIMIT 1) ultimo_pesaje,
+      COUNT(*) OVER()::int total
+     FROM animal a
+     JOIN especie e ON e.id_especie=a.id_especie
+     JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
+     LEFT JOIN condicion_animal coa ON coa.codigo=a.estado
+     LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
+     LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
+     LEFT JOIN marquilla mq ON mq.id_marquilla=a.id_marquilla AND mq.deleted_at IS NULL
+     LEFT JOIN animal_imagen im ON im.id_animal=a.id_animal AND im.es_perfil AND im.deleted_at IS NULL
+     WHERE ${where.join(' AND ')}
+     ORDER BY a.nombre
+     LIMIT $${limitIndex} OFFSET $${offsetIndex}`,
+    params,
+  );
+  return ok(res, result.rows, { page: p.page, limit: p.limit, total: result.rows[0]?.total ?? 0 });
+}));
+
+animalsRouter.get('/opciones/filtros', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (_req, res) => {
+  const [especies, categorias, condiciones, grupos, ubicaciones, propietarios, razas, colores, marquillas] = await Promise.all([
+    pool.query(`SELECT id_especie,nombre FROM especie WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
+    pool.query(`SELECT id_categoria_animal,codigo,nombre FROM categoria_animal WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
+    pool.query(`SELECT id_condicion_animal,codigo,nombre,activo FROM condicion_animal WHERE deleted_at IS NULL ORDER BY activo DESC,nombre`),
+    pool.query(`SELECT id_grupo,nombre FROM grupo WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
+    pool.query(`SELECT id_ubicacion,nombre,tipo,id_categoria_animal FROM ubicacion WHERE deleted_at IS NULL AND activo=TRUE ORDER BY tipo,nombre`),
+    pool.query(`SELECT DISTINCT u.id_usuario,TRIM(CONCAT(u.nombres,' ',u.apellidos)) nombre
+      FROM animal_propietario ap
+      JOIN usuario u ON u.id_usuario=ap.id_usuario
+      WHERE ap.deleted_at IS NULL AND ap.fecha_hasta IS NULL AND u.deleted_at IS NULL
+      ORDER BY nombre`),
+    pool.query(`SELECT id_raza,nombre,id_especie FROM raza_animal WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
+    pool.query(`SELECT id_color,nombre FROM color_animal WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre`),
+    pool.query(`SELECT id_marquilla,nombre,codigo FROM marquilla WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombre,codigo`),
+  ]);
+  return ok(res, {
+    especies: especies.rows,
+    categorias: categorias.rows,
+    condiciones: condiciones.rows,
+    grupos: grupos.rows,
+    ubicaciones: ubicaciones.rows,
+    propietarios: propietarios.rows,
+    razas: razas.rows,
+    colores: colores.rows,
+    marquillas: marquillas.rows,
+  });
+}));
+
+animalsRouter.get('/opciones/propietarios', requirePermission('ANIMAL_CONSULTAR', 'ANIMAL_CREAR', 'ANIMAL_MODIFICAR'), asyncHandler(async (_req, res) => {
+  const rows = (await pool.query(
+    `SELECT id_usuario,TRIM(CONCAT(nombres,' ',apellidos)) nombre,correo
+     FROM usuario
+     WHERE deleted_at IS NULL AND activo=TRUE AND correo_verificado=TRUE
+     ORDER BY nombres,apellidos`,
+  )).rows;
+  return ok(res, rows);
+}));
+
+animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
+  const result = await pool.query(
+    `SELECT a.*,e.nombre especie,oa.nombre origen,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
+      mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
+      COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)
+       FROM marquilla_usuario mu JOIN usuario mu_u ON mu_u.id_usuario=mu.id_usuario AND mu_u.deleted_at IS NULL
+       WHERE mu.id_marquilla=mq.id_marquilla AND mu.deleted_at IS NULL),'') marquilla_usuario,
+      (SELECT ip.secure_url FROM animal_imagen ip
+       WHERE ip.id_animal=a.id_animal AND ip.es_perfil=TRUE AND ip.deleted_at IS NULL
+       ORDER BY ip.created_at DESC LIMIT 1) foto_perfil,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_imagen',i.id_imagen,'secure_url',i.secure_url,'url',i.url,'public_id',i.public_id,
+        'es_perfil',i.es_perfil,'descripcion',i.descripcion,'orden',i.orden,'created_at',i.created_at,'fecha_toma',i.fecha_toma,
+        'tipo_archivo',i.tipo_archivo,'mime_type',i.mime_type,'nombre_original',i.nombre_original,
+        'etiquetas',COALESCE((SELECT jsonb_agg(jsonb_build_object(
+          'id_etiqueta',em.id_etiqueta,'codigo',em.codigo,'nombre',em.nombre
+        ) ORDER BY em.nombre)
+        FROM animal_imagen_etiqueta aie JOIN etiqueta_multimedia em ON em.id_etiqueta=aie.id_etiqueta AND em.deleted_at IS NULL
+        WHERE aie.id_imagen=i.id_imagen AND aie.deleted_at IS NULL),'[]'::jsonb),
+        'animales',COALESCE((SELECT jsonb_agg(jsonb_build_object(
+          'id_animal',ar_a.id_animal,'nombre',ar_a.nombre,'codigo_arete',ar_a.codigo_arete
+        ) ORDER BY ar_a.nombre)
+        FROM animal_imagen_relacion ar JOIN animal ar_a ON ar_a.id_animal=ar.id_animal AND ar_a.deleted_at IS NULL
+        WHERE ar.id_imagen=i.id_imagen AND ar.deleted_at IS NULL),'[]'::jsonb)
+      ) ORDER BY i.es_perfil DESC,i.fecha_toma DESC,i.created_at DESC,i.orden DESC)
+      FROM animal_imagen i WHERE i.deleted_at IS NULL AND (i.id_animal=a.id_animal OR EXISTS(
+        SELECT 1 FROM animal_imagen_relacion air
+        WHERE air.id_imagen=i.id_imagen AND air.id_animal=a.id_animal AND air.deleted_at IS NULL
+      ))),'[]') imagenes,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_usuario',ap.id_usuario,'nombre',TRIM(CONCAT(up.nombres,' ',up.apellidos)),
+        'correo',up.correo,'porcentaje',ap.porcentaje_propiedad,'es_principal',ap.es_principal
+      ) ORDER BY ap.es_principal DESC,up.nombres,up.apellidos)
+      FROM animal_propietario ap JOIN usuario up ON up.id_usuario=ap.id_usuario
+      WHERE ap.id_animal=a.id_animal AND ap.fecha_hasta IS NULL AND ap.deleted_at IS NULL),'[]') propietarios,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_color',c.id_color,'nombre',c.nombre,'es_principal',ac.es_principal
+      )) FROM animal_color ac JOIN color_animal c ON c.id_color=ac.id_color
+      WHERE ac.id_animal=a.id_animal AND ac.deleted_at IS NULL),'[]') colores,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_raza',r.id_raza,'nombre',r.nombre,'porcentaje',ar.porcentaje
+      )) FROM animal_raza ar JOIN raza_animal r ON r.id_raza=ar.id_raza
+      WHERE ar.id_animal=a.id_animal AND ar.deleted_at IS NULL),'[]') razas,
+      (SELECT jsonb_build_object('id_pesaje',pe.id_pesaje,'peso_kg',pe.peso_kg,'fecha',pe.fecha_pesaje,'metodo',pe.metodo)
+       FROM pesaje pe WHERE pe.id_animal=a.id_animal AND pe.deleted_at IS NULL
+       ORDER BY pe.fecha_pesaje DESC LIMIT 1) ultimo_pesaje,
+      (SELECT jsonb_build_object(
+        'id_tratamiento',ta.id_tratamiento,'fecha',ta.fecha_aplicacion,
+        'tipo',tt.nombre,'medicamento',me.nombre_comercial,'via',va.nombre,
+        'dosis',ta.dosis,'unidad',COALESCE(um.simbolo,um.nombre),
+        'descripcion',ta.descripcion,'observaciones',ta.observaciones
+       )
+       FROM tratamiento_animal ta
+       JOIN tipo_tratamiento tt ON tt.id_tipo_tratamiento=ta.id_tipo_tratamiento
+       JOIN medicamento me ON me.id_medicamento=ta.id_medicamento
+       JOIN via_administracion va ON va.id_via_administracion=ta.id_via_administracion
+       JOIN unidad_medida um ON um.id_unidad=ta.id_unidad_dosis
+       WHERE ta.id_animal=a.id_animal AND ta.deleted_at IS NULL
+       ORDER BY ta.fecha_aplicacion DESC LIMIT 1) ultimo_tratamiento,
+      (SELECT jsonb_build_object(
+        'id_movimiento',mv.id_movimiento,
+        'fecha',COALESCE(md.aplicado_en,mv.aplicado_en,mv.fecha_movimiento),
+        'ubicacion_origen',uo.nombre,'ubicacion_destino',ud.nombre,
+        'grupo_origen',go.nombre,'grupo_destino',gd.nombre,
+        'motivo',mv.motivo
+       )
+       FROM movimiento_animal_detalle md
+       JOIN movimiento_animal mv ON mv.id_movimiento=md.id_movimiento
+       LEFT JOIN ubicacion uo ON uo.id_ubicacion=COALESCE(md.id_ubicacion_anterior,mv.id_ubicacion_origen)
+       LEFT JOIN ubicacion ud ON ud.id_ubicacion=COALESCE(md.id_ubicacion_destino,mv.id_ubicacion_destino)
+       LEFT JOIN grupo go ON go.id_grupo=COALESCE(md.id_grupo_anterior,mv.id_grupo_origen)
+       LEFT JOIN grupo gd ON gd.id_grupo=COALESCE(md.id_grupo_destino,mv.id_grupo_destino)
+       WHERE md.id_animal=a.id_animal
+         AND md.seleccionado=TRUE
+         AND md.estado='APLICADO'
+         AND md.deleted_at IS NULL
+         AND mv.estado='COMPLETADO'
+         AND mv.deleted_at IS NULL
+       ORDER BY COALESCE(md.aplicado_en,mv.aplicado_en,mv.fecha_movimiento) DESC LIMIT 1) ultimo_movimiento,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_evento',ace.id_evento,'tipo_evento',ace.tipo_evento,
+        'estado_anterior',ace.estado_anterior,'estado_nuevo',ace.estado_nuevo,
+        'fecha_evento',ace.fecha_evento,'observaciones',ace.observaciones,
+        'ubicacion',ace_u.nombre,'grupo',ace_g.nombre
+      ) ORDER BY ace.fecha_evento DESC)
+      FROM animal_condicion_evento ace
+      LEFT JOIN ubicacion ace_u ON ace_u.id_ubicacion=ace.id_ubicacion_destino
+      LEFT JOIN grupo ace_g ON ace_g.id_grupo=ace.id_grupo_destino
+      WHERE ace.id_animal=a.id_animal AND ace.deleted_at IS NULL),'[]'::jsonb) eventos_condicion,
+      CASE WHEN a.sexo='HEMBRA' THEN (SELECT COUNT(*)::int FROM parto hp
+        WHERE hp.id_madre=a.id_animal AND hp.deleted_at IS NULL) ELSE 0 END total_partos,
+      (SELECT COUNT(*)::int
+       FROM animal rc
+       WHERE rc.deleted_at IS NULL
+         AND (CASE WHEN a.sexo='HEMBRA' THEN rc.id_madre=a.id_animal ELSE rc.id_padre=a.id_animal END)) total_crias,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_animal',rc.id_animal,'nombre',rc.nombre,'codigo_arete',rc.codigo_arete,'sexo',rc.sexo,
+        'fecha_nacimiento',rc.fecha_nacimiento,
+        'id_parto',(SELECT rpc.id_parto FROM parto_cria rpc JOIN parto rp ON rp.id_parto=rpc.id_parto AND rp.deleted_at IS NULL
+          WHERE rpc.id_cria=rc.id_animal AND rpc.deleted_at IS NULL ORDER BY rp.fecha_parto DESC LIMIT 1),
+        'fecha_parto',(SELECT rp.fecha_parto FROM parto_cria rpc JOIN parto rp ON rp.id_parto=rpc.id_parto AND rp.deleted_at IS NULL
+          WHERE rpc.id_cria=rc.id_animal AND rpc.deleted_at IS NULL ORDER BY rp.fecha_parto DESC LIMIT 1),
+        'parentesco',CASE WHEN a.sexo='HEMBRA' THEN 'MADRE' ELSE 'PADRE' END
+      ) ORDER BY rc.fecha_nacimiento DESC NULLS LAST,rc.created_at DESC,rc.nombre)
+      FROM animal rc
+      WHERE rc.deleted_at IS NULL
+        AND (CASE WHEN a.sexo='HEMBRA' THEN rc.id_madre=a.id_animal ELSE rc.id_padre=a.id_animal END)),'[]'::jsonb) crias_registradas,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_parto',rp.id_parto,'fecha',rp.fecha_parto,'tipo',rp.tipo_parto,
+        'rol',CASE WHEN rp.id_madre=a.id_animal THEN 'MADRE' ELSE 'PADRE' END,
+        'contraparte',CASE WHEN rp.id_madre=a.id_animal THEN rf.nombre ELSE rm.nombre END,
+        'total_crias',(SELECT COUNT(*)::int FROM parto_cria rpc WHERE rpc.id_parto=rp.id_parto AND rpc.deleted_at IS NULL)
+      ) ORDER BY rp.fecha_parto DESC)
+      FROM parto rp
+      JOIN animal rm ON rm.id_animal=rp.id_madre
+      LEFT JOIN animal rf ON rf.id_animal=rp.id_padre
+      WHERE rp.deleted_at IS NULL AND (rp.id_madre=a.id_animal OR rp.id_padre=a.id_animal)),'[]'::jsonb) historial_partos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_celo',rc.id_celo,'fecha_inicio',rc.fecha_inicio,'fecha_fin',rc.fecha_fin,
+        'rol',CASE WHEN rc.id_vaca=a.id_animal THEN 'VACA' ELSE 'TORO' END,
+        'contraparte',CASE WHEN rc.id_vaca=a.id_animal THEN rct.nombre ELSE rcv.nombre END,
+        'observaciones',rc.observaciones
+      ) ORDER BY rc.fecha_inicio DESC)
+      FROM celo rc JOIN animal rcv ON rcv.id_animal=rc.id_vaca
+      LEFT JOIN animal rct ON rct.id_animal=rc.id_toro
+      WHERE rc.deleted_at IS NULL AND (rc.id_vaca=a.id_animal OR rc.id_toro=a.id_animal)),'[]'::jsonb) historial_celos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_prenez',rp.id_prenez,'fecha',rp.fecha_confirmacion,'estado',rp.estado,
+        'metodo',rp.metodo_embarazo,'rol',CASE WHEN rp.id_vaca=a.id_animal THEN 'VACA' ELSE 'PADRE' END,
+        'contraparte',CASE WHEN rp.id_vaca=a.id_animal THEN rpf.nombre ELSE rpv.nombre END,
+        'fecha_parto_tentativa',rp.fecha_parto_tentativa
+      ) ORDER BY rp.fecha_confirmacion DESC)
+      FROM prenez rp JOIN animal rpv ON rpv.id_animal=rp.id_vaca
+      LEFT JOIN animal rpf ON rpf.id_animal=rp.id_padre
+      WHERE rp.deleted_at IS NULL AND (rp.id_vaca=a.id_animal OR rp.id_padre=a.id_animal)),'[]'::jsonb) historial_preneces,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_aborto',ra.id_aborto,'fecha',ra.fecha,'causa',ra.causa,
+        'meses_gestacion',ra.meses_gestacion,'descripcion',ra.descripcion,'id_prenez',ra.id_prenez
+      ) ORDER BY ra.fecha DESC)
+      FROM aborto ra WHERE ra.id_vaca=a.id_animal AND ra.deleted_at IS NULL),'[]'::jsonb) historial_abortos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_actividad',ha.id_actividad,'fecha',ha.fecha,'tipo',hta.nombre,'codigo',hta.codigo,
+        'descripcion',ha.descripcion,'fierro',hm.nombre,'fierro_codigo',hm.codigo
+      ) ORDER BY ha.fecha DESC,ha.created_at DESC)
+      FROM actividad_animal haa
+      JOIN actividad ha ON ha.id_actividad=haa.id_actividad AND ha.deleted_at IS NULL
+      JOIN tipo_actividad hta ON hta.id_tipo_actividad=ha.id_tipo_actividad
+      LEFT JOIN marquilla hm ON hm.id_marquilla=ha.id_marquilla_aplicada
+      WHERE haa.id_animal=a.id_animal AND haa.deleted_at IS NULL),'[]'::jsonb) historial_actividades,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_movimiento',hmv.id_movimiento,
+        'fecha',COALESCE(hmd.aplicado_en,hmv.aplicado_en,hmv.fecha_movimiento),
+        'tipo',hmv.tipo_movimiento,'motivo',COALESCE(hmm.nombre,hmv.motivo),
+        'ubicacion_origen',huo.nombre,'ubicacion_destino',hud.nombre,
+        'grupo_origen',hgo.nombre,'grupo_destino',hgd.nombre
+      ) ORDER BY COALESCE(hmd.aplicado_en,hmv.aplicado_en,hmv.fecha_movimiento) DESC)
+      FROM movimiento_animal_detalle hmd
+      JOIN movimiento_animal hmv ON hmv.id_movimiento=hmd.id_movimiento AND hmv.deleted_at IS NULL
+      LEFT JOIN motivo_movimiento hmm ON hmm.id_motivo_movimiento=hmv.id_motivo_movimiento
+      LEFT JOIN ubicacion huo ON huo.id_ubicacion=COALESCE(hmd.id_ubicacion_anterior,hmv.id_ubicacion_origen)
+      LEFT JOIN ubicacion hud ON hud.id_ubicacion=COALESCE(hmd.id_ubicacion_destino,hmv.id_ubicacion_destino)
+      LEFT JOIN grupo hgo ON hgo.id_grupo=COALESCE(hmd.id_grupo_anterior,hmv.id_grupo_origen)
+      LEFT JOIN grupo hgd ON hgd.id_grupo=COALESCE(hmd.id_grupo_destino,hmv.id_grupo_destino)
+      WHERE hmd.id_animal=a.id_animal AND hmd.seleccionado=TRUE AND hmd.estado='APLICADO'
+        AND hmd.deleted_at IS NULL AND hmv.estado='COMPLETADO'),'[]'::jsonb) historial_movimientos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_tratamiento',ht.id_tratamiento,'fecha',ht.fecha_aplicacion,
+        'tipo',htt.nombre,'medicamento',hmed.nombre_comercial,'via',hvia.nombre,
+        'dosis',ht.dosis,'unidad',COALESCE(hum.simbolo,hum.nombre),
+        'descripcion',ht.descripcion,'observaciones',ht.observaciones
+      ) ORDER BY ht.fecha_aplicacion DESC,ht.created_at DESC)
+      FROM tratamiento_animal ht
+      JOIN tipo_tratamiento htt ON htt.id_tipo_tratamiento=ht.id_tipo_tratamiento
+      JOIN medicamento hmed ON hmed.id_medicamento=ht.id_medicamento
+      JOIN via_administracion hvia ON hvia.id_via_administracion=ht.id_via_administracion
+      JOIN unidad_medida hum ON hum.id_unidad=ht.id_unidad_dosis
+      WHERE ht.id_animal=a.id_animal AND ht.deleted_at IS NULL),'[]'::jsonb) historial_tratamientos,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_produccion',hpl.id_produccion,'fecha',hpl.fecha_produccion,
+        'litros',hpl.litros,'turno',hpl.turno,'fuente',hpl.fuente,
+        'observaciones',hpl.observaciones
+      ) ORDER BY hpl.fecha_produccion DESC,hpl.created_at DESC)
+      FROM produccion_leche hpl
+      WHERE hpl.id_vaca=a.id_animal AND hpl.deleted_at IS NULL),'[]'::jsonb) historial_produccion
+     FROM animal a
+     JOIN especie e ON e.id_especie=a.id_especie
+     JOIN origen_animal oa ON oa.id_origen=a.id_origen
+     JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
+     LEFT JOIN condicion_animal coa ON coa.codigo=a.estado
+     LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
+     LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
+     LEFT JOIN animal m ON m.id_animal=a.id_madre
+     LEFT JOIN animal p ON p.id_animal=a.id_padre
+     LEFT JOIN marquilla mq ON mq.id_marquilla=a.id_marquilla AND mq.deleted_at IS NULL
+     WHERE a.id_animal=$1 AND a.deleted_at IS NULL`,
+    [routeParam(req.params.id, 'id')],
+  );
+  if (!result.rows[0]) throw new NotFoundError();
+  return ok(res, result.rows[0]);
+}));
+
+async function assertGenealogyRules(client: PoolClient, input: {
+  id_animal?: string;
+  id_especie: string;
+  id_madre?: string | null;
+  id_padre?: string | null;
+}) {
+  if (input.id_padre) {
+    if (input.id_padre === input.id_animal) throw new ValidationError('Un animal no puede registrarse como su propio padre.');
+    const father = (await client.query(
+      `SELECT id_especie,sexo,fecha_nacimiento
+       FROM animal
+       WHERE id_animal=$1 AND deleted_at IS NULL AND estado='ACTIVO'`,
+      [input.id_padre],
+    )).rows[0] as { id_especie: string; sexo: string; fecha_nacimiento: string | null } | undefined;
+    if (!father || father.sexo !== 'MACHO') throw new ValidationError('El padre seleccionado no existe o no es un macho activo.');
+    if (father.id_especie !== input.id_especie) throw new ValidationError('El padre debe pertenecer a la misma especie.');
+    if (father.fecha_nacimiento) {
+      const age = await client.query(`SELECT $1::date <= CURRENT_DATE - INTERVAL '1 year' AS valido`, [father.fecha_nacimiento]);
+      if (!age.rows[0]?.valido) throw new ValidationError('El padre debe tener al menos un año de edad.');
+    }
+  }
+  if (input.id_madre) {
+    if (input.id_madre === input.id_animal) throw new ValidationError('Un animal no puede registrarse como su propia madre.');
+    const mother = (await client.query(
+      `SELECT id_especie,sexo FROM animal WHERE id_animal=$1 AND deleted_at IS NULL`,
+      [input.id_madre],
+    )).rows[0] as { id_especie: string; sexo: string } | undefined;
+    if (!mother || mother.sexo !== 'HEMBRA') throw new ValidationError('La madre seleccionada no existe o no es hembra.');
+    if (mother.id_especie !== input.id_especie) throw new ValidationError('La madre debe pertenecer a la misma especie.');
+  }
+}
+
+async function assertCategoryLocation(client: PoolClient, categoryId: string, locationId?: string | null) {
+  const category = await client.query(
+    'SELECT 1 FROM categoria_animal WHERE id_categoria_animal=$1 AND deleted_at IS NULL AND activo=TRUE',
+    [categoryId],
+  );
+  if (!category.rowCount) throw new ValidationError('La categoría seleccionada no está disponible.');
+  if (!locationId) return;
+  const location = (await client.query(
+    `SELECT id_categoria_animal FROM ubicacion
+     WHERE id_ubicacion=$1 AND deleted_at IS NULL AND activo=TRUE`,
+    [locationId],
+  )).rows[0] as { id_categoria_animal: string } | undefined;
+  if (!location) throw new ValidationError('La ubicación seleccionada no está disponible.');
+  if (location.id_categoria_animal !== categoryId) {
+    throw new ValidationError('La ubicación no pertenece a la categoría seleccionada para el animal.');
+  }
+}
+
+async function assertCategoryGroup(client: PoolClient, categoryId: string, speciesId: string, groupId?: string | null, locationId?: string | null) {
+  if (!groupId) return;
+  const group = (await client.query(
+    `SELECT id_especie,id_categoria_animal,id_ubicacion_actual FROM grupo
+     WHERE id_grupo=$1 AND deleted_at IS NULL AND activo=TRUE`,
+    [groupId],
+  )).rows[0] as { id_especie: string | null; id_categoria_animal: string; id_ubicacion_actual: string | null } | undefined;
+  if (!group) throw new ValidationError('El grupo seleccionado no está disponible.');
+  if (group.id_especie && group.id_especie !== speciesId) throw new ValidationError('El grupo no corresponde a la especie del animal.');
+  if (group.id_categoria_animal !== categoryId) throw new ValidationError('El grupo no corresponde a la situación de propiedad del animal.');
+  if (!group.id_ubicacion_actual) throw new ValidationError('El grupo todavía no tiene un potrero, corral o propiedad asignado.');
+  if (group.id_ubicacion_actual !== locationId) throw new ValidationError('La ubicación del animal debe coincidir con la ubicación de su grupo.');
+}
+
+async function assertAnimalCondition(client: PoolClient, code: string, allowInactive = false) {
+  const condition = await client.query(
+    `SELECT 1 FROM condicion_animal
+     WHERE codigo=$1 AND deleted_at IS NULL AND (activo=TRUE OR $2::boolean=TRUE)`,
+    [code, allowInactive],
+  );
+  if (!condition.rowCount) throw new ValidationError('La condición seleccionada no está disponible.');
+}
+
+async function saveRelations(client: PoolClient, id: string, input: {
+  colores?: Array<z.infer<typeof relation>>;
+  razas?: Array<z.infer<typeof relation>>;
+  propietarios?: Array<z.infer<typeof ownerRelation>>;
+  registrado_por: string;
+}) {
+  if (input.colores) {
+    await client.query('UPDATE animal_color SET deleted_at=NOW() WHERE id_animal=$1 AND deleted_at IS NULL', [id]);
+    for (const item of input.colores) {
+      await client.query(buildInsert('animal_color', {
+        id_animal: id,
+        id_color: item.id,
+        es_principal: item.principal ?? false,
+        registrado_por: input.registrado_por,
+      }));
+    }
+  }
+  if (input.razas) {
+    await client.query('UPDATE animal_raza SET deleted_at=NOW() WHERE id_animal=$1 AND deleted_at IS NULL', [id]);
+    for (const item of input.razas) {
+      await client.query(buildInsert('animal_raza', {
+        id_animal: id,
+        id_raza: item.id,
+        porcentaje: item.porcentaje ?? null,
+        registrado_por: input.registrado_por,
+      }));
+    }
+  }
+  if (input.propietarios) {
+    await client.query(
+      'UPDATE animal_propietario SET fecha_hasta=CURRENT_DATE WHERE id_animal=$1 AND fecha_hasta IS NULL AND deleted_at IS NULL',
+      [id],
+    );
+    for (const item of input.propietarios) {
+      await client.query(buildInsert('animal_propietario', {
+        id_animal: id,
+        id_usuario: item.id,
+        porcentaje_propiedad: item.porcentaje ?? null,
+        es_principal: item.principal ?? false,
+        fecha_desde: new Date().toISOString().slice(0, 10),
+        registrado_por: input.registrado_por,
+      }));
+    }
+  }
+}
+
+animalsRouter.post(
+  '/',
+  requirePermission('ANIMAL_CREAR'),
+  createUpload.single('foto_perfil'),
+  asyncHandler(async (req, res) => {
+    const input = createPayload(req.body);
+    const idAnimal = randomUUID();
+    const profilePhoto = req.file;
+    let cloud: Awaited<ReturnType<typeof uploadAnimalImage>> | null = null;
+
+    if (profilePhoto) cloud = await uploadAnimalImage(profilePhoto.buffer, idAnimal);
+
+    try {
+      const result = await transaction(async (client) => {
+        const {
+          colores,
+          razas,
+          propietarios,
+          peso_inicial_kg,
+          fecha_pesaje_inicial,
+          metodo_pesaje_inicial,
+          observaciones_pesaje_inicial,
+          descripcion_foto_perfil,
+          ...animal
+        } = input;
+
+        await assertGenealogyRules(client, {
+          id_animal: idAnimal,
+          id_especie: animal.id_especie,
+          id_madre: animal.id_madre,
+          id_padre: animal.id_padre,
+        });
+        await assertCategoryLocation(client, animal.id_categoria_animal, animal.id_ubicacion_actual);
+        await assertCategoryGroup(client, animal.id_categoria_animal, animal.id_especie, animal.id_grupo_actual, animal.id_ubicacion_actual);
+        await assertAnimalCondition(client, animal.estado ?? 'ACTIVO');
+
+        const row = (await client.query(buildInsert('animal', {
+          id_animal: idAnimal,
+          ...animal,
+          registrado_por: req.user!.id,
+        }))).rows[0];
+
+        await saveRelations(client, idAnimal, {
+          colores,
+          razas,
+          propietarios,
+          registrado_por: req.user!.id,
+        });
+
+        let initialWeight: { peso_kg: unknown; fecha_pesaje: unknown } | null = null;
+        if (peso_inicial_kg !== null && peso_inicial_kg !== undefined) {
+          initialWeight = (await client.query(buildInsert('pesaje', {
+            id_animal: idAnimal,
+            fecha_pesaje: fecha_pesaje_inicial || new Date().toISOString().slice(0, 10),
+            peso_kg: peso_inicial_kg,
+            metodo: metodo_pesaje_inicial || null,
+            observaciones: observaciones_pesaje_inicial || 'Peso inicial registrado al crear el animal.',
+            registrado_por: req.user!.id,
+          }))).rows[0];
+        }
+
+        let profileImage: { secure_url?: string } | null = null;
+        if (cloud) {
+          profileImage = (await client.query(buildInsert('animal_imagen', {
+            id_animal: idAnimal,
+            public_id: cloud.public_id,
+            url: cloud.url,
+            secure_url: cloud.secure_url,
+            formato: cloud.format,
+            ancho: cloud.width,
+            alto: cloud.height,
+            bytes: cloud.bytes,
+            tipo_archivo: 'IMAGEN',
+            mime_type: profilePhoto?.mimetype ?? 'image/jpeg',
+            nombre_original: profilePhoto?.originalname ?? null,
+            es_perfil: true,
+            fecha_toma: new Date().toISOString().slice(0,10),
+            descripcion: descripcion_foto_perfil || 'Foto de perfil registrada al crear el animal.',
+            registrado_por: req.user!.id,
+          }))).rows[0];
+          await client.query(buildInsert('animal_imagen_relacion', {
+            id_imagen: (profileImage as { id_imagen: string }).id_imagen,
+            id_animal: idAnimal,
+            registrado_por: req.user!.id,
+          }));
+        }
+
+        return {
+          ...row,
+          foto_perfil: profileImage?.secure_url ?? null,
+          ultimo_pesaje: initialWeight
+            ? { peso_kg: initialWeight.peso_kg, fecha: initialWeight.fecha_pesaje }
+            : null,
+        };
+      }, req.user!.id);
+
+      return created(res, result);
+    } catch (error) {
+      if (cloud?.public_id) {
+        await deleteCloudinaryImage(cloud.public_id).catch(() => undefined);
+      }
+      throw error;
+    }
+  }),
+);
+
+animalsRouter.post('/:id/condicion', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
+  const id = routeParam(req.params.id, 'id');
+  const input = conditionActionSchema.parse(req.body);
+  const result = await transaction(async (client) => {
+    const current = (await client.query(
+      `SELECT id_animal,id_especie,estado,id_categoria_animal,id_grupo_actual,id_ubicacion_actual
+       FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR UPDATE`,
+      [id],
+    )).rows[0] as {
+      id_animal: string;
+      id_especie: string;
+      estado: string;
+      id_categoria_animal: string;
+      id_grupo_actual: string | null;
+      id_ubicacion_actual: string | null;
+    } | undefined;
+    if (!current) throw new NotFoundError('Animal no encontrado.');
+
+    const transitions: Record<typeof input.accion, { from: string; to: string }> = {
+      DESACTIVAR: { from: 'ACTIVO', to: 'INACTIVO' },
+      REACTIVAR: { from: 'INACTIVO', to: 'ACTIVO' },
+      REPORTAR_DESAPARICION: { from: 'ACTIVO', to: 'DESAPARECIDO' },
+      REGISTRAR_HALLAZGO: { from: 'DESAPARECIDO', to: 'ACTIVO' },
+    };
+    const transition = transitions[input.accion];
+    if (current.estado !== transition.from) {
+      throw new ConflictError(`La acción ${input.accion.toLowerCase().replaceAll('_', ' ')} no corresponde a la condición actual del animal.`);
+    }
+
+    let nextCategory = current.id_categoria_animal;
+    let nextGroup = current.id_grupo_actual;
+    let nextLocation = current.id_ubicacion_actual;
+
+    if (input.accion === 'REPORTAR_DESAPARICION') {
+      nextGroup = null;
+      nextLocation = null;
+    }
+
+    if (input.accion === 'REGISTRAR_HALLAZGO') {
+      nextGroup = input.id_grupo_actual ?? null;
+      nextLocation = input.id_ubicacion_actual ?? null;
+      if (nextLocation) {
+        const location = (await client.query(
+          `SELECT id_categoria_animal FROM ubicacion
+           WHERE id_ubicacion=$1 AND deleted_at IS NULL AND activo=TRUE`,
+          [nextLocation],
+        )).rows[0] as { id_categoria_animal: string } | undefined;
+        if (!location) throw new ValidationError('La ubicación del hallazgo no está disponible.');
+        nextCategory = location.id_categoria_animal;
+      }
+      await assertCategoryGroup(client, nextCategory, current.id_especie, nextGroup, nextLocation);
+    }
+
+    await client.query("SELECT set_config('app.fecha_movimiento', $1, true)", [input.fecha_evento]);
+    await client.query("SELECT set_config('app.motivo_cambio', $1, true)", [input.accion.toLowerCase().replaceAll('_', ' ')]);
+    const updated = (await client.query(
+      `UPDATE animal
+       SET estado=$2,id_categoria_animal=$3,id_grupo_actual=$4,id_ubicacion_actual=$5,updated_at=NOW()
+       WHERE id_animal=$1 RETURNING *`,
+      [id, transition.to, nextCategory, nextGroup, nextLocation],
+    )).rows[0];
+
+    await client.query(buildInsert('animal_condicion_evento', {
+      id_animal: id,
+      tipo_evento: input.accion,
+      estado_anterior: current.estado,
+      estado_nuevo: transition.to,
+      fecha_evento: input.fecha_evento,
+      id_categoria_anterior: current.id_categoria_animal,
+      id_categoria_destino: nextCategory,
+      id_grupo_anterior: current.id_grupo_actual,
+      id_grupo_destino: nextGroup,
+      id_ubicacion_anterior: current.id_ubicacion_actual,
+      id_ubicacion_destino: nextLocation,
+      observaciones: input.observaciones ?? null,
+      registrado_por: req.user!.id,
+    }));
+    return updated;
+  }, req.user!.id);
+  return ok(res, result);
+}));
+
+animalsRouter.get('/:id/ubicacion-historica', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
+  const id = routeParam(req.params.id, 'id');
+  const { fecha } = z.object({ fecha: z.string().date() }).parse(req.query);
+  const [animalResult, locationResult, groupResult] = await Promise.all([
+    pool.query(
+      `SELECT a.id_animal,a.nombre,a.created_at,a.id_ubicacion_actual,a.id_grupo_actual
+       FROM animal a WHERE a.id_animal=$1 AND a.deleted_at IS NULL`,
+      [id],
+    ),
+    pool.query(
+      `SELECT h.fecha_desde,h.fecha_hasta,u.id_ubicacion,u.nombre ubicacion,u.tipo tipo_ubicacion,
+         p.id_propiedad,p.nombre propiedad
+       FROM animal_ubicacion_historial h
+       LEFT JOIN ubicacion u ON u.id_ubicacion=h.id_ubicacion
+       LEFT JOIN propiedad_ganadera p ON p.id_propiedad=u.id_propiedad
+       WHERE h.id_animal=$1 AND h.deleted_at IS NULL
+         AND h.fecha_desde<($2::date+INTERVAL '1 day')
+         AND (h.fecha_hasta IS NULL OR h.fecha_hasta>=$2::date)
+       ORDER BY h.fecha_desde DESC LIMIT 1`,
+      [id, fecha],
+    ),
+    pool.query(
+      `SELECT h.fecha_desde,h.fecha_hasta,g.id_grupo,g.nombre grupo,
+         p.id_propiedad,p.nombre propiedad
+       FROM animal_grupo_historial h
+       LEFT JOIN grupo g ON g.id_grupo=h.id_grupo
+       LEFT JOIN propiedad_ganadera p ON p.id_propiedad=g.id_propiedad
+       WHERE h.id_animal=$1 AND h.deleted_at IS NULL
+         AND h.fecha_desde<($2::date+INTERVAL '1 day')
+         AND (h.fecha_hasta IS NULL OR h.fecha_hasta>=$2::date)
+       ORDER BY h.fecha_desde DESC LIMIT 1`,
+      [id, fecha],
+    ),
+  ]);
+  const animal = animalResult.rows[0];
+  if (!animal) throw new NotFoundError('Animal no encontrado.');
+  const location = locationResult.rows[0] ?? null;
+  const group = groupResult.rows[0] ?? null;
+  return ok(res, {
+    fecha,
+    encontrado: Boolean(location || group),
+    propiedad: location?.propiedad ?? group?.propiedad ?? null,
+    id_propiedad: location?.id_propiedad ?? group?.id_propiedad ?? null,
+    ubicacion: location?.ubicacion ?? null,
+    id_ubicacion: location?.id_ubicacion ?? null,
+    tipo_ubicacion: location?.tipo_ubicacion ?? null,
+    grupo: group?.grupo ?? null,
+    id_grupo: group?.id_grupo ?? null,
+    periodo_ubicacion: location ? { desde: location.fecha_desde, hasta: location.fecha_hasta } : null,
+    periodo_grupo: group ? { desde: group.fecha_desde, hasta: group.fecha_hasta } : null,
+  });
+}));
+
+animalsRouter.get('/:id/compartir', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
+  const id = routeParam(req.params.id, 'id');
+  const row = (await pool.query(
+    `SELECT token,created_at FROM animal_compartido
+     WHERE id_animal=$1 AND activo=TRUE AND revocado_at IS NULL
+     ORDER BY created_at DESC LIMIT 1`,
+    [id],
+  )).rows[0];
+  return ok(res, row ? { activo: true, token: row.token, url: sharedAnimalUrl(row.token), created_at: row.created_at } : { activo: false });
+}));
+
+animalsRouter.post('/:id/compartir', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
+  const id = routeParam(req.params.id, 'id');
+  const result = await transaction(async (client) => {
+    const animal = (await client.query(
+      'SELECT id_animal FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR SHARE',
+      [id],
+    )).rows[0];
+    if (!animal) throw new NotFoundError('Animal no encontrado.');
+    const current = (await client.query(
+      `SELECT token,created_at FROM animal_compartido
+       WHERE id_animal=$1 AND activo=TRUE AND revocado_at IS NULL
+       ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+      [id],
+    )).rows[0];
+    if (current) return current;
+    const token = randomUUID();
+    return (await client.query(
+      `INSERT INTO animal_compartido(id_animal,token,creado_por)
+       VALUES($1,$2,$3) RETURNING token,created_at`,
+      [id, token, req.user!.id],
+    )).rows[0];
+  }, req.user!.id);
+  return ok(res, { activo: true, token: result.token, url: sharedAnimalUrl(result.token), created_at: result.created_at });
+}));
+
+animalsRouter.delete('/:id/compartir', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
+  const result = await pool.query(
+    `UPDATE animal_compartido
+     SET activo=FALSE,revocado_at=NOW(),updated_at=NOW()
+     WHERE id_animal=$1 AND activo=TRUE AND revocado_at IS NULL`,
+    [routeParam(req.params.id, 'id')],
+  );
+  if (!result.rowCount) throw new NotFoundError('El animal no tiene un enlace público activo.');
+  return noContent(res);
+}));
+
+animalsRouter.patch('/:id', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
+  const input = animalUpdateSchema.parse(req.body);
+  const id = routeParam(req.params.id, 'id');
+  const result = await transaction(async (client) => {
+    const { colores, razas, propietarios, ...animal } = input;
+    const current = (await client.query(
+      'SELECT id_especie,id_madre,id_padre FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR UPDATE',
+      [id],
+    )).rows[0] as { id_especie: string; id_madre: string | null; id_padre: string | null } | undefined;
+    if (!current) throw new NotFoundError();
+    await assertGenealogyRules(client, {
+      id_animal: id,
+      id_especie: animal.id_especie ?? current.id_especie,
+      id_madre: Object.prototype.hasOwnProperty.call(animal, 'id_madre') ? animal.id_madre : current.id_madre,
+      id_padre: Object.prototype.hasOwnProperty.call(animal, 'id_padre') ? animal.id_padre : current.id_padre,
+    });
+    let row;
+    if (Object.keys(animal).length) {
+      row = (await client.query(buildUpdate('animal', 'id_animal', id, animal))).rows[0];
+      if (!row) throw new NotFoundError();
+    } else {
+      const query = await client.query('SELECT * FROM animal WHERE id_animal=$1 AND deleted_at IS NULL', [id]);
+      row = query.rows[0];
+      if (!row) throw new NotFoundError();
+    }
+    await saveRelations(client, id, { colores, razas, propietarios, registrado_por: req.user!.id });
+    return row;
+  }, req.user!.id);
+  return ok(res, result);
+}));
+
+animalsRouter.delete('/:id', requirePermission('ANIMAL_ELIMINAR'), asyncHandler(async (req, res) => {
+  const result = await pool.query(
+    "UPDATE animal SET deleted_at=NOW(),estado='INACTIVO' WHERE id_animal=$1 AND deleted_at IS NULL",
+    [routeParam(req.params.id, 'id')],
+  );
+  if (!result.rowCount) throw new NotFoundError();
+  return noContent(res);
+}));
