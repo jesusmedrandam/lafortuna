@@ -153,6 +153,12 @@ export interface PublicAnimal {
   padre: string | null;
   marquilla_codigo: string | null;
   foto_perfil: string | null;
+  fotos_portada: Array<{
+    id_imagen: string;
+    secure_url: string;
+    descripcion: string | null;
+    fecha_toma: string | null;
+  }>;
   razas: Array<{ nombre: string; porcentaje: number | string | null }>;
   colores: Array<{ nombre: string; es_principal: boolean }>;
   ultimo_pesaje: { peso_kg: number | string; fecha: string } | null;

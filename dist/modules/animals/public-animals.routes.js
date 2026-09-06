@@ -18,6 +18,24 @@ publicAnimalsRouter.get('/:token', asyncHandler(async (req, res) => {
         WHERE ai.id_animal=a.id_animal AND ai.es_perfil=TRUE AND ai.deleted_at IS NULL
         ORDER BY ai.created_at DESC LIMIT 1) foto_perfil,
        COALESCE((SELECT jsonb_agg(jsonb_build_object(
+         'id_imagen',gallery.id_imagen,
+         'secure_url',COALESCE(gallery.secure_url,gallery.url),
+         'descripcion',gallery.descripcion,
+         'fecha_toma',gallery.fecha_toma
+       ) ORDER BY gallery.fecha_toma DESC NULLS LAST,gallery.created_at DESC)
+       FROM animal_imagen gallery
+       WHERE gallery.deleted_at IS NULL
+         AND COALESCE(gallery.es_perfil,FALSE)=FALSE
+         AND UPPER(COALESCE(gallery.tipo_archivo,'IMAGEN'))<>'VIDEO'
+         AND LOWER(COALESCE(gallery.mime_type,'image/legacy')) NOT LIKE 'video/%'
+         AND COALESCE(gallery.secure_url,gallery.url) IS NOT NULL
+         AND (gallery.id_animal=a.id_animal OR EXISTS(
+           SELECT 1 FROM animal_imagen_relacion relation
+           WHERE relation.id_imagen=gallery.id_imagen
+             AND relation.id_animal=a.id_animal
+             AND relation.deleted_at IS NULL
+         ))),'[]'::jsonb) fotos_portada,
+       COALESCE((SELECT jsonb_agg(jsonb_build_object(
          'nombre',r.nombre,'porcentaje',ar.porcentaje
        ) ORDER BY ar.porcentaje DESC NULLS LAST,r.nombre)
        FROM animal_raza ar JOIN raza_animal r ON r.id_raza=ar.id_raza

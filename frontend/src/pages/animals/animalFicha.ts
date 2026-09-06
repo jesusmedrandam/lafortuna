@@ -5,6 +5,7 @@ export interface AnimalFichaData {
   codigoArete?:string|null;
   descripcion?:string|null;
   fotoPerfil?:string|null;
+  fotoPortada?:string|null;
   especie?:string|null;
   sexo?:string|null;
   fechaNacimiento?:string|null;
@@ -47,7 +48,27 @@ function drawField(ctx:CanvasRenderingContext2D,x:number,y:number,width:number,l
 
 async function loadPicture(url?:string|null){
   if(!url)return null;
+  try{
+    const response=await fetch(url,{cache:'force-cache'});
+    if(response.ok){
+      const localUrl=URL.createObjectURL(await response.blob());
+      const picture=await new Promise<HTMLImageElement|null>((resolve)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>resolve(null);image.src=localUrl;});
+      URL.revokeObjectURL(localUrl);
+      if(picture)return picture;
+    }
+  }catch{/* Se intenta la carga directa como compatibilidad web. */}
   return new Promise<HTMLImageElement|null>((resolve)=>{const image=new Image();image.crossOrigin='anonymous';image.onload=()=>resolve(image);image.onerror=()=>resolve(null);image.src=url;});
+}
+
+function drawCoverPicture(ctx:CanvasRenderingContext2D,picture:HTMLImageElement,x:number,y:number,width:number,height:number){
+  const scale=Math.max(width/picture.naturalWidth,height/picture.naturalHeight);
+  const renderedWidth=picture.naturalWidth*scale;const renderedHeight=picture.naturalHeight*scale;
+  ctx.drawImage(picture,x+(width-renderedWidth)/2,y+(height-renderedHeight)/2,renderedWidth,renderedHeight);
+}
+
+function drawFittedText(ctx:CanvasRenderingContext2D,value:string,x:number,y:number,maxWidth:number){
+  let size=54;do{ctx.font=`800 ${size}px sans-serif`;size-=2;}while(size>=34&&ctx.measureText(value).width>maxWidth);
+  ctx.fillText(value,x,y);
 }
 
 async function fichaCanvas(animal:AnimalFichaData){
@@ -59,15 +80,16 @@ async function fichaCanvas(animal:AnimalFichaData){
   ctx.fillStyle='#ffffff';ctx.font='800 58px sans-serif';ctx.fillText('Ficha del animal',72,164);
   ctx.fillStyle='#aec2b7';ctx.font='400 27px sans-serif';ctx.fillText('Sistema de Gestión Bovina',72,214);
 
-  const picture=await loadPicture(animal.fotoPerfil);
+  const [picture,coverPicture]=await Promise.all([loadPicture(animal.fotoPerfil),loadPicture(animal.fotoPortada)]);
   const photoX=72,photoY=238,photoSize=286;
   roundedRect(ctx,photoX,photoY,photoSize,photoSize,42);ctx.fillStyle='#dff3e7';ctx.fill();ctx.save();roundedRect(ctx,photoX,photoY,photoSize,photoSize,42);ctx.clip();
-  if(picture){const scale=Math.max(photoSize/picture.naturalWidth,photoSize/picture.naturalHeight);const w=picture.naturalWidth*scale,h=picture.naturalHeight*scale;ctx.drawImage(picture,photoX+(photoSize-w)/2,photoY+(photoSize-h)/2,w,h);}else{ctx.fillStyle='#2c9d66';ctx.font='800 112px sans-serif';ctx.textAlign='center';ctx.fillText(animal.nombre.slice(0,1).toUpperCase(),photoX+photoSize/2,photoY+184);ctx.textAlign='left';}ctx.restore();
+  if(picture){drawCoverPicture(ctx,picture,photoX,photoY,photoSize,photoSize);}else{ctx.fillStyle='#2c9d66';ctx.font='800 112px sans-serif';ctx.textAlign='center';ctx.fillText(animal.nombre.slice(0,1).toUpperCase(),photoX+photoSize/2,photoY+184);ctx.textAlign='left';}ctx.restore();
   ctx.strokeStyle='#ffffff';ctx.lineWidth=10;roundedRect(ctx,photoX,photoY,photoSize,photoSize,42);ctx.stroke();
 
-  ctx.fillStyle='#173126';ctx.font='800 54px sans-serif';ctx.fillText(animal.nombre,398,374);
+  ctx.fillStyle='#173126';drawFittedText(ctx,animal.nombre,398,374,420);
   ctx.fillStyle='#60736a';ctx.font='500 27px sans-serif';ctx.fillText(animal.codigoArete?`Arete ${animal.codigoArete}`:'Sin arete registrado',398,421);
   roundedRect(ctx,398,452,240,52,26);ctx.fillStyle='#dff3e7';ctx.fill();ctx.fillStyle='#187d50';ctx.font='700 24px sans-serif';ctx.fillText(humanizeCode(animal.estado||'ACTIVO'),424,486);
+  if(coverPicture){const coverX=846,coverY=304,coverWidth=322,coverHeight=220;roundedRect(ctx,coverX,coverY,coverWidth,coverHeight,28);ctx.fillStyle='#dfece5';ctx.fill();ctx.save();roundedRect(ctx,coverX,coverY,coverWidth,coverHeight,28);ctx.clip();drawCoverPicture(ctx,coverPicture,coverX,coverY,coverWidth,coverHeight);const shade=ctx.createLinearGradient(0,coverY+145,0,coverY+coverHeight);shade.addColorStop(0,'rgba(0,0,0,0)');shade.addColorStop(1,'rgba(0,0,0,.68)');ctx.fillStyle=shade;ctx.fillRect(coverX,coverY,coverWidth,coverHeight);ctx.restore();ctx.fillStyle='#ffffff';ctx.font='700 21px sans-serif';ctx.fillText('Última foto de portada',coverX+20,coverY+coverHeight-20);}
 
   const breed=animal.razas?.length?animal.razas.map((item)=>`${item.nombre}${item.porcentaje!=null?` ${formatNumber(item.porcentaje)}%`:''}`).join(', '):'Sin registrar';
   const colors=animal.colores?.length?animal.colores.map((item)=>item.nombre).join(', '):'Sin registrar';
