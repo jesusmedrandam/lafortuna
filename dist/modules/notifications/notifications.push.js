@@ -43,7 +43,8 @@ async function claimPending(limit = 50) {
         RETURNING nu.id_notificacion,nu.id_usuario
       )
       SELECT r.id_notificacion,r.id_usuario,n.tipo,n.categoria,n.prioridad,
-             n.titulo,n.mensaje,n.ruta,NULLIF(n.datos->>'imagen_url','') imagen_url
+             n.titulo,n.mensaje,n.ruta,NULLIF(n.datos->>'imagen_url','') imagen_url,
+             NULLIF(n.datos->>'version_objetivo','') version_objetivo
       FROM reclamados r
       JOIN notificacion n ON n.id_notificacion=r.id_notificacion
     `, [limit]);
@@ -62,6 +63,21 @@ function invalidRegistration(errorCode) {
     return errorCode === 'messaging/registration-token-not-registered'
         || errorCode === 'messaging/invalid-registration-token'
         || errorCode === 'messaging/invalid-argument';
+}
+function versionIsNewer(candidate, current) {
+    if (!current)
+        return true;
+    const parts = (value) => value.replace(/^v/i, '').split(/[.+-]/)
+        .map(part => Number.parseInt(part, 10))
+        .map(part => Number.isFinite(part) ? part : 0);
+    const left = parts(candidate);
+    const right = parts(current);
+    for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+        const difference = (left[index] ?? 0) - (right[index] ?? 0);
+        if (difference !== 0)
+            return difference > 0;
+    }
+    return false;
 }
 async function deactivateInvalidTokens(tokens, response) {
     const invalid = response.responses.flatMap((item, index) => !item.success && invalidRegistration(item.error?.code) ? [tokens[index]] : []);
@@ -85,11 +101,15 @@ async function sendRecipient(item) {
             await finish(item, 'ERROR', 'Firebase no está configurado en el servidor.');
             return;
         }
-        const tokens = (await pool.query(`
-      SELECT token_push FROM notificacion_dispositivo
+        const devices = (await pool.query(`
+      SELECT token_push,version_app,plataforma FROM notificacion_dispositivo
       WHERE id_usuario=$1 AND activo=TRUE
       ORDER BY ultimo_uso_at DESC
-      LIMIT 500`, [item.id_usuario])).rows.map(row => row.token_push);
+      LIMIT 500`, [item.id_usuario])).rows;
+        const tokens = devices.filter(device => item.tipo !== 'ACTUALIZACION_APP_DISPONIBLE'
+            || (device.plataforma === 'ANDROID' && Boolean(item.version_objetivo)
+                && versionIsNewer(item.version_objetivo, device.version_app)))
+            .map(device => device.token_push);
         if (!tokens.length) {
             await finish(item, 'OMITIDA', 'El usuario no tiene dispositivos activos.');
             return;

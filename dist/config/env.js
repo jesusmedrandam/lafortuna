@@ -33,6 +33,7 @@ const envSchema = z.object({
     FIREBASE_PROJECT_ID: z.string().trim().min(1).optional(),
     PUSH_DISPATCH_INTERVAL_MS: z.coerce.number().int().min(3000).max(60000).default(10000),
     CALCULATED_ALERT_INTERVAL_MS: z.coerce.number().int().min(300000).max(86400000).default(3600000),
+    APP_UPDATE_CHECK_INTERVAL_MS: z.coerce.number().int().min(300000).max(86400000).default(900000),
     TICK_EARLIEST_HATCH_DAYS: z.coerce.number().int().min(10).max(40).default(21),
     TICK_MINIMUM_REST_DAYS: z.coerce.number().int().min(30).max(70).default(45),
     TICK_REDUCED_RISK_DAYS: z.coerce.number().int().min(61).max(180).default(100),

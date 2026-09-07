@@ -9,6 +9,100 @@ type Row = Record<string, unknown>;
 
 let running = false;
 let timer: NodeJS.Timeout | null = null;
+let appUpdateRunning = false;
+let appUpdateTimer: NodeJS.Timeout | null = null;
+
+const APP_RELEASE_API = 'https://api.github.com/repos/jesusmedrandam/lafortuna/releases/latest';
+
+interface AppRelease {
+  tag_name?: string;
+  html_url?: string;
+  published_at?: string | null;
+  body?: string | null;
+  assets?: Array<{ name?: string; browser_download_url?: string }>;
+}
+
+function versionParts(value: unknown) {
+  return String(value ?? '').replace(/^v/i, '').split(/[.+-]/)
+    .map(part => Number.parseInt(part, 10))
+    .map(part => Number.isFinite(part) ? part : 0);
+}
+
+function versionIsNewer(candidate: string, current: unknown) {
+  const left = versionParts(candidate);
+  const right = versionParts(current);
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference > 0;
+  }
+  return false;
+}
+
+async function latestAppRelease() {
+  const response = await fetch(APP_RELEASE_API, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'SGB-Update-Notifier',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`GitHub no respondió correctamente (HTTP ${response.status}).`);
+  const release = await response.json() as AppRelease;
+  const version = String(release.tag_name ?? '').replace(/^v/i, '').trim();
+  if (!/^\d+(?:\.\d+)+$/.test(version)) return null;
+  const apk = (release.assets ?? []).find(asset =>
+    String(asset.name ?? '').toLocaleLowerCase('es').endsWith('.apk')
+      && String(asset.browser_download_url ?? '').startsWith('https://github.com/jesusmedrandam/lafortuna/releases/download/'),
+  );
+  if (!apk?.browser_download_url) return null;
+  return {
+    version,
+    apkUrl: apk.browser_download_url,
+    releaseUrl: release.html_url ?? null,
+    publishedAt: release.published_at ?? null,
+    notes: release.body ?? null,
+  };
+}
+
+export async function notifyAvailableAppUpdate() {
+  if (appUpdateRunning) return 0;
+  appUpdateRunning = true;
+  try {
+    const release = await latestAppRelease();
+    if (!release) return 0;
+    const devices = (await pool.query<{ id_usuario: string; version_app: string | null }>(`
+      SELECT id_usuario,version_app
+      FROM notificacion_dispositivo
+      WHERE plataforma='ANDROID' AND activo=TRUE
+    `)).rows;
+    const users = [...new Set(devices
+      .filter(device => !device.version_app || versionIsNewer(release.version, device.version_app))
+      .map(device => device.id_usuario))];
+    if (!users.length) return 0;
+    const notificationId = await transaction(async client => {
+      const lock = await client.query(`SELECT pg_try_advisory_xact_lock(78128434) acquired`);
+      if (!lock.rows[0]?.acquired) return null;
+      return emitNotification(client, {
+        tipo: 'ACTUALIZACION_APP_DISPONIBLE', categoria: 'SISTEMA', prioridad: 'IMPORTANTE',
+        titulo: `SGB ${release.version} disponible`,
+        mensaje: 'Ya puedes instalar la nueva versión desde Configuración. Incluye las últimas mejoras y correcciones.',
+        ruta: '/configuracion', usuarios: users,
+        datos: {
+          version_objetivo: release.version,
+          apk_url: release.apkUrl,
+          release_url: release.releaseUrl,
+          publicada_at: release.publishedAt,
+        },
+        claveDedupe: `SISTEMA:ACTUALIZACION_APP:${release.version}`,
+      });
+    });
+    if (notificationId) scheduleNotificationPushDispatch();
+    return notificationId ? users.length : 0;
+  } finally {
+    appUpdateRunning = false;
+  }
+}
 
 function localDate(value: unknown) {
   if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString().slice(0, 10);
@@ -269,12 +363,19 @@ export async function generateCalculatedNotifications() {
 export function startCalculatedNotificationWorker() {
   if (timer) return () => undefined;
   void generateCalculatedNotifications().catch(error => console.error('Error al calcular alertas:', error));
+  void notifyAvailableAppUpdate().catch(error => console.error('Error al comprobar actualizaciones Android:', error));
   timer = setInterval(() => {
     void generateCalculatedNotifications().catch(error => console.error('Error al calcular alertas:', error));
   }, env.CALCULATED_ALERT_INTERVAL_MS);
+  appUpdateTimer = setInterval(() => {
+    void notifyAvailableAppUpdate().catch(error => console.error('Error al comprobar actualizaciones Android:', error));
+  }, env.APP_UPDATE_CHECK_INTERVAL_MS);
   timer.unref();
+  appUpdateTimer.unref();
   return () => {
     if (timer) clearInterval(timer);
+    if (appUpdateTimer) clearInterval(appUpdateTimer);
     timer = null;
+    appUpdateTimer = null;
   };
 }
