@@ -1395,3 +1395,14 @@ body, .shell-main, .page-content, .topbar, .card, .input, .modal { transition: b
   .animal-cover-stage > h1 { max-width: calc(100% - 125px); font-size: 1.3rem; }
   .animal-profile-overlap { width: 98px; height: 98px; }
 }
+
+.public-animal-hero{display:block;position:relative;padding:0;background:var(--surface)}
+.public-animal-cover{position:relative;display:block;width:100%;height:auto;aspect-ratio:16/7;padding:0;border:0;border-radius:0;background:linear-gradient(135deg,var(--primary-soft),var(--surface-alt));overflow:hidden;color:var(--primary)}
+.public-animal-cover img{display:block;width:100%;height:100%;object-fit:cover}
+.public-animal-cover>svg{position:absolute;right:16px;top:16px;padding:7px;width:36px;height:36px;border-radius:12px;color:#fff;background:rgba(0,0,0,.5)}
+.public-animal-cover-empty{display:grid;place-items:center}
+.public-animal-identity{position:relative;margin-top:-72px;padding:0 24px 22px;display:flex;align-items:flex-end;gap:20px}
+.public-animal-avatar{flex:0 0 auto;width:148px;height:148px;border:6px solid var(--surface);border-radius:30px;display:grid;place-items:center;overflow:hidden;color:var(--primary);background:var(--surface-alt);box-shadow:var(--shadow)}
+.public-animal-avatar img{width:100%;height:100%;object-fit:cover}
+.public-animal-identity>div{padding-bottom:7px}.public-animal-identity h1{margin:8px 0 3px}
+@media(max-width:620px){.public-animal-cover{aspect-ratio:16/9}.public-animal-identity{margin-top:-48px;padding:0 16px 17px;gap:13px}.public-animal-avatar{width:104px;height:104px;border-width:4px;border-radius:22px}.public-animal-identity>div{padding-bottom:2px}}

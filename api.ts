@@ -132,6 +132,8 @@ export interface Animal {
   historial_actividades?: AnimalActivityHistory[];
   historial_movimientos?: AnimalMovementHistory[];
   historial_tratamientos?: AnimalTreatmentHistory[];
+  historial_pesajes?: Array<{id_pesaje:string;fecha:string;peso_kg:string|number;metodo:string|null}>;
+  historial_lactancias?: Array<{id_lactancia:string;fecha_inicio:string;fecha_fin:string|null;en_ordeno:boolean}>;
   historial_produccion?: AnimalProductionHistory[];
   imagenes?: AnimalImage[];
   colores?: { id_color: string; nombre: string; es_principal: boolean }[];
@@ -169,8 +171,8 @@ export interface PublicAnimal {
 }
 
 export interface AnimalRegisteredChild { id_animal:string;nombre:string;codigo_arete:string|null;sexo:'MACHO'|'HEMBRA';fecha_nacimiento:string|null;id_parto:string|null;fecha_parto:string|null;parentesco:'MADRE'|'PADRE' }
-export interface AnimalReproductiveBirth { id_parto:string;fecha:string;tipo:string;rol:'MADRE'|'PADRE';contraparte:string|null;total_crias:number }
-export interface AnimalReproductiveHeat { id_celo:string;fecha_inicio:string;fecha_fin:string|null;rol:'VACA'|'TORO';contraparte:string|null;observaciones:string|null }
+export interface AnimalReproductiveBirth { id_parto:string;fecha:string;tipo:string;rol:'MADRE'|'PADRE';contraparte:string|null;total_crias:number;crias:Array<{id_animal:string;nombre:string;fecha_nacimiento:string|null}> }
+export interface AnimalReproductiveHeat { id_celo:string;fecha_inicio:string;fecha_fin:string|null;es_falso:boolean;rol:'VACA'|'TORO';contraparte:string|null;observaciones:string|null }
 export interface AnimalReproductivePregnancy { id_prenez:string;fecha:string;estado:string;metodo:string;rol:'VACA'|'PADRE';contraparte:string|null;fecha_parto_tentativa:string|null }
 export interface AnimalReproductiveAbortion { id_aborto:string;fecha:string;causa:string|null;meses_gestacion:number|string|null;descripcion:string|null;id_prenez:string|null }
 
@@ -850,6 +852,7 @@ export interface HeatRecord {
   fecha_inicio: string;
   fecha_fin: string | null;
   observaciones: string | null;
+  es_falso: boolean;
   tiene_prenez: boolean;
   categoria_codigo: string;
   categoria: string;

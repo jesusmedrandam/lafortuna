@@ -286,11 +286,11 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
         'id_raza',r.id_raza,'nombre',r.nombre,'porcentaje',ar.porcentaje
       )) FROM animal_raza ar JOIN raza_animal r ON r.id_raza=ar.id_raza
       WHERE ar.id_animal=a.id_animal AND ar.deleted_at IS NULL),'[]') razas,
-      (SELECT jsonb_build_object('id_pesaje',pe.id_pesaje,'peso_kg',pe.peso_kg,'fecha',pe.fecha_pesaje,'metodo',pe.metodo)
+      (SELECT jsonb_build_object('id_pesaje',pe.id_pesaje,'peso_kg',pe.peso_kg,'fecha',pe.fecha_pesaje::text,'metodo',pe.metodo)
        FROM pesaje pe WHERE pe.id_animal=a.id_animal AND pe.deleted_at IS NULL
        ORDER BY pe.fecha_pesaje DESC LIMIT 1) ultimo_pesaje,
       (SELECT jsonb_build_object(
-        'id_tratamiento',ta.id_tratamiento,'fecha',ta.fecha_aplicacion,
+        'id_tratamiento',ta.id_tratamiento,'fecha',ta.fecha_aplicacion::text,
         'tipo',tt.nombre,'medicamento',me.nombre_comercial,'via',va.nombre,
         'dosis',ta.dosis,'unidad',COALESCE(um.simbolo,um.nombre),
         'descripcion',ta.descripcion,'observaciones',ta.observaciones
@@ -340,10 +340,10 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
          AND (CASE WHEN a.sexo='HEMBRA' THEN rc.id_madre=a.id_animal ELSE rc.id_padre=a.id_animal END)) total_crias,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_animal',rc.id_animal,'nombre',rc.nombre,'codigo_arete',rc.codigo_arete,'sexo',rc.sexo,
-        'fecha_nacimiento',rc.fecha_nacimiento,
+        'fecha_nacimiento',rc.fecha_nacimiento::text,
         'id_parto',(SELECT rpc.id_parto FROM parto_cria rpc JOIN parto rp ON rp.id_parto=rpc.id_parto AND rp.deleted_at IS NULL
           WHERE rpc.id_cria=rc.id_animal AND rpc.deleted_at IS NULL ORDER BY rp.fecha_parto DESC LIMIT 1),
-        'fecha_parto',(SELECT rp.fecha_parto FROM parto_cria rpc JOIN parto rp ON rp.id_parto=rpc.id_parto AND rp.deleted_at IS NULL
+        'fecha_parto',(SELECT rp.fecha_parto::text FROM parto_cria rpc JOIN parto rp ON rp.id_parto=rpc.id_parto AND rp.deleted_at IS NULL
           WHERE rpc.id_cria=rc.id_animal AND rpc.deleted_at IS NULL ORDER BY rp.fecha_parto DESC LIMIT 1),
         'parentesco',CASE WHEN a.sexo='HEMBRA' THEN 'MADRE' ELSE 'PADRE' END
       ) ORDER BY rc.fecha_nacimiento DESC NULLS LAST,rc.created_at DESC,rc.nombre)
@@ -351,17 +351,20 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       WHERE rc.deleted_at IS NULL
         AND (CASE WHEN a.sexo='HEMBRA' THEN rc.id_madre=a.id_animal ELSE rc.id_padre=a.id_animal END)),'[]'::jsonb) crias_registradas,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
-        'id_parto',rp.id_parto,'fecha',rp.fecha_parto,'tipo',rp.tipo_parto,
+        'id_parto',rp.id_parto,'fecha',rp.fecha_parto::text,'tipo',rp.tipo_parto,
         'rol',CASE WHEN rp.id_madre=a.id_animal THEN 'MADRE' ELSE 'PADRE' END,
         'contraparte',CASE WHEN rp.id_madre=a.id_animal THEN rf.nombre ELSE rm.nombre END,
-        'total_crias',(SELECT COUNT(*)::int FROM parto_cria rpc WHERE rpc.id_parto=rp.id_parto AND rpc.deleted_at IS NULL)
+        'total_crias',(SELECT COUNT(*)::int FROM parto_cria rpc WHERE rpc.id_parto=rp.id_parto AND rpc.deleted_at IS NULL),
+        'crias',COALESCE((SELECT jsonb_agg(jsonb_build_object('id_animal',rpc_a.id_animal,'nombre',rpc_a.nombre,'fecha_nacimiento',rpc_a.fecha_nacimiento::text) ORDER BY rpc.orden_nacimiento)
+          FROM parto_cria rpc JOIN animal rpc_a ON rpc_a.id_animal=rpc.id_cria
+          WHERE rpc.id_parto=rp.id_parto AND rpc.deleted_at IS NULL),'[]'::jsonb)
       ) ORDER BY rp.fecha_parto DESC)
       FROM parto rp
       JOIN animal rm ON rm.id_animal=rp.id_madre
       LEFT JOIN animal rf ON rf.id_animal=rp.id_padre
       WHERE rp.deleted_at IS NULL AND (rp.id_madre=a.id_animal OR rp.id_padre=a.id_animal)),'[]'::jsonb) historial_partos,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
-        'id_celo',rc.id_celo,'fecha_inicio',rc.fecha_inicio,'fecha_fin',rc.fecha_fin,
+        'id_celo',rc.id_celo,'fecha_inicio',rc.fecha_inicio::text,'fecha_fin',rc.fecha_fin::text,'es_falso',rc.es_falso,
         'rol',CASE WHEN rc.id_vaca=a.id_animal THEN 'VACA' ELSE 'TORO' END,
         'contraparte',CASE WHEN rc.id_vaca=a.id_animal THEN rct.nombre ELSE rcv.nombre END,
         'observaciones',rc.observaciones
@@ -370,21 +373,21 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       LEFT JOIN animal rct ON rct.id_animal=rc.id_toro
       WHERE rc.deleted_at IS NULL AND (rc.id_vaca=a.id_animal OR rc.id_toro=a.id_animal)),'[]'::jsonb) historial_celos,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
-        'id_prenez',rp.id_prenez,'fecha',rp.fecha_confirmacion,'estado',rp.estado,
+        'id_prenez',rp.id_prenez,'fecha',rp.fecha_confirmacion::text,'estado',rp.estado,
         'metodo',rp.metodo_embarazo,'rol',CASE WHEN rp.id_vaca=a.id_animal THEN 'VACA' ELSE 'PADRE' END,
         'contraparte',CASE WHEN rp.id_vaca=a.id_animal THEN rpf.nombre ELSE rpv.nombre END,
-        'fecha_parto_tentativa',rp.fecha_parto_tentativa
+        'fecha_parto_tentativa',rp.fecha_parto_tentativa::text
       ) ORDER BY rp.fecha_confirmacion DESC)
       FROM prenez rp JOIN animal rpv ON rpv.id_animal=rp.id_vaca
       LEFT JOIN animal rpf ON rpf.id_animal=rp.id_padre
       WHERE rp.deleted_at IS NULL AND (rp.id_vaca=a.id_animal OR rp.id_padre=a.id_animal)),'[]'::jsonb) historial_preneces,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
-        'id_aborto',ra.id_aborto,'fecha',ra.fecha,'causa',ra.causa,
+        'id_aborto',ra.id_aborto,'fecha',ra.fecha::text,'causa',ra.causa,
         'meses_gestacion',ra.meses_gestacion,'descripcion',ra.descripcion,'id_prenez',ra.id_prenez
       ) ORDER BY ra.fecha DESC)
       FROM aborto ra WHERE ra.id_vaca=a.id_animal AND ra.deleted_at IS NULL),'[]'::jsonb) historial_abortos,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
-        'id_actividad',ha.id_actividad,'fecha',ha.fecha,'tipo',hta.nombre,'codigo',hta.codigo,
+        'id_actividad',ha.id_actividad,'fecha',ha.fecha::text,'tipo',hta.nombre,'codigo',hta.codigo,
         'descripcion',ha.descripcion,'fierro',hm.nombre,'fierro_codigo',hm.codigo
       ) ORDER BY ha.fecha DESC,ha.created_at DESC)
       FROM actividad_animal haa
@@ -409,7 +412,7 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       WHERE hmd.id_animal=a.id_animal AND hmd.seleccionado=TRUE AND hmd.estado='APLICADO'
         AND hmd.deleted_at IS NULL AND hmv.estado='COMPLETADO'),'[]'::jsonb) historial_movimientos,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
-        'id_tratamiento',ht.id_tratamiento,'fecha',ht.fecha_aplicacion,
+        'id_tratamiento',ht.id_tratamiento,'fecha',ht.fecha_aplicacion::text,
         'tipo',htt.nombre,'medicamento',hmed.nombre_comercial,'via',hvia.nombre,
         'dosis',ht.dosis,'unidad',COALESCE(hum.simbolo,hum.nombre),
         'descripcion',ht.descripcion,'observaciones',ht.observaciones
@@ -421,7 +424,17 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       JOIN unidad_medida hum ON hum.id_unidad=ht.id_unidad_dosis
       WHERE ht.id_animal=a.id_animal AND ht.deleted_at IS NULL),'[]'::jsonb) historial_tratamientos,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
-        'id_produccion',hpl.id_produccion,'fecha',hpl.fecha_produccion,
+        'id_pesaje',hp.id_pesaje,'fecha',hp.fecha_pesaje::text,
+        'peso_kg',hp.peso_kg,'metodo',hp.metodo
+      ) ORDER BY hp.fecha_pesaje DESC,hp.created_at DESC)
+      FROM pesaje hp WHERE hp.id_animal=a.id_animal AND hp.deleted_at IS NULL),'[]'::jsonb) historial_pesajes,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_lactancia',hl.id_lactancia,'fecha_inicio',hl.fecha_inicio::text,
+        'fecha_fin',hl.fecha_fin::text,'en_ordeno',hl.en_ordeno
+      ) ORDER BY hl.fecha_inicio DESC,hl.created_at DESC)
+      FROM lactancia hl WHERE hl.id_vaca=a.id_animal AND hl.deleted_at IS NULL),'[]'::jsonb) historial_lactancias,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_produccion',hpl.id_produccion,'fecha',hpl.fecha_produccion::text,
         'litros',hpl.litros,'turno',hpl.turno,'fuente',hpl.fuente,
         'observaciones',hpl.observaciones
       ) ORDER BY hpl.fecha_produccion DESC,hpl.created_at DESC)
@@ -754,7 +767,7 @@ animalsRouter.post('/:id/condicion', requirePermission('ANIMAL_MODIFICAR'), asyn
 animalsRouter.get('/:id/ubicacion-historica', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
   const id = routeParam(req.params.id, 'id');
   const { fecha } = z.object({ fecha: z.string().date() }).parse(req.query);
-  const [animalResult, locationResult, groupResult] = await Promise.all([
+  const [animalResult, locationResult, groupResult, snapshotResult] = await Promise.all([
     pool.query(
       `SELECT a.id_animal,a.nombre,a.created_at,a.id_ubicacion_actual,a.id_grupo_actual
        FROM animal a WHERE a.id_animal=$1 AND a.deleted_at IS NULL`,
@@ -784,11 +797,53 @@ animalsRouter.get('/:id/ubicacion-historica', requirePermission('ANIMAL_CONSULTA
        ORDER BY h.fecha_desde DESC LIMIT 1`,
       [id, fecha],
     ),
+    pool.query(
+      `SELECT
+        COALESCE((SELECT ace.estado_nuevo FROM animal_condicion_evento ace
+          WHERE ace.id_animal=a.id_animal AND ace.deleted_at IS NULL
+            AND ace.fecha_evento<($2::date+INTERVAL '1 day')
+          ORDER BY ace.fecha_evento DESC LIMIT 1),'ACTIVO') estado,
+        (SELECT jsonb_build_object('peso_kg',pe.peso_kg,'fecha',pe.fecha_pesaje::text,'metodo',pe.metodo)
+          FROM pesaje pe WHERE pe.id_animal=a.id_animal AND pe.deleted_at IS NULL AND pe.fecha_pesaje<=$2::date
+          ORDER BY pe.fecha_pesaje DESC,pe.created_at DESC LIMIT 1) ultimo_pesaje,
+        (SELECT jsonb_build_object('fecha',ta.fecha_aplicacion::text,'tipo',tt.nombre,'medicamento',m.nombre_comercial,
+          'via',v.nombre,'dosis',ta.dosis,'unidad',COALESCE(um.simbolo,um.nombre))
+          FROM tratamiento_animal ta JOIN tipo_tratamiento tt ON tt.id_tipo_tratamiento=ta.id_tipo_tratamiento
+          JOIN medicamento m ON m.id_medicamento=ta.id_medicamento JOIN via_administracion v ON v.id_via_administracion=ta.id_via_administracion
+          JOIN unidad_medida um ON um.id_unidad=ta.id_unidad_dosis
+          WHERE ta.id_animal=a.id_animal AND ta.deleted_at IS NULL AND ta.fecha_aplicacion<=$2::date
+          ORDER BY ta.fecha_aplicacion DESC,ta.created_at DESC LIMIT 1) ultimo_tratamiento,
+        (SELECT jsonb_build_object('fecha',c.fecha_inicio::text,'fecha_fin',c.fecha_fin::text,'es_falso',c.es_falso)
+          FROM celo c WHERE c.id_vaca=a.id_animal AND c.deleted_at IS NULL AND c.fecha_inicio<=$2::date
+          ORDER BY c.fecha_inicio DESC,c.created_at DESC LIMIT 1) ultimo_celo,
+        (SELECT jsonb_build_object('fecha_confirmacion',pr.fecha_confirmacion::text,'fecha_parto_tentativa',pr.fecha_parto_tentativa::text,
+          'metodo_confirmacion',pr.metodo_confirmacion,'padre',father.nombre)
+          FROM prenez pr LEFT JOIN animal father ON father.id_animal=pr.id_padre
+          WHERE pr.id_vaca=a.id_animal AND pr.deleted_at IS NULL AND pr.fecha_confirmacion<=$2::date
+            AND NOT EXISTS(SELECT 1 FROM parto pb WHERE pb.id_prenez=pr.id_prenez AND pb.deleted_at IS NULL AND pb.fecha_parto<=$2::date)
+            AND NOT EXISTS(SELECT 1 FROM aborto ab WHERE ab.id_prenez=pr.id_prenez AND ab.deleted_at IS NULL AND ab.fecha<=$2::date)
+          ORDER BY pr.fecha_confirmacion DESC LIMIT 1) prenez,
+        (SELECT jsonb_build_object('fecha',p.fecha_parto::text,'tipo',p.tipo_parto,'total_crias',(SELECT COUNT(*)::int FROM parto_cria pc WHERE pc.id_parto=p.id_parto AND pc.deleted_at IS NULL))
+          FROM parto p WHERE p.id_madre=a.id_animal AND p.deleted_at IS NULL AND p.fecha_parto<=$2::date
+          ORDER BY p.fecha_parto DESC,p.created_at DESC LIMIT 1) ultimo_parto,
+        (SELECT jsonb_build_object('fecha',ab.fecha::text,'causa',ab.causa)
+          FROM aborto ab WHERE ab.id_vaca=a.id_animal AND ab.deleted_at IS NULL AND ab.fecha<=$2::date
+          ORDER BY ab.fecha DESC,ab.created_at DESC LIMIT 1) ultimo_aborto,
+        (SELECT jsonb_build_object('fecha_inicio',l.fecha_inicio::text,'fecha_fin',l.fecha_fin::text,'activa',l.fecha_inicio<=$2::date AND (l.fecha_fin IS NULL OR l.fecha_fin>=$2::date),'en_ordeno',l.en_ordeno)
+          FROM lactancia l WHERE l.id_vaca=a.id_animal AND l.deleted_at IS NULL AND l.fecha_inicio<=$2::date
+          ORDER BY l.fecha_inicio DESC LIMIT 1) lactancia,
+        (SELECT COALESCE(SUM(pl.litros),0) FROM produccion_leche pl WHERE pl.id_vaca=a.id_animal AND pl.deleted_at IS NULL AND pl.fecha_produccion=$2::date) produccion_dia,
+        (SELECT COUNT(*)::int FROM produccion_leche pl WHERE pl.id_vaca=a.id_animal AND pl.deleted_at IS NULL AND pl.fecha_produccion<=$2::date) registros_produccion,
+        (SELECT COUNT(*)::int FROM tratamiento_animal ta WHERE ta.id_animal=a.id_animal AND ta.deleted_at IS NULL AND ta.fecha_aplicacion<=$2::date) total_tratamientos,
+        (SELECT COUNT(*)::int FROM parto p WHERE p.id_madre=a.id_animal AND p.deleted_at IS NULL AND p.fecha_parto<=$2::date) total_partos
+       FROM animal a WHERE a.id_animal=$1 AND a.deleted_at IS NULL`,[id,fecha],
+    ),
   ]);
   const animal = animalResult.rows[0];
   if (!animal) throw new NotFoundError('Animal no encontrado.');
   const location = locationResult.rows[0] ?? null;
   const group = groupResult.rows[0] ?? null;
+  const snapshot=snapshotResult.rows[0]??{};
   return ok(res, {
     fecha,
     encontrado: Boolean(location || group),
@@ -801,6 +856,14 @@ animalsRouter.get('/:id/ubicacion-historica', requirePermission('ANIMAL_CONSULTA
     id_grupo: group?.id_grupo ?? null,
     periodo_ubicacion: location ? { desde: location.fecha_desde, hasta: location.fecha_hasta } : null,
     periodo_grupo: group ? { desde: group.fecha_desde, hasta: group.fecha_hasta } : null,
+    estado:snapshot.estado??null,
+    ultimo_pesaje:snapshot.ultimo_pesaje??null,
+    ultimo_tratamiento:snapshot.ultimo_tratamiento??null,
+    reproduccion:{ultimo_celo:snapshot.ultimo_celo??null,prenez:snapshot.prenez??null,ultimo_parto:snapshot.ultimo_parto??null,ultimo_aborto:snapshot.ultimo_aborto??null,total_partos:Number(snapshot.total_partos??0)},
+    lactancia:snapshot.lactancia??null,
+    produccion_dia:Number(snapshot.produccion_dia??0),
+    registros_produccion:Number(snapshot.registros_produccion??0),
+    total_tratamientos:Number(snapshot.total_tratamientos??0),
   });
 }));
 
