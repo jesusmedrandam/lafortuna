@@ -20,8 +20,8 @@ const catalogDefinitions = [
 type CatalogName = typeof catalogDefinitions[number][0];
 const isCatalogName = (value: string | null): value is CatalogName => catalogDefinitions.some(([name]) => name === value);
 
-type CatalogForm = Record<string, string | boolean> & { activo: boolean };
-const emptyForm = (): CatalogForm => ({ codigo: '', nombre: '', descripcion: '', activo: true });
+type CatalogForm = Record<string, string | boolean | string[]> & { activo: boolean };
+const emptyForm = (): CatalogForm => ({ codigo: '', nombre: '', descripcion: '', id_vias_administracion: [], activo: true });
 
 export function CatalogsPage() {
   const { hasPermission } = useAuth();
@@ -35,6 +35,7 @@ export function CatalogsPage() {
   const species = useCatalog('especies');
   const categories = useCatalog('categorias-agroquimicos');
   const units = useCatalog('unidades');
+  const administrationRoutes = useCatalog('vias');
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CatalogForm>(emptyForm);
@@ -49,7 +50,7 @@ export function CatalogsPage() {
     if (catalog === 'tipos-grupo') return ['id_especie','codigo','nombre','descripcion'];
     if (catalog === 'tipos-limpieza') return ['codigo','nombre','requiere_productos','descripcion'];
     if (catalog === 'agroquimicos') return ['id_categoria_producto','nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','instrucciones'];
-    if (catalog === 'medicamentos') return ['nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','dias_retiro_leche','dias_retiro_carne'];
+    if (catalog === 'medicamentos') return ['nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','dosis_sugerida','indicaciones','dias_retiro_leche','dias_retiro_carne'];
     if (catalog === 'productos-venta') return ['codigo','nombre','id_unidad_venta','id_unidad_complementaria','descripcion'];
     if (catalog === 'compradores') return ['codigo','nombre','contacto','destino','descripcion'];
     if (catalog === 'tipos-producto-compra') return ['codigo','nombre','es_animal','descripcion'];
@@ -65,6 +66,7 @@ export function CatalogsPage() {
         else if (field.startsWith('dias_')) body[field] = value === '' || value == null ? null : Number(value);
         else body[field] = typeof value === 'string' && !value.trim() ? null : value;
       }
+      if (catalog === 'medicamentos') body.id_vias_administracion = form.id_vias_administracion;
       return apiRequest(`/catalogos/${catalog}${editingId ? `/${editingId}` : ''}`, { method: editingId ? 'PATCH' : 'POST', body });
     },
     onSuccess: () => {
@@ -87,6 +89,7 @@ export function CatalogsPage() {
     for (const field of fields) next[field] = field === 'requiere_productos' || field === 'es_animal' ? Boolean(item[field]) : String(item[field] ?? '');
     next.activo = item.activo !== false;
     next.es_sistema = Boolean(item.es_sistema);
+    if (catalog === 'medicamentos') next.id_vias_administracion = Array.isArray(item.id_vias_administracion) ? item.id_vias_administracion.map(String) : [];
     setForm(next); setEditingId(itemId(item)); setOpen(true);
   };
 
@@ -109,14 +112,14 @@ export function CatalogsPage() {
       </section>
     </div>
 
-    {open ? <Modal title={editingId ? `Editar ${title}` : `Nuevo elemento · ${title}`} onClose={() => setOpen(false)} footer={<><Button variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button><Button onClick={() => save.mutate()} loading={save.isPending}>Guardar</Button></>}><div className="form-stack">{fields.map((field) => {
+    {open ? <Modal title={editingId ? `Editar ${title}` : `Nuevo elemento · ${title}`} onClose={() => setOpen(false)} footer={<><Button variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button><Button onClick={() => save.mutate()} loading={save.isPending}>Guardar</Button></>}><div className="form-stack">{catalog==='medicamentos'?<Field label="Vías de administración" required hint="Puedes seleccionar más de una."><div className="medication-route-selector">{administrationRoutes.data?.filter((item)=>item.activo!==false).map((item)=>{const id=itemId(item);const selected=Array.isArray(form.id_vias_administracion)&&form.id_vias_administracion.includes(id);return <label className={selected?'selected':''} key={id}><input type="checkbox" checked={selected} onChange={()=>setForm((current)=>{const values=Array.isArray(current.id_vias_administracion)?current.id_vias_administracion:[];return {...current,id_vias_administracion:selected?values.filter((value)=>value!==id):[...values,id]};})}/><span>{itemLabel(item)}</span></label>;})}</div></Field>:null}{fields.map((field) => {
       const label = field.replace(/^id_/, '').replaceAll('_', ' ');
       if (field === 'id_especie') return <Field key={field} label="Especie" required={catalog === 'razas'}><Select value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">Sin especie específica</option>{species.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>;
       if (field === 'id_categoria_producto') return <Field key={field} label="Categoría" required><Select value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">Selecciona</option>{categories.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>;
-      if (field === 'id_unidad_predeterminada' || field === 'id_unidad_venta' || field === 'id_unidad_complementaria') { const complementary=field==='id_unidad_complementaria'; const saleUnit=field==='id_unidad_venta'; return <Field key={field} label={complementary?'Unidad complementaria':saleUnit?'Unidad de venta':'Unidad predeterminada'} required={saleUnit}><Select required={saleUnit} value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">{saleUnit?'Selecciona una unidad':complementary?'Sin campo complementario':'Sin unidad'}</option>{units.data?.filter((item) => item.activo !== false&&(!complementary||itemId(item)!==String(form.id_unidad_venta??''))).map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)} {item.simbolo ? `(${item.simbolo})` : ''}</option>)}</Select>{complementary?<small className="muted">Si la configuras, la venta pedirá también esta cantidad (por ejemplo, marquetas).</small>:null}</Field>; }
+      if (field === 'id_unidad_predeterminada' || field === 'id_unidad_venta' || field === 'id_unidad_complementaria') { const complementary=field==='id_unidad_complementaria'; const saleUnit=field==='id_unidad_venta'; const medicationUnit=catalog==='medicamentos'&&field==='id_unidad_predeterminada'; return <Field key={field} label={complementary?'Unidad complementaria':saleUnit?'Unidad de venta':'Unidad predeterminada'} required={saleUnit||medicationUnit}><Select required={saleUnit||medicationUnit} value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">{saleUnit||medicationUnit?'Selecciona una unidad':complementary?'Sin campo complementario':'Sin unidad'}</option>{units.data?.filter((item) => item.activo !== false&&(!complementary||itemId(item)!==String(form.id_unidad_venta??''))).map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)} {item.simbolo ? `(${item.simbolo})` : ''}</option>)}</Select>{complementary?<small className="muted">Si la configuras, la venta pedirá también esta cantidad (por ejemplo, marquetas).</small>:null}</Field>; }
       if (field === 'requiere_productos') return <label key={field} className="checkbox"><input type="checkbox" checked={Boolean(form[field])} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.checked }))} />Requiere registrar productos aplicados</label>;
       if (field === 'es_animal') return <label key={field} className="checkbox"><input type="checkbox" checked={Boolean(form[field])} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.checked }))} />Esta compra crea un nuevo animal</label>;
-      if (field === 'descripcion' || field === 'instrucciones') return <Field key={field} label={label}><Textarea value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))} /></Field>;
+      if (field === 'descripcion' || field === 'instrucciones' || field === 'dosis_sugerida' || field === 'indicaciones') return <Field key={field} label={field==='dosis_sugerida'?'Dosis sugerida':label}><Textarea value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))} /></Field>;
       return <Field key={field} label={label} required={['codigo','nombre','nombre_comercial'].includes(field)}><Input disabled={catalog === 'condiciones-animales' && Boolean(form.es_sistema) && field === 'codigo'} type={field.startsWith('dias_') ? 'number' : 'text'} min={field.startsWith('dias_') ? 0 : undefined} value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))} /></Field>;
     })}<label className="checkbox"><input type="checkbox" disabled={catalog === 'condiciones-animales' && Boolean(form.es_sistema)} checked={form.activo} onChange={(event) => setForm((current) => ({ ...current, activo: event.target.checked }))} />Activo</label></div></Modal> : null}
     {deleteId ? <ConfirmDialog title="Desactivar elemento" message="El elemento quedará inactivo y se conservarán las relaciones históricas." onClose={() => setDeleteId(null)} onConfirm={() => remove.mutate(deleteId)} loading={remove.isPending} /> : null}
