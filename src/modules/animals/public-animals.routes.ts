@@ -58,9 +58,11 @@ publicAnimalsRouter.get('/:token', asyncHandler(async (req, res) => {
           AND (CASE WHEN a.sexo='HEMBRA' THEN cria.id_madre=a.id_animal ELSE cria.id_padre=a.id_animal END)) total_crias,
        EXISTS(SELECT 1 FROM prenez pr
          WHERE pr.id_vaca=a.id_animal AND pr.estado='CONFIRMADA' AND pr.deleted_at IS NULL) prenez_confirmada,
-       ac.created_at compartido_desde
+       ac.created_at compartido_desde,
+       TRIM(CONCAT(creador.nombres,' ',creador.apellidos)) compartido_por
      FROM animal_compartido ac
      JOIN animal a ON a.id_animal=ac.id_animal AND a.deleted_at IS NULL
+     JOIN usuario creador ON creador.id_usuario=ac.creado_por AND creador.deleted_at IS NULL
      JOIN especie e ON e.id_especie=a.id_especie
      JOIN origen_animal oa ON oa.id_origen=a.id_origen
      LEFT JOIN animal m ON m.id_animal=a.id_madre AND m.deleted_at IS NULL

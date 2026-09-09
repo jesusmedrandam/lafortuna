@@ -31,13 +31,35 @@ const heatSchema = z.object({
 const pregnancySchema = z.object({
   id_vaca: z.string().uuid().nullable().optional(),
   id_celo: z.string().uuid().nullable().optional(),
+  id_servicio_reproductivo: z.string().uuid().nullable().optional(),
   id_padre: z.string().uuid().nullable().optional(),
+  padre_externo: z.string().trim().max(240).nullable().optional(),
   metodo_embarazo: z.enum(['MONTA_NATURAL', 'INSEMINACION_ARTIFICIAL', 'TRANSFERENCIA_EMBRIONES', 'DESCONOCIDO']),
   metodo_confirmacion: z.enum(['PALPACION', 'ECOGRAFIA', 'ANALISIS_SANGRE', 'OBSERVACION', 'OTRO']),
   fecha_confirmacion: z.string().date(),
   dias_gestacion_confirmacion: z.number().int().min(0).max(400).nullable().optional(),
   observaciones: z.string().trim().max(500).nullable().optional(),
-}).refine((value) => Boolean(value.id_vaca || value.id_celo), 'Selecciona una vaca o un celo confirmado.');
+}).refine((value) => Boolean(value.id_vaca || value.id_celo || value.id_servicio_reproductivo), 'Selecciona una vaca, un celo o un servicio reproductivo.');
+
+const assistedServiceSchema=z.object({
+  id_vaca:z.string().uuid(),
+  tipo:z.enum(['INSEMINACION_ARTIFICIAL','TRANSFERENCIA_EMBRIONES']),
+  fecha:z.string().date(),
+  id_celo:z.string().uuid().nullable().optional(),
+  id_padre:z.string().uuid().nullable().optional(),
+  padre_externo:z.string().trim().max(240).nullable().optional(),
+  id_donante:z.string().uuid().nullable().optional(),
+  donante_externa:z.string().trim().max(240).nullable().optional(),
+  codigo_material:z.string().trim().max(160).nullable().optional(),
+  calidad:z.string().trim().max(120).nullable().optional(),
+  tecnico:z.string().trim().max(160).nullable().optional(),
+  proveedor:z.string().trim().max(160).nullable().optional(),
+  observaciones:z.string().trim().max(2000).nullable().optional(),
+}).superRefine((value,ctx)=>{
+  if(value.id_padre&&value.padre_externo)ctx.addIssue({code:z.ZodIssueCode.custom,path:['padre_externo'],message:'Elige un padre registrado o escribe uno externo, no ambos.'});
+  if(value.id_donante&&value.donante_externa)ctx.addIssue({code:z.ZodIssueCode.custom,path:['donante_externa'],message:'Elige una donante registrada o escribe una externa, no ambas.'});
+  if(value.tipo==='INSEMINACION_ARTIFICIAL'&&(value.id_donante||value.donante_externa))ctx.addIssue({code:z.ZodIssueCode.custom,path:['id_donante'],message:'La donante solo corresponde a una transferencia de embriones.'});
+});
 
 type AnimalRow = {
   id_animal: string;
@@ -74,6 +96,20 @@ async function pregnancyData(client: PoolClient, input: z.infer<typeof pregnancy
   let startDate: string | null = null;
   let heatStart:string|null=null;
   let heatEnd:string|null=null;
+  let serviceId=input.id_servicio_reproductivo??null;
+  let externalFather=input.padre_externo??null;
+  if(serviceId){
+    const service=(await client.query(
+      `SELECT id_vaca,id_celo,id_padre,padre_externo,tipo,fecha::text
+       FROM servicio_reproductivo WHERE id_servicio_reproductivo=$1 AND deleted_at IS NULL FOR SHARE`,[serviceId],
+    )).rows[0] as {id_vaca:string;id_celo:string|null;id_padre:string|null;padre_externo:string|null;tipo:string;fecha:string}|undefined;
+    if(!service)throw new ValidationError('El servicio reproductivo seleccionado no está disponible.');
+    if(cowId&&cowId!==service.id_vaca)throw new ValidationError('La vaca no coincide con el servicio reproductivo.');
+    cowId=service.id_vaca;heatId=service.id_celo;fatherId=service.id_padre;externalFather=service.padre_externo;
+    input.metodo_embarazo=service.tipo as z.infer<typeof pregnancySchema>['metodo_embarazo'];
+    startDate=service.fecha;
+    if(input.fecha_confirmacion<service.fecha)throw new ValidationError('La confirmación no puede ser anterior al servicio reproductivo.');
+  }
   if (heatId) {
     const heat = (await client.query(
       `SELECT id_vaca,id_toro,fecha_inicio::text,fecha_fin::text,es_falso FROM celo WHERE id_celo=$1 AND deleted_at IS NULL FOR SHARE`,
@@ -92,7 +128,7 @@ async function pregnancyData(client: PoolClient, input: z.infer<typeof pregnancy
   const cow = await eligibleAnimal(client, cowId, 'HEMBRA', 'La vaca', 'PRENEZ');
   const rules=await assertFemaleReproductionRules(client,cowId,input.fecha_confirmacion,'PRENEZ',false,undefined,excludePregnancyId);
   await assertMinimumAge(client,cow.fecha_nacimiento,input.fecha_confirmacion,rules.edad_minima_celo_meses,'La vaca');
-  if(!heatId&&rules.usar_ultimo_celo_valido){
+  if(!heatId&&!serviceId&&rules.usar_ultimo_celo_valido){
     const recent=(await client.query(
       `SELECT id_celo,id_toro,fecha_inicio::text,fecha_fin::text FROM celo
        WHERE id_vaca=$1 AND es_falso=FALSE AND deleted_at IS NULL AND fecha_inicio<=$2::date
@@ -100,7 +136,7 @@ async function pregnancyData(client: PoolClient, input: z.infer<typeof pregnancy
     )).rows[0] as {id_celo:string;id_toro:string|null;fecha_inicio:string;fecha_fin:string|null}|undefined;
     if(recent){heatId=recent.id_celo;fatherId=fatherId??recent.id_toro;heatStart=recent.fecha_inicio;heatEnd=recent.fecha_fin;}
   }
-  if(heatStart)startDate=rules.usar_ultimo_celo_valido?(heatEnd??heatStart):heatStart;
+  if(heatStart&&!serviceId)startDate=rules.usar_ultimo_celo_valido?(heatEnd??heatStart):heatStart;
   if (fatherId) {
     const father = await eligibleAnimal(client, fatherId, 'MACHO', 'El padre', 'PRENEZ');
     if (father.id_especie !== cow.id_especie) throw new ValidationError('El padre y la vaca deben pertenecer a la misma especie.');
@@ -117,7 +153,9 @@ async function pregnancyData(client: PoolClient, input: z.infer<typeof pregnancy
   return {
     id_vaca: cowId,
     id_celo: heatId,
+    id_servicio_reproductivo:serviceId,
     id_padre: fatherId,
+    padre_externo:externalFather,
     metodo_embarazo: input.metodo_embarazo,
     metodo_confirmacion: input.metodo_confirmacion,
     fecha_confirmacion: input.fecha_confirmacion,
@@ -213,8 +251,66 @@ reproductionRouter.delete('/celos/:id', requirePermission('PARTO_ADMINISTRAR'), 
   return noContent(res);
 }));
 
+async function assistedServiceData(client:PoolClient,input:z.infer<typeof assistedServiceSchema>){
+  const cow=await eligibleAnimal(client,input.id_vaca,'HEMBRA','La receptora','PRENEZ');
+  const rules=await assertFemaleReproductionRules(client,input.id_vaca,input.fecha,'PRENEZ',false);
+  await assertMinimumAge(client,cow.fecha_nacimiento,input.fecha,rules.edad_minima_celo_meses,'La receptora');
+  if(input.id_celo){
+    const heat=(await client.query('SELECT id_vaca,es_falso FROM celo WHERE id_celo=$1 AND deleted_at IS NULL FOR SHARE',[input.id_celo])).rows[0] as {id_vaca:string;es_falso:boolean}|undefined;
+    if(!heat||heat.id_vaca!==input.id_vaca||heat.es_falso)throw new ValidationError('El celo seleccionado no corresponde a la receptora o está marcado como falso.');
+  }
+  if(input.id_padre){
+    const father=await eligibleAnimal(client,input.id_padre,'MACHO','El padre','PRENEZ');
+    if(father.id_especie!==cow.id_especie)throw new ValidationError('El padre y la receptora deben pertenecer a la misma especie.');
+    await assertMinimumAge(client,father.fecha_nacimiento,input.fecha,rules.edad_minima_padre_meses,'El padre');
+  }
+  if(input.id_donante){
+    const donor=await eligibleAnimal(client,input.id_donante,'HEMBRA','La donante','PRENEZ');
+    if(donor.id_especie!==cow.id_especie)throw new ValidationError('La donante y la receptora deben pertenecer a la misma especie.');
+  }
+  return{...input,id_celo:input.id_celo??null,id_padre:input.id_padre??null,padre_externo:input.padre_externo??null,id_donante:input.tipo==='TRANSFERENCIA_EMBRIONES'?input.id_donante??null:null,donante_externa:input.tipo==='TRANSFERENCIA_EMBRIONES'?input.donante_externa??null:null,codigo_material:input.codigo_material??null,calidad:input.calidad??null,tecnico:input.tecnico??null,proveedor:input.proveedor??null,observaciones:input.observaciones??null};
+}
+
+reproductionRouter.get('/servicios',requirePermission('PARTO_CONSULTAR'),asyncHandler(async(_req,res)=>ok(res,(await pool.query(
+  `SELECT s.*,v.nombre vaca,v.codigo_arete,v.id_categoria_animal,ca.codigo categoria_codigo,ca.nombre categoria,
+    COALESCE(p.nombre,s.padre_externo) padre,COALESCE(d.nombre,s.donante_externa) donante,
+    EXISTS(SELECT 1 FROM prenez pr WHERE pr.id_servicio_reproductivo=s.id_servicio_reproductivo AND pr.deleted_at IS NULL) tiene_prenez
+   FROM servicio_reproductivo s JOIN animal v ON v.id_animal=s.id_vaca
+   JOIN categoria_animal ca ON ca.id_categoria_animal=v.id_categoria_animal
+   LEFT JOIN animal p ON p.id_animal=s.id_padre LEFT JOIN animal d ON d.id_animal=s.id_donante
+   WHERE s.deleted_at IS NULL ORDER BY s.fecha DESC,s.created_at DESC`,
+)).rows)));
+
+reproductionRouter.post('/servicios',requirePermission('PARTO_ADMINISTRAR'),asyncHandler(async(req,res)=>{
+  const input=assistedServiceSchema.parse(req.body);
+  const row=await transaction(async client=>{
+    const data=await assistedServiceData(client,input);
+    return(await client.query(buildInsert('servicio_reproductivo',{...data,registrado_por:req.user!.id}))).rows[0];
+  },req.user!.id);
+  return created(res,row);
+}));
+
+reproductionRouter.patch('/servicios/:id',requirePermission('PARTO_ADMINISTRAR'),asyncHandler(async(req,res)=>{
+  const input=assistedServiceSchema.parse(req.body);const id=routeParam(req.params.id,'id');
+  const row=await transaction(async client=>{
+    const linked=await client.query('SELECT 1 FROM prenez WHERE id_servicio_reproductivo=$1 AND deleted_at IS NULL LIMIT 1',[id]);
+    if(linked.rowCount)throw new ValidationError('No se puede modificar un servicio que ya tiene una preñez relacionada.');
+    const data=await assistedServiceData(client,input);const saved=(await client.query(buildUpdate('servicio_reproductivo','id_servicio_reproductivo',id,data))).rows[0];
+    if(!saved)throw new NotFoundError('Servicio reproductivo no encontrado.');return saved;
+  },req.user!.id);return ok(res,row);
+}));
+
+reproductionRouter.delete('/servicios/:id',requirePermission('PARTO_ADMINISTRAR'),asyncHandler(async(req,res)=>{
+  const id=routeParam(req.params.id,'id');await transaction(async client=>{
+    const linked=await client.query('SELECT 1 FROM prenez WHERE id_servicio_reproductivo=$1 AND deleted_at IS NULL LIMIT 1',[id]);
+    if(linked.rowCount)throw new ValidationError('No se puede eliminar un servicio que ya tiene una preñez relacionada.');
+    const result=await client.query('UPDATE servicio_reproductivo SET deleted_at=NOW(),updated_at=NOW() WHERE id_servicio_reproductivo=$1 AND deleted_at IS NULL',[id]);
+    if(!result.rowCount)throw new NotFoundError('Servicio reproductivo no encontrado.');
+  },req.user!.id);return noContent(res);
+}));
+
 reproductionRouter.get('/preneces', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(
-  `SELECT p.*,v.nombre vaca,v.codigo_arete,v.id_especie,v.id_categoria_animal,pa.nombre padre,c.fecha_inicio celo_inicio,
+  `SELECT p.*,v.nombre vaca,v.codigo_arete,v.id_especie,v.id_categoria_animal,COALESCE(pa.nombre,p.padre_externo) padre,c.fecha_inicio celo_inicio,
     ca.codigo categoria_codigo,ca.nombre categoria,
     pp.id_proximo_parto,pp.estado proximo_estado
    FROM prenez p JOIN animal v ON v.id_animal=p.id_vaca
@@ -282,7 +378,7 @@ reproductionRouter.delete('/preneces/:id', requirePermission('PARTO_ADMINISTRAR'
 
 reproductionRouter.get('/proximos-partos', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(
   `SELECT pp.*,p.fecha_confirmacion,p.metodo_embarazo,p.metodo_confirmacion,p.dias_gestacion_confirmacion,
-    v.nombre vaca,v.codigo_arete,pa.nombre padre,ca.codigo categoria_codigo,ca.nombre categoria
+    v.nombre vaca,v.codigo_arete,COALESCE(pa.nombre,p.padre_externo) padre,ca.codigo categoria_codigo,ca.nombre categoria
    FROM proximo_parto pp JOIN prenez p ON p.id_prenez=pp.id_prenez AND p.deleted_at IS NULL
    JOIN animal v ON v.id_animal=pp.id_vaca
    JOIN categoria_animal ca ON ca.id_categoria_animal=v.id_categoria_animal
