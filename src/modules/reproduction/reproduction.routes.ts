@@ -11,6 +11,7 @@ import { requirePermission } from '../../middleware/permission.js';
 import { buildInsert, buildUpdate } from '../shared/sql.js';
 import { assertAnimalOperationAllowed, type AnimalOperationCode } from '../../services/animal-operation-policy.js';
 import { notifyReproductionEvent } from '../notifications/business-notifications.service.js';
+import { assertFemaleReproductionRules, assertMinimumAge } from '../../services/reproduction-policy.js';
 
 const GESTATION_DAYS = 283;
 
@@ -19,6 +20,7 @@ const heatSchema = z.object({
   id_toro: z.string().uuid().nullable().optional(),
   fecha_inicio: z.string().date(),
   fecha_fin: z.string().date().nullable().optional(),
+  es_falso: z.boolean().default(false),
   observaciones: z.string().trim().max(500).nullable().optional(),
 }).superRefine((value, ctx) => {
   if (value.fecha_fin && value.fecha_fin < value.fecha_inicio) {
@@ -56,10 +58,6 @@ async function eligibleAnimal(client: PoolClient, id: string, sex: 'HEMBRA' | 'M
     throw new ValidationError(`${role} debe ser un animal ${sex === 'HEMBRA' ? 'hembra' : 'macho'} activo.`);
   }
   await assertAnimalOperationAllowed(client, id, operation);
-  if (animal.fecha_nacimiento) {
-    const result = await client.query(`SELECT $1::date <= CURRENT_DATE - INTERVAL '1 year' AS valido`, [animal.fecha_nacimiento]);
-    if (!result.rows[0]?.valido) throw new ValidationError(`${role} debe tener al menos un año de edad.`);
-  }
   return animal;
 }
 
@@ -69,27 +67,44 @@ function addDays(value: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
-async function pregnancyData(client: PoolClient, input: z.infer<typeof pregnancySchema>) {
+async function pregnancyData(client: PoolClient, input: z.infer<typeof pregnancySchema>, excludePregnancyId?: string) {
   let cowId = input.id_vaca ?? null;
   let fatherId = input.id_padre ?? null;
+  let heatId = input.id_celo ?? null;
   let startDate: string | null = null;
-  if (input.id_celo) {
+  let heatStart:string|null=null;
+  let heatEnd:string|null=null;
+  if (heatId) {
     const heat = (await client.query(
-      `SELECT id_vaca,id_toro,fecha_inicio FROM celo WHERE id_celo=$1 AND deleted_at IS NULL FOR SHARE`,
-      [input.id_celo],
-    )).rows[0] as { id_vaca: string; id_toro: string | null; fecha_inicio: string } | undefined;
+      `SELECT id_vaca,id_toro,fecha_inicio::text,fecha_fin::text,es_falso FROM celo WHERE id_celo=$1 AND deleted_at IS NULL FOR SHARE`,
+      [heatId],
+    )).rows[0] as { id_vaca: string; id_toro: string | null; fecha_inicio: string; fecha_fin:string|null; es_falso:boolean } | undefined;
     if (!heat) throw new ValidationError('El celo seleccionado no está disponible.');
+    if (heat.es_falso) throw new ValidationError('Un celo marcado como falso no puede utilizarse para confirmar una preñez.');
     if (cowId && cowId !== heat.id_vaca) throw new ValidationError('La vaca no coincide con el celo seleccionado.');
     cowId = heat.id_vaca;
     fatherId = fatherId ?? heat.id_toro;
-    startDate = String(heat.fecha_inicio).slice(0, 10);
-    if (input.fecha_confirmacion < startDate) throw new ValidationError('La confirmación no puede ser anterior al inicio del celo.');
+    heatStart=heat.fecha_inicio;
+    heatEnd=heat.fecha_fin;
+    if (input.fecha_confirmacion < heatStart) throw new ValidationError('La confirmación no puede ser anterior al inicio del celo.');
   }
   if (!cowId) throw new ValidationError('Selecciona la vaca.');
   const cow = await eligibleAnimal(client, cowId, 'HEMBRA', 'La vaca', 'PRENEZ');
+  const rules=await assertFemaleReproductionRules(client,cowId,input.fecha_confirmacion,'PRENEZ',false,undefined,excludePregnancyId);
+  await assertMinimumAge(client,cow.fecha_nacimiento,input.fecha_confirmacion,rules.edad_minima_celo_meses,'La vaca');
+  if(!heatId&&rules.usar_ultimo_celo_valido){
+    const recent=(await client.query(
+      `SELECT id_celo,id_toro,fecha_inicio::text,fecha_fin::text FROM celo
+       WHERE id_vaca=$1 AND es_falso=FALSE AND deleted_at IS NULL AND fecha_inicio<=$2::date
+       ORDER BY fecha_inicio DESC,created_at DESC LIMIT 1 FOR SHARE`,[cowId,input.fecha_confirmacion],
+    )).rows[0] as {id_celo:string;id_toro:string|null;fecha_inicio:string;fecha_fin:string|null}|undefined;
+    if(recent){heatId=recent.id_celo;fatherId=fatherId??recent.id_toro;heatStart=recent.fecha_inicio;heatEnd=recent.fecha_fin;}
+  }
+  if(heatStart)startDate=rules.usar_ultimo_celo_valido?(heatEnd??heatStart):heatStart;
   if (fatherId) {
     const father = await eligibleAnimal(client, fatherId, 'MACHO', 'El padre', 'PRENEZ');
     if (father.id_especie !== cow.id_especie) throw new ValidationError('El padre y la vaca deben pertenecer a la misma especie.');
+    await assertMinimumAge(client,father.fecha_nacimiento,input.fecha_confirmacion,rules.edad_minima_padre_meses,'El padre');
   }
   let gestationDays = input.dias_gestacion_confirmacion ?? null;
   if (startDate) {
@@ -101,7 +116,7 @@ async function pregnancyData(client: PoolClient, input: z.infer<typeof pregnancy
   const tentativeDate = startDate ? addDays(startDate, GESTATION_DAYS) : null;
   return {
     id_vaca: cowId,
-    id_celo: input.id_celo ?? null,
+    id_celo: heatId,
     id_padre: fatherId,
     metodo_embarazo: input.metodo_embarazo,
     metodo_confirmacion: input.metodo_confirmacion,
@@ -118,17 +133,24 @@ export const reproductionRouter = Router();
 reproductionRouter.get('/opciones', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => {
   const [females, males] = await Promise.all([
     pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,a.fecha_nacimiento,a.id_especie,
-      a.id_categoria_animal,ca.codigo categoria_codigo,ca.nombre categoria
+      a.id_categoria_animal,ca.codigo categoria_codigo,ca.nombre categoria,
+      EXISTS(SELECT 1 FROM prenez active WHERE active.id_vaca=a.id_animal AND active.estado='CONFIRMADA' AND active.deleted_at IS NULL) prenez_confirmada
       FROM animal a JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
+      LEFT JOIN ubicacion au ON au.id_ubicacion=a.id_ubicacion_actual
+      LEFT JOIN grupo ag ON ag.id_grupo=a.id_grupo_actual
+      LEFT JOIN configuracion_propiedad cp ON cp.id_propiedad=COALESCE(au.id_propiedad,ag.id_propiedad,(SELECT id_propiedad FROM propiedad_ganadera WHERE deleted_at IS NULL ORDER BY es_principal DESC LIMIT 1))
       WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='HEMBRA'
-        AND (a.fecha_nacimiento IS NULL OR a.fecha_nacimiento<=CURRENT_DATE-INTERVAL '1 year') ORDER BY a.nombre`),
+        AND (a.fecha_nacimiento IS NULL OR a.fecha_nacimiento+make_interval(months=>COALESCE(cp.edad_minima_celo_meses,12))<=CURRENT_DATE) ORDER BY a.nombre`),
     pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,a.fecha_nacimiento,a.id_especie,
       a.id_categoria_animal,ca.codigo categoria_codigo,ca.nombre categoria
       FROM animal a JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
+      LEFT JOIN ubicacion au ON au.id_ubicacion=a.id_ubicacion_actual
+      LEFT JOIN grupo ag ON ag.id_grupo=a.id_grupo_actual
+      LEFT JOIN configuracion_propiedad cp ON cp.id_propiedad=COALESCE(au.id_propiedad,ag.id_propiedad,(SELECT id_propiedad FROM propiedad_ganadera WHERE deleted_at IS NULL ORDER BY es_principal DESC LIMIT 1))
       WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='MACHO'
-        AND (a.fecha_nacimiento IS NULL OR a.fecha_nacimiento<=CURRENT_DATE-INTERVAL '1 year') ORDER BY a.nombre`),
+        AND (a.fecha_nacimiento IS NULL OR a.fecha_nacimiento+make_interval(months=>COALESCE(cp.edad_minima_padre_meses,12))<=CURRENT_DATE) ORDER BY a.nombre`),
   ]);
-  return ok(res, { hembras: females.rows, machos: males.rows });
+  return ok(res, { hembras: females.rows, hembras_prenez: females.rows.filter((item)=>!item.prenez_confirmada), machos: males.rows });
 }));
 
 reproductionRouter.get('/celos', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(
@@ -145,9 +167,12 @@ reproductionRouter.post('/celos', requirePermission('PARTO_ADMINISTRAR'), asyncH
   const input = heatSchema.parse(req.body);
   const row = await transaction(async (client) => {
     const cow = await eligibleAnimal(client, input.id_vaca, 'HEMBRA', 'La vaca', 'CELO');
+    const rules=await assertFemaleReproductionRules(client,input.id_vaca,input.fecha_inicio,'CELO',input.es_falso);
+    await assertMinimumAge(client,cow.fecha_nacimiento,input.fecha_inicio,rules.edad_minima_celo_meses,'La vaca');
     if (input.id_toro) {
       const bull = await eligibleAnimal(client, input.id_toro, 'MACHO', 'El toro', 'CELO');
       if (bull.id_especie !== cow.id_especie) throw new ValidationError('El toro y la vaca deben pertenecer a la misma especie.');
+      await assertMinimumAge(client,bull.fecha_nacimiento,input.fecha_inicio,rules.edad_minima_padre_meses,'El toro');
     }
     const saved=(await client.query(buildInsert('celo', { ...input, registrado_por: req.user!.id }))).rows[0];
     await notifyReproductionEvent(client,'CELO',saved,req.user!.id);
@@ -163,9 +188,12 @@ reproductionRouter.patch('/celos/:id', requirePermission('PARTO_ADMINISTRAR'), a
     const linked = await client.query('SELECT 1 FROM prenez WHERE id_celo=$1 AND deleted_at IS NULL LIMIT 1', [id]);
     if (linked.rowCount) throw new ValidationError('No se puede modificar un celo que ya tiene una preñez relacionada.');
     const cow = await eligibleAnimal(client, input.id_vaca, 'HEMBRA', 'La vaca', 'CELO');
+    const rules=await assertFemaleReproductionRules(client,input.id_vaca,input.fecha_inicio,'CELO',input.es_falso,id);
+    await assertMinimumAge(client,cow.fecha_nacimiento,input.fecha_inicio,rules.edad_minima_celo_meses,'La vaca');
     if (input.id_toro) {
       const bull = await eligibleAnimal(client, input.id_toro, 'MACHO', 'El toro', 'CELO');
       if (bull.id_especie !== cow.id_especie) throw new ValidationError('El toro y la vaca deben pertenecer a la misma especie.');
+      await assertMinimumAge(client,bull.fecha_nacimiento,input.fecha_inicio,rules.edad_minima_padre_meses,'El toro');
     }
     const updated = (await client.query(buildUpdate('celo', 'id_celo', id, input))).rows[0];
     if (!updated) throw new NotFoundError('Celo no encontrado.');
@@ -226,7 +254,7 @@ reproductionRouter.patch('/preneces/:id', requirePermission('PARTO_ADMINISTRAR')
     const current = (await client.query('SELECT estado FROM prenez WHERE id_prenez=$1 AND deleted_at IS NULL FOR UPDATE', [id])).rows[0];
     if (!current) throw new NotFoundError('Preñez no encontrada.');
     if (current.estado !== 'CONFIRMADA') throw new ValidationError('Solo se puede modificar una preñez confirmada y pendiente.');
-    const data = await pregnancyData(client, input);
+    const data = await pregnancyData(client, input, id);
     const pregnancy = (await client.query(buildUpdate('prenez', 'id_prenez', id, data))).rows[0];
     await client.query(
       `UPDATE proximo_parto SET id_vaca=$2,fecha_tentativa=$3,updated_at=NOW()
