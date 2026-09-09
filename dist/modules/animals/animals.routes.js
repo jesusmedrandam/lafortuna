@@ -8,7 +8,7 @@ import { transaction } from '../../database/transaction.js';
 import { asyncHandler } from '../../core/async-handler.js';
 import { routeParam } from '../../core/route-param.js';
 import { created, noContent, ok } from '../../core/http.js';
-import { ConflictError, NotFoundError, ValidationError } from '../../core/errors.js';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../core/errors.js';
 import { paginationSchema, offset } from '../../core/pagination.js';
 import { requirePermission } from '../../middleware/permission.js';
 import { deleteCloudinaryImage, uploadAnimalImage } from '../../services/cloudinary.service.js';
@@ -236,6 +236,27 @@ animalsRouter.get('/opciones/propietarios', requirePermission('ANIMAL_CONSULTAR'
      ORDER BY nombres,apellidos`)).rows;
     return ok(res, rows);
 }));
+animalsRouter.get('/enlaces-publicos', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
+    if (!req.user.roles.includes('ADMINISTRADOR'))
+        throw new ForbiddenError('Solo un administrador puede gestionar todos los enlaces públicos.');
+    const rows = (await pool.query(`SELECT ac.id_animal_compartido,ac.id_animal,a.nombre animal,a.codigo_arete,
+       ac.token,ac.created_at,TRIM(CONCAT(u.nombres,' ',u.apellidos)) creado_por
+     FROM animal_compartido ac
+     JOIN animal a ON a.id_animal=ac.id_animal AND a.deleted_at IS NULL
+     JOIN usuario u ON u.id_usuario=ac.creado_por
+     WHERE ac.activo=TRUE AND ac.revocado_at IS NULL
+     ORDER BY ac.created_at DESC`)).rows.map((row) => ({ ...row, url: sharedAnimalUrl(row.token) }));
+    return ok(res, rows);
+}));
+animalsRouter.delete('/enlaces-publicos/:shareId', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
+    if (!req.user.roles.includes('ADMINISTRADOR'))
+        throw new ForbiddenError('Solo un administrador puede desactivar enlaces creados por otros usuarios.');
+    const result = await pool.query(`UPDATE animal_compartido SET activo=FALSE,revocado_at=NOW(),updated_at=NOW()
+     WHERE id_animal_compartido=$1 AND activo=TRUE AND revocado_at IS NULL`, [z.string().uuid().parse(routeParam(req.params.shareId, 'shareId'))]);
+    if (!result.rowCount)
+        throw new NotFoundError('El enlace público ya no está activo.');
+    return noContent(res);
+}));
 animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
     const result = await pool.query(`SELECT a.*,e.nombre especie,oa.nombre origen,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
       mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
@@ -296,6 +317,7 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
        ORDER BY ta.fecha_aplicacion DESC LIMIT 1) ultimo_tratamiento,
       (SELECT jsonb_build_object(
         'id_movimiento',mv.id_movimiento,
+        'tipo',mv.tipo_movimiento,
         'fecha',COALESCE(md.aplicado_en,mv.aplicado_en,mv.fecha_movimiento),
         'ubicacion_origen',uo.nombre,'ubicacion_destino',ud.nombre,
         'grupo_origen',go.nombre,'grupo_destino',gd.nombre,
@@ -324,6 +346,12 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       LEFT JOIN ubicacion ace_u ON ace_u.id_ubicacion=ace.id_ubicacion_destino
       LEFT JOIN grupo ace_g ON ace_g.id_grupo=ace.id_grupo_destino
       WHERE ace.id_animal=a.id_animal AND ace.deleted_at IS NULL),'[]'::jsonb) eventos_condicion,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_condicion_salud',cs.id_condicion_salud,'descripcion',cs.descripcion,'estado',cs.estado,
+        'fecha_deteccion',cs.fecha_deteccion::text,'tipo',tcs.nombre
+      ) ORDER BY cs.fecha_deteccion DESC)
+      FROM condicion_salud cs LEFT JOIN tipo_condicion_salud tcs ON tcs.id_tipo_condicion_salud=cs.id_tipo_condicion_salud
+      WHERE cs.id_animal=a.id_animal AND cs.deleted_at IS NULL AND cs.estado<>'RESUELTA'),'[]'::jsonb) condiciones_salud_activas,
       CASE WHEN a.sexo='HEMBRA' THEN (SELECT COUNT(*)::int FROM parto hp
         WHERE hp.id_madre=a.id_animal AND hp.deleted_at IS NULL) ELSE 0 END total_partos,
       (SELECT COUNT(*)::int
@@ -367,12 +395,21 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_prenez',rp.id_prenez,'fecha',rp.fecha_confirmacion::text,'estado',rp.estado,
         'metodo',rp.metodo_embarazo,'rol',CASE WHEN rp.id_vaca=a.id_animal THEN 'VACA' ELSE 'PADRE' END,
-        'contraparte',CASE WHEN rp.id_vaca=a.id_animal THEN rpf.nombre ELSE rpv.nombre END,
+        'contraparte',CASE WHEN rp.id_vaca=a.id_animal THEN COALESCE(rpf.nombre,rp.padre_externo) ELSE rpv.nombre END,
         'fecha_parto_tentativa',rp.fecha_parto_tentativa::text
       ) ORDER BY rp.fecha_confirmacion DESC)
       FROM prenez rp JOIN animal rpv ON rpv.id_animal=rp.id_vaca
       LEFT JOIN animal rpf ON rpf.id_animal=rp.id_padre
       WHERE rp.deleted_at IS NULL AND (rp.id_vaca=a.id_animal OR rp.id_padre=a.id_animal)),'[]'::jsonb) historial_preneces,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id_servicio_reproductivo',sr.id_servicio_reproductivo,'fecha',sr.fecha::text,'tipo',sr.tipo,
+        'rol',CASE WHEN sr.id_vaca=a.id_animal THEN 'RECEPTORA' WHEN sr.id_padre=a.id_animal THEN 'PADRE' ELSE 'DONANTE' END,
+        'receptora',srv.nombre,'padre',COALESCE(srp.nombre,sr.padre_externo),'donante',COALESCE(srd.nombre,sr.donante_externa),
+        'codigo_material',sr.codigo_material,'tecnico',sr.tecnico,'observaciones',sr.observaciones
+      ) ORDER BY sr.fecha DESC,sr.created_at DESC)
+      FROM servicio_reproductivo sr JOIN animal srv ON srv.id_animal=sr.id_vaca
+      LEFT JOIN animal srp ON srp.id_animal=sr.id_padre LEFT JOIN animal srd ON srd.id_animal=sr.id_donante
+      WHERE sr.deleted_at IS NULL AND (sr.id_vaca=a.id_animal OR sr.id_padre=a.id_animal OR sr.id_donante=a.id_animal)),'[]'::jsonb) historial_servicios_reproductivos,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_aborto',ra.id_aborto,'fecha',ra.fecha::text,'causa',ra.causa,
         'meses_gestacion',ra.meses_gestacion,'descripcion',ra.descripcion,'id_prenez',ra.id_prenez
