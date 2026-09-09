@@ -93,6 +93,14 @@ function renderValue(value: unknown, format?: MetricDefinition['format']) {
   return formatNumber(Number(value ?? 0));
 }
 
+function sanitizeConfiguration(value: DashboardConfiguration): DashboardConfiguration {
+  return Object.fromEntries(modules.flatMap((module)=>{
+    const allowed=new Set(module.metrics.map((metric)=>metric.key));
+    const selected=(value[module.key]??[]).filter((key)=>allowed.has(key));
+    return selected.length?[[module.key,[...new Set(selected)]]]:[];
+  })) as DashboardConfiguration;
+}
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const { hasPermission, user } = useAuth();
@@ -114,7 +122,7 @@ export function DashboardPage() {
   }, [settingsOpen]);
 
   const save = useMutation({
-    mutationFn: () => apiRequest('/dashboard/preferencias', { method: 'PATCH', body: { configuracion: draft } }),
+    mutationFn: () => apiRequest('/dashboard/preferencias', { method: 'PATCH', body: { configuracion: sanitizeConfiguration(draft) } }),
     onSuccess: () => {
       toast.show('Panel personalizado.');
       setSettingsOpen(false);

@@ -14,13 +14,13 @@ import type { Birth, CatalogItem, GenericRecord, Group, HeatRecord, Location, Ow
 import { currentDateInput, dateInputValue, formatAge, formatDate, formatNumber, humanizeCode, nullIfEmpty, numberOrNull } from '../../utils';
 
 type Tab = 'heats' | 'pregnancies' | 'upcoming' | 'births' | 'abortions';
-type ReproductionAnimal = { id_animal: string; nombre: string; codigo_arete: string | null; fecha_nacimiento: string | null; id_especie: string; id_categoria_animal: string; categoria_codigo: string; categoria: string };
-type ReproductionOptions = { hembras: ReproductionAnimal[]; machos: ReproductionAnimal[] };
+type ReproductionAnimal = { id_animal: string; nombre: string; codigo_arete: string | null; fecha_nacimiento: string | null; id_especie: string; id_categoria_animal: string; categoria_codigo: string; categoria: string; prenez_confirmada?:boolean };
+type ReproductionOptions = { hembras: ReproductionAnimal[]; hembras_prenez?:ReproductionAnimal[]; machos: ReproductionAnimal[] };
 
 const localToday = currentDateInput;
 
-interface HeatForm { id_celo?: string; id_vaca: string; id_toro: string; fecha_inicio: string; fecha_fin: string; observaciones: string }
-const emptyHeat = (): HeatForm => ({ id_vaca: '', id_toro: '', fecha_inicio: localToday(), fecha_fin: '', observaciones: '' });
+interface HeatForm { id_celo?: string; id_vaca: string; id_toro: string; fecha_inicio: string; fecha_fin: string; es_falso?:boolean; observaciones: string }
+const emptyHeat = (): HeatForm => ({ id_vaca: '', id_toro: '', fecha_inicio: localToday(), fecha_fin: '', es_falso:false, observaciones: '' });
 
 interface PregnancyForm {
   id_prenez?: string;
@@ -80,7 +80,7 @@ export function BirthsPage() {
   const groups = useQuery({ queryKey: ['groups', 'birth'], queryFn: () => apiRequest<Group[]>('/grupos?limit=100') });
   const locations = useQuery({ queryKey: ['locations', 'birth'], queryFn: () => apiRequest<Location[]>('/ubicaciones') });
 
-  const scopedFemales = options.data?.hembras.filter((item) => isInOwnershipScope(item.categoria_codigo, ownershipScope)) ?? [];
+  const scopedFemales = options.data?.hembras.filter((item) => isInOwnershipScope(item.categoria_codigo, ownershipScope)&&(!pregnancyForm||!item.prenez_confirmada||item.id_animal===pregnancyForm.id_vaca)) ?? [];
   const scopedMales = options.data?.machos.filter((item) => isInOwnershipScope(item.categoria_codigo, ownershipScope)) ?? [];
   const heatList = useListControls({ items: (heats.data ?? []).filter((item) => isInOwnershipScope(item.categoria_codigo, ownershipScope)), storageKey: 'reproduction-heats', searchText: (item) => `${item.vaca} ${item.codigo_arete ?? ''} ${item.toro ?? ''}`, dateValue: (item) => item.fecha_inicio, nameValue: (item) => item.vaca });
   const pregnancyList = useListControls({ items: (pregnancies.data ?? []).filter((item) => isInOwnershipScope(item.categoria_codigo, ownershipScope)), storageKey: 'reproduction-pregnancies', searchText: (item) => `${item.vaca} ${item.codigo_arete ?? ''} ${item.padre ?? ''} ${item.metodo_confirmacion}`, dateValue: (item) => item.fecha_confirmacion, nameValue: (item) => item.vaca });
@@ -100,7 +100,7 @@ export function BirthsPage() {
       if (!heatForm?.id_vaca || !heatForm.fecha_inicio) throw new Error('Selecciona la vaca y la fecha de inicio.');
       return apiRequest(`/reproduccion/celos${heatForm.id_celo ? `/${heatForm.id_celo}` : ''}`, {
         method: heatForm.id_celo ? 'PATCH' : 'POST',
-        body: { id_vaca: heatForm.id_vaca, id_toro: heatForm.id_toro || null, fecha_inicio: heatForm.fecha_inicio, fecha_fin: heatForm.fecha_fin || null, observaciones: nullIfEmpty(heatForm.observaciones) },
+        body: { id_vaca: heatForm.id_vaca, id_toro: heatForm.id_toro || null, fecha_inicio: heatForm.fecha_inicio, fecha_fin: heatForm.fecha_fin || null, es_falso:Boolean(heatForm.es_falso), observaciones: nullIfEmpty(heatForm.observaciones) },
       });
     },
     onSuccess: () => { toast.show(heatForm?.id_celo ? 'Celo actualizado.' : 'Celo registrado.'); setHeatForm(null); refreshReproduction(); },

@@ -40,10 +40,10 @@ function lines(ctx:CanvasRenderingContext2D,value:string,maxWidth:number,maxLine
 }
 
 function drawField(ctx:CanvasRenderingContext2D,x:number,y:number,width:number,label:string,value:string){
-  roundedRect(ctx,x,y,width,132,24);ctx.fillStyle='#ffffff';ctx.fill();ctx.strokeStyle='#d9e8df';ctx.lineWidth=2;ctx.stroke();
-  ctx.fillStyle='#718077';ctx.font='500 25px sans-serif';ctx.fillText(label,x+28,y+40);
+  roundedRect(ctx,x,y,width,120,24);ctx.fillStyle='#ffffff';ctx.fill();ctx.strokeStyle='#d9e8df';ctx.lineWidth=2;ctx.stroke();
+  ctx.fillStyle='#718077';ctx.font='500 24px sans-serif';ctx.fillText(label,x+28,y+36);
   ctx.fillStyle='#183025';ctx.font='700 31px sans-serif';
-  const rows=lines(ctx,value||'—',width-56,2);rows.forEach((row,index)=>ctx.fillText(row,x+28,y+82+index*35));
+  const rows=lines(ctx,value||'—',width-56,2);rows.forEach((row,index)=>ctx.fillText(row,x+28,y+76+index*32));
 }
 
 async function loadPicture(url?:string|null){
@@ -81,15 +81,19 @@ async function fichaCanvas(animal:AnimalFichaData){
   ctx.fillStyle='#aec2b7';ctx.font='400 27px sans-serif';ctx.fillText('Sistema de Gestión Bovina',72,214);
 
   const [picture,coverPicture]=await Promise.all([loadPicture(animal.fotoPerfil),loadPicture(animal.fotoPortada)]);
-  const photoX=72,photoY=238,photoSize=286;
-  roundedRect(ctx,photoX,photoY,photoSize,photoSize,42);ctx.fillStyle='#dff3e7';ctx.fill();ctx.save();roundedRect(ctx,photoX,photoY,photoSize,photoSize,42);ctx.clip();
-  if(picture){drawCoverPicture(ctx,picture,photoX,photoY,photoSize,photoSize);}else{ctx.fillStyle='#2c9d66';ctx.font='800 112px sans-serif';ctx.textAlign='center';ctx.fillText(animal.nombre.slice(0,1).toUpperCase(),photoX+photoSize/2,photoY+184);ctx.textAlign='left';}ctx.restore();
-  ctx.strokeStyle='#ffffff';ctx.lineWidth=10;roundedRect(ctx,photoX,photoY,photoSize,photoSize,42);ctx.stroke();
+  const coverX=72,coverY=238,coverWidth=1096,coverHeight=380;
+  roundedRect(ctx,coverX,coverY,coverWidth,coverHeight,34);ctx.fillStyle='#dfece5';ctx.fill();ctx.save();roundedRect(ctx,coverX,coverY,coverWidth,coverHeight,34);ctx.clip();
+  if(coverPicture)drawCoverPicture(ctx,coverPicture,coverX,coverY,coverWidth,coverHeight);else{const gradient=ctx.createLinearGradient(coverX,coverY,coverX+coverWidth,coverY+coverHeight);gradient.addColorStop(0,'#174a34');gradient.addColorStop(1,'#2c9d66');ctx.fillStyle=gradient;ctx.fillRect(coverX,coverY,coverWidth,coverHeight);}
+  const shade=ctx.createLinearGradient(0,coverY+180,0,coverY+coverHeight);shade.addColorStop(0,'rgba(0,0,0,0)');shade.addColorStop(1,'rgba(0,0,0,.62)');ctx.fillStyle=shade;ctx.fillRect(coverX,coverY,coverWidth,coverHeight);ctx.restore();
 
-  ctx.fillStyle='#173126';drawFittedText(ctx,animal.nombre,398,374,420);
-  ctx.fillStyle='#60736a';ctx.font='500 27px sans-serif';ctx.fillText(animal.codigoArete?`Arete ${animal.codigoArete}`:'Sin arete registrado',398,421);
-  roundedRect(ctx,398,452,240,52,26);ctx.fillStyle='#dff3e7';ctx.fill();ctx.fillStyle='#187d50';ctx.font='700 24px sans-serif';ctx.fillText(humanizeCode(animal.estado||'ACTIVO'),424,486);
-  if(coverPicture){const coverX=846,coverY=304,coverWidth=322,coverHeight=220;roundedRect(ctx,coverX,coverY,coverWidth,coverHeight,28);ctx.fillStyle='#dfece5';ctx.fill();ctx.save();roundedRect(ctx,coverX,coverY,coverWidth,coverHeight,28);ctx.clip();drawCoverPicture(ctx,coverPicture,coverX,coverY,coverWidth,coverHeight);const shade=ctx.createLinearGradient(0,coverY+145,0,coverY+coverHeight);shade.addColorStop(0,'rgba(0,0,0,0)');shade.addColorStop(1,'rgba(0,0,0,.68)');ctx.fillStyle=shade;ctx.fillRect(coverX,coverY,coverWidth,coverHeight);ctx.restore();ctx.fillStyle='#ffffff';ctx.font='700 21px sans-serif';ctx.fillText('Última foto de portada',coverX+20,coverY+coverHeight-20);}
+  const photoX=100,photoY=506,photoSize=190;
+  roundedRect(ctx,photoX,photoY,photoSize,photoSize,38);ctx.fillStyle='#dff3e7';ctx.fill();ctx.save();roundedRect(ctx,photoX,photoY,photoSize,photoSize,38);ctx.clip();
+  if(picture){drawCoverPicture(ctx,picture,photoX,photoY,photoSize,photoSize);}else{ctx.fillStyle='#2c9d66';ctx.font='800 82px sans-serif';ctx.textAlign='center';ctx.fillText(animal.nombre.slice(0,1).toUpperCase(),photoX+photoSize/2,photoY+125);ctx.textAlign='left';}ctx.restore();
+  ctx.strokeStyle='#ffffff';ctx.lineWidth=9;roundedRect(ctx,photoX,photoY,photoSize,photoSize,38);ctx.stroke();
+
+  ctx.fillStyle='#173126';drawFittedText(ctx,animal.nombre,326,681,700);
+  ctx.fillStyle='#60736a';ctx.font='500 27px sans-serif';ctx.fillText(animal.codigoArete?`Arete ${animal.codigoArete}`:'Sin arete registrado',326,724);
+  roundedRect(ctx,326,746,240,48,24);ctx.fillStyle='#dff3e7';ctx.fill();ctx.fillStyle='#187d50';ctx.font='700 23px sans-serif';ctx.fillText(humanizeCode(animal.estado||'ACTIVO'),352,778);
 
   const breed=animal.razas?.length?animal.razas.map((item)=>`${item.nombre}${item.porcentaje!=null?` ${formatNumber(item.porcentaje)}%`:''}`).join(', '):'Sin registrar';
   const colors=animal.colores?.length?animal.colores.map((item)=>item.nombre).join(', '):'Sin registrar';
@@ -98,9 +102,9 @@ async function fichaCanvas(animal:AnimalFichaData){
   const birth=animal.fechaNacimiento?`${formatDate(animal.fechaNacimiento)} · ${formatAge(animal.fechaNacimiento)}`:'Sin registrar';
   const reproduction=animal.sexo==='HEMBRA'?[animal.prenezConfirmada?'Preñez confirmada':null,animal.totalPartos!=null?`${animal.totalPartos} parto${animal.totalPartos===1?'':'s'}`:null,animal.totalCrias!=null?`${animal.totalCrias} cría${animal.totalCrias===1?'':'s'}`:null].filter(Boolean).join(' · ')||'Sin registros':animal.totalCrias!=null?`${animal.totalCrias} cría${animal.totalCrias===1?'':'s'} registrada${animal.totalCrias===1?'':'s'}`:'Sin registros';
   const fields:[string,string][]=[['Especie y sexo',[animal.especie,animal.sexo==='HEMBRA'?'Hembra':animal.sexo==='MACHO'?'Macho':null].filter(Boolean).join(' · ')||'—'],['Nacimiento y edad',birth],['Raza',breed],['Color',colors],['Último peso',weight],['Padres',parents],['Origen',animal.origen||'Sin registrar'],['Resumen reproductivo',reproduction],['Fierro o marquilla',animal.marquilla||'Sin registrar']];
-  let y=566;for(let index=0;index<fields.length;index+=1){const column=index%2;const row=Math.floor(index/2);drawField(ctx,72+column*558,y+row*154,column===0&&index===fields.length-1?1096:522,fields[index][0],fields[index][1]);}
-  y+=Math.ceil(fields.length/2)*154+12;
-  if(animal.descripcion){roundedRect(ctx,72,y,1096,170,24);ctx.fillStyle='#ffffff';ctx.fill();ctx.strokeStyle='#d9e8df';ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#718077';ctx.font='500 25px sans-serif';ctx.fillText('Descripción',100,y+40);ctx.fillStyle='#183025';ctx.font='500 28px sans-serif';lines(ctx,animal.descripcion,1040,3).forEach((row,index)=>ctx.fillText(row,100,y+82+index*34));}
+  let y=820;for(let index=0;index<fields.length;index+=1){const column=index%2;const row=Math.floor(index/2);drawField(ctx,72+column*558,y+row*136,column===0&&index===fields.length-1?1096:522,fields[index][0],fields[index][1]);}
+  y+=Math.ceil(fields.length/2)*136+4;
+  if(animal.descripcion){roundedRect(ctx,72,y,1096,118,24);ctx.fillStyle='#ffffff';ctx.fill();ctx.strokeStyle='#d9e8df';ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#718077';ctx.font='500 24px sans-serif';ctx.fillText('Descripción',100,y+36);ctx.fillStyle='#183025';ctx.font='500 27px sans-serif';lines(ctx,animal.descripcion,1040,2).forEach((row,index)=>ctx.fillText(row,100,y+75+index*31));}
   ctx.fillStyle='#718077';ctx.font='400 22px sans-serif';ctx.fillText(`Ficha generada el ${new Intl.DateTimeFormat('es-EC',{dateStyle:'long'}).format(new Date())}`,72,HEIGHT-60);
   ctx.textAlign='right';ctx.fillText('Información proporcionada por SGB',WIDTH-72,HEIGHT-60);ctx.textAlign='left';
   return canvas;

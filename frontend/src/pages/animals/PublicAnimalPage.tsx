@@ -20,7 +20,10 @@ export function PublicAnimalPage(){
   return <main className="public-animal-page">
     <header className="public-animal-brand"><img src="/branding/logo-sgb-full.png" alt="SGB"/><span>Ficha pública verificada</span></header>
     <Card className="public-animal-card">
-      <section className="public-animal-hero">{animal.foto_perfil?<img src={animal.foto_perfil} alt={animal.nombre}/>:<span><Beef size={70}/></span>}<div><Badge tone={animal.estado==='ACTIVO'?'success':'neutral'}>{humanizeCode(animal.estado)}</Badge><h1>{animal.nombre}</h1><p>{animal.codigo_arete?`Arete ${animal.codigo_arete}`:'Sin arete registrado'}</p></div></section>
+      <section className="public-animal-hero">
+        {coverPhotos[0]?<button type="button" className="public-animal-cover" onClick={()=>setSelectedPhoto(coverPhotos[0])}><img src={coverPhotos[0].secure_url} alt={`Portada de ${animal.nombre}`}/><Maximize2 size={20}/></button>:<div className="public-animal-cover public-animal-cover-empty"><Beef size={72}/></div>}
+        <div className="public-animal-identity"><span className="public-animal-avatar">{animal.foto_perfil?<img src={animal.foto_perfil} alt={animal.nombre}/>:<Beef size={52}/>}</span><div><Badge tone={animal.estado==='ACTIVO'?'success':'neutral'}>{humanizeCode(animal.estado)}</Badge><h1>{animal.nombre}</h1><p>{animal.codigo_arete?`Arete ${animal.codigo_arete}`:'Sin arete registrado'}</p></div></div>
+      </section>
       {animal.descripcion?<p className="public-animal-description">{animal.descripcion}</p>:null}
       <section className="public-animal-info">
         <PublicFact icon={Beef} label="Especie y sexo" value={`${animal.especie} · ${animal.sexo==='HEMBRA'?'Hembra':'Macho'}`}/>
@@ -35,7 +38,7 @@ export function PublicAnimalPage(){
       <section className="public-animal-download"><div><Download size={20}/><span><strong>Descargar ficha</strong><small>Guarda esta información para verla o compartirla.</small></span></div><div><Button variant="secondary" loading={downloading==='png'} disabled={Boolean(downloading)} onClick={()=>void download('png')}><FileImage size={17}/>PNG</Button><Button loading={downloading==='pdf'} disabled={Boolean(downloading)} onClick={()=>void download('pdf')}><FileText size={17}/>PDF</Button></div></section>
     </Card>
     {selectedPhoto?<Modal title={selectedPhoto.descripcion||`Foto de ${animal.nombre}`} wide onClose={()=>setSelectedPhoto(null)} footer={<Button variant="ghost" onClick={()=>setSelectedPhoto(null)}>Cerrar</Button>}><div className="public-animal-photo-view"><img src={selectedPhoto.secure_url} alt={selectedPhoto.descripcion||animal.nombre}/>{selectedPhoto.fecha_toma?<small>{formatDate(selectedPhoto.fecha_toma)}</small>:null}</div></Modal>:null}
-    <footer>La ficha fue compartida desde SGB. No incluye información interna de la finca.</footer>
+    <footer>Ficha compartida desde SGB · Sistema de Gestión Bovina.</footer>
   </main>;
 }
 

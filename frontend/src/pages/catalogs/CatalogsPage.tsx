@@ -36,6 +36,7 @@ export function CatalogsPage() {
   const categories = useCatalog('categorias-agroquimicos');
   const units = useCatalog('unidades');
   const administrationRoutes = useCatalog('vias');
+  const treatmentTypes = useCatalog('tipos-tratamiento');
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CatalogForm>(emptyForm);
@@ -50,7 +51,7 @@ export function CatalogsPage() {
     if (catalog === 'tipos-grupo') return ['id_especie','codigo','nombre','descripcion'];
     if (catalog === 'tipos-limpieza') return ['codigo','nombre','requiere_productos','descripcion'];
     if (catalog === 'agroquimicos') return ['id_categoria_producto','nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','instrucciones'];
-    if (catalog === 'medicamentos') return ['nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','dosis_sugerida','indicaciones','dias_retiro_leche','dias_retiro_carne'];
+    if (catalog === 'medicamentos') return ['id_tipo_tratamiento','nombre_comercial','principio_activo','fabricante','id_unidad_predeterminada','dosis_sugerida','indicaciones','dias_retiro_leche','dias_retiro_carne'];
     if (catalog === 'productos-venta') return ['codigo','nombre','id_unidad_venta','id_unidad_complementaria','descripcion'];
     if (catalog === 'compradores') return ['codigo','nombre','contacto','destino','descripcion'];
     if (catalog === 'tipos-producto-compra') return ['codigo','nombre','es_animal','descripcion'];
@@ -59,6 +60,8 @@ export function CatalogsPage() {
 
   const save = useMutation({
     mutationFn: () => {
+      if(catalog==='medicamentos'&&!form.id_tipo_tratamiento)throw new Error('Selecciona el tipo de tratamiento del medicamento.');
+      if(catalog==='medicamentos'&&(!Array.isArray(form.id_vias_administracion)||!form.id_vias_administracion.length))throw new Error('Selecciona al menos una vía de administración.');
       const body: Record<string, unknown> = { activo: form.activo };
       for (const field of fields) {
         const value = form[field];
@@ -96,6 +99,7 @@ export function CatalogsPage() {
   const displayValue = (item: CatalogItem, field: string) => {
     if (field === 'id_especie') return itemLabel(species.data?.find((value) => itemId(value) === String(item[field])) ?? { nombre: '—' });
     if (field === 'id_categoria_producto') return itemLabel(categories.data?.find((value) => itemId(value) === String(item[field])) ?? { nombre: '—' });
+    if (field === 'id_tipo_tratamiento') return itemLabel(treatmentTypes.data?.find((value) => itemId(value) === String(item[field])) ?? { nombre: 'Sin clasificar' });
     if (field === 'id_unidad_predeterminada' || field === 'id_unidad_venta' || field === 'id_unidad_complementaria') return itemLabel(units.data?.find((value) => itemId(value) === String(item[field])) ?? { nombre: '—' });
     if (field === 'requiere_productos') return item[field] ? 'Sí' : 'No';
     if (field === 'es_animal') return item[field] ? 'Crea un animal' : 'Producto o insumo';
@@ -116,6 +120,7 @@ export function CatalogsPage() {
       const label = field.replace(/^id_/, '').replaceAll('_', ' ');
       if (field === 'id_especie') return <Field key={field} label="Especie" required={catalog === 'razas'}><Select value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">Sin especie específica</option>{species.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>;
       if (field === 'id_categoria_producto') return <Field key={field} label="Categoría" required><Select value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">Selecciona</option>{categories.data?.map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>;
+      if (field === 'id_tipo_tratamiento') return <Field key={field} label="Tipo de tratamiento" required><Select required value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">Selecciona</option>{treatmentTypes.data?.filter((item)=>item.activo!==false).map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field>;
       if (field === 'id_unidad_predeterminada' || field === 'id_unidad_venta' || field === 'id_unidad_complementaria') { const complementary=field==='id_unidad_complementaria'; const saleUnit=field==='id_unidad_venta'; const medicationUnit=catalog==='medicamentos'&&field==='id_unidad_predeterminada'; return <Field key={field} label={complementary?'Unidad complementaria':saleUnit?'Unidad de venta':'Unidad predeterminada'} required={saleUnit||medicationUnit}><Select required={saleUnit||medicationUnit} value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">{saleUnit||medicationUnit?'Selecciona una unidad':complementary?'Sin campo complementario':'Sin unidad'}</option>{units.data?.filter((item) => item.activo !== false&&(!complementary||itemId(item)!==String(form.id_unidad_venta??''))).map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)} {item.simbolo ? `(${item.simbolo})` : ''}</option>)}</Select>{complementary?<small className="muted">Si la configuras, la venta pedirá también esta cantidad (por ejemplo, marquetas).</small>:null}</Field>; }
       if (field === 'requiere_productos') return <label key={field} className="checkbox"><input type="checkbox" checked={Boolean(form[field])} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.checked }))} />Requiere registrar productos aplicados</label>;
       if (field === 'es_animal') return <label key={field} className="checkbox"><input type="checkbox" checked={Boolean(form[field])} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.checked }))} />Esta compra crea un nuevo animal</label>;
