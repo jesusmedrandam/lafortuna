@@ -77,7 +77,7 @@ export async function notifyAvailableAppUpdate() {
                 tipo: 'ACTUALIZACION_APP_DISPONIBLE', categoria: 'SISTEMA', prioridad: 'IMPORTANTE',
                 titulo: `SGB ${release.version} disponible`,
                 mensaje: 'Ya puedes instalar la nueva versión desde Configuración. Incluye las últimas mejoras y correcciones.',
-                entidadTipo: 'VERSION_APP', entidadId: release.version, ruta: '/configuracion', usuarios: users,
+                ruta: '/configuracion', usuarios: users,
                 datos: {
                     version_objetivo: release.version,
                     apk_url: release.apkUrl,

@@ -10,15 +10,15 @@ const dashboardConfigurationSchema = z.object({
     animales: z.array(z.enum(['en_propiedad', 'fuera_propiedad', 'activos', 'inactivos'])).max(4).optional(),
     ingresos: z.array(z.enum(['semana', 'mes', 'anio'])).max(3).optional(),
     egresos: z.array(z.enum(['semana', 'mes', 'anio'])).max(3).optional(),
-    ventas: z.array(z.enum(['semana', 'mes', 'anio'])).max(3).optional(),
-    produccion: z.array(z.enum(['hoy', 'semana', 'mes'])).max(3).optional(),
-    tratamientos: z.array(z.enum(['hoy', 'semana', 'mes'])).max(3).optional(),
-    traslados: z.array(z.enum(['semana', 'mes', 'anio'])).max(3).optional(),
+    ventas: z.array(z.enum(['semana', 'mes', 'anio', 'ventas_animales_mes', 'animales_vendidos_mes', 'ventas_productos_mes'])).max(6).optional(),
+    produccion: z.array(z.enum(['hoy', 'ayer', 'semana', 'mes', 'vacas_hoy', 'promedio_vaca_hoy', 'tanque_hoy'])).max(7).optional(),
+    tratamientos: z.array(z.enum(['hoy', 'semana', 'mes', 'animales_mes', 'medicamentos_mes'])).max(5).optional(),
+    traslados: z.array(z.enum(['semana', 'mes', 'anio', 'rotaciones_mes', 'cambios_grupo_mes', 'propiedades_mes', 'combinados_mes', 'grupos_completos_mes', 'selecciones_manuales_mes', 'animales_mes'])).max(10).optional(),
     potreros: z.array(z.enum(['total', 'ocupados', 'descanso'])).max(3).optional(),
     grupos: z.array(z.enum(['total', 'con_animales', 'animales_agrupados'])).max(3).optional(),
     reproduccion: z.array(z.enum(['celos_abiertos', 'preneces_confirmadas', 'proximos_partos', 'partos_mes'])).max(4).optional(),
     sexo: z.array(z.enum(['hembras', 'machos'])).max(2).optional(),
-}).strict();
+});
 dashboardRouter.get('/preferencias', requirePermission('DASHBOARD_CONSULTAR'), asyncHandler(async (req, res) => {
     const row = (await pool.query('SELECT configuracion FROM usuario_preferencia_panel WHERE id_usuario=$1', [req.user.id])).rows[0];
     return ok(res, { configuracion: row?.configuracion ?? null });
@@ -56,18 +56,34 @@ dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncH
        (SELECT COUNT(*) FROM venta_producto WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('month',CURRENT_DATE)))::int ventas_mes,
       ((SELECT COUNT(*) FROM venta_animal WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('year',CURRENT_DATE))+
        (SELECT COUNT(*) FROM venta_producto WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('year',CURRENT_DATE)))::int ventas_anio,
+      (SELECT COUNT(*)::int FROM venta_animal WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('month',CURRENT_DATE)) ventas_animales_mes,
+      (SELECT COUNT(*)::int FROM venta_animal_detalle d JOIN venta_animal v ON v.id_venta=d.id_venta WHERE d.deleted_at IS NULL AND v.deleted_at IS NULL AND v.estado='COMPLETADA' AND v.fecha_venta>=date_trunc('month',CURRENT_DATE)) animales_vendidos_mes,
+      (SELECT COUNT(*)::int FROM venta_producto WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('month',CURRENT_DATE)) ventas_productos_mes,
 
       (SELECT COALESCE(SUM(litros),0)::numeric FROM produccion_leche WHERE deleted_at IS NULL AND fecha_produccion=CURRENT_DATE) produccion_hoy,
+      (SELECT COALESCE(SUM(litros),0)::numeric FROM produccion_leche WHERE deleted_at IS NULL AND fecha_produccion=CURRENT_DATE-1) produccion_ayer,
       (SELECT COALESCE(SUM(litros),0)::numeric FROM produccion_leche WHERE deleted_at IS NULL AND fecha_produccion>=date_trunc('week',CURRENT_DATE)::date) produccion_semana,
       (SELECT COALESCE(SUM(litros),0)::numeric FROM produccion_leche WHERE deleted_at IS NULL AND fecha_produccion>=date_trunc('month',CURRENT_DATE)::date) produccion_mes,
+      (SELECT COUNT(DISTINCT id_vaca)::int FROM produccion_leche WHERE deleted_at IS NULL AND fecha_produccion=CURRENT_DATE) vacas_hoy,
+      (SELECT COALESCE(AVG(total_vaca),0)::numeric FROM (SELECT SUM(litros) total_vaca FROM produccion_leche WHERE deleted_at IS NULL AND fecha_produccion=CURRENT_DATE GROUP BY id_vaca) pv) promedio_vaca_hoy,
+      (SELECT COALESCE(SUM(litros),0)::numeric FROM produccion_tanque WHERE deleted_at IS NULL AND fecha_produccion=CURRENT_DATE) tanque_hoy,
 
       (SELECT COUNT(*)::int FROM tratamiento_animal WHERE deleted_at IS NULL AND fecha_aplicacion::date=CURRENT_DATE) tratamientos_hoy,
       (SELECT COUNT(*)::int FROM tratamiento_animal WHERE deleted_at IS NULL AND fecha_aplicacion>=date_trunc('week',CURRENT_DATE)) tratamientos_semana,
       (SELECT COUNT(*)::int FROM tratamiento_animal WHERE deleted_at IS NULL AND fecha_aplicacion>=date_trunc('month',CURRENT_DATE)) tratamientos_mes,
+      (SELECT COUNT(DISTINCT id_animal)::int FROM tratamiento_animal WHERE deleted_at IS NULL AND fecha_aplicacion>=date_trunc('month',CURRENT_DATE)) tratamientos_animales_mes,
+      (SELECT COUNT(DISTINCT id_medicamento)::int FROM tratamiento_animal WHERE deleted_at IS NULL AND fecha_aplicacion>=date_trunc('month',CURRENT_DATE) AND id_medicamento IS NOT NULL) tratamientos_medicamentos_mes,
 
       (SELECT COUNT(*)::int FROM movimiento_animal WHERE deleted_at IS NULL AND estado='COMPLETADO' AND fecha_movimiento>=date_trunc('week',CURRENT_DATE)) traslados_semana,
       (SELECT COUNT(*)::int FROM movimiento_animal WHERE deleted_at IS NULL AND estado='COMPLETADO' AND fecha_movimiento>=date_trunc('month',CURRENT_DATE)) traslados_mes,
       (SELECT COUNT(*)::int FROM movimiento_animal WHERE deleted_at IS NULL AND estado='COMPLETADO' AND fecha_movimiento>=date_trunc('year',CURRENT_DATE)) traslados_anio,
+      (SELECT COUNT(*)::int FROM movimiento_animal WHERE deleted_at IS NULL AND estado='COMPLETADO' AND tipo_movimiento='UBICACION' AND fecha_movimiento>=date_trunc('month',CURRENT_DATE)) rotaciones_mes,
+      (SELECT COUNT(*)::int FROM movimiento_animal WHERE deleted_at IS NULL AND estado='COMPLETADO' AND tipo_movimiento='GRUPO' AND fecha_movimiento>=date_trunc('month',CURRENT_DATE)) cambios_grupo_mes,
+      (SELECT COUNT(*)::int FROM movimiento_animal WHERE deleted_at IS NULL AND estado='COMPLETADO' AND tipo_movimiento='PROPIEDAD' AND fecha_movimiento>=date_trunc('month',CURRENT_DATE)) propiedades_mes,
+      (SELECT COUNT(*)::int FROM movimiento_animal WHERE deleted_at IS NULL AND estado='COMPLETADO' AND tipo_movimiento='COMBINADO' AND fecha_movimiento>=date_trunc('month',CURRENT_DATE)) combinados_mes,
+      (SELECT COUNT(*)::int FROM movimiento_animal WHERE deleted_at IS NULL AND estado='COMPLETADO' AND modo_seleccion='GRUPO' AND fecha_movimiento>=date_trunc('month',CURRENT_DATE)) grupos_completos_mes,
+      (SELECT COUNT(*)::int FROM movimiento_animal WHERE deleted_at IS NULL AND estado='COMPLETADO' AND modo_seleccion='SELECCION_MANUAL' AND fecha_movimiento>=date_trunc('month',CURRENT_DATE)) selecciones_manuales_mes,
+      (SELECT COALESCE(SUM(total_seleccionados),0)::int FROM movimiento_animal WHERE deleted_at IS NULL AND estado='COMPLETADO' AND fecha_movimiento>=date_trunc('month',CURRENT_DATE)) animales_trasladados_mes,
 
       (SELECT COUNT(*)::int FROM potrero p JOIN ubicacion u ON u.id_ubicacion=p.id_ubicacion WHERE p.deleted_at IS NULL AND u.deleted_at IS NULL AND u.activo) potreros_total,
       (SELECT COUNT(DISTINCT p.id_potrero)::int FROM potrero p JOIN animal a ON a.id_ubicacion_actual=p.id_ubicacion
@@ -89,10 +105,10 @@ dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncH
         animales: { en_propiedad: row.animales_en_propiedad, fuera_propiedad: row.animales_fuera_propiedad, activos: row.animales_activos, inactivos: row.animales_inactivos },
         ingresos: { semana: row.ingresos_semana, mes: row.ingresos_mes, anio: row.ingresos_anio },
         egresos: { semana: row.egresos_semana, mes: row.egresos_mes, anio: row.egresos_anio },
-        ventas: { semana: row.ventas_semana, mes: row.ventas_mes, anio: row.ventas_anio },
-        produccion: { hoy: row.produccion_hoy, semana: row.produccion_semana, mes: row.produccion_mes },
-        tratamientos: { hoy: row.tratamientos_hoy, semana: row.tratamientos_semana, mes: row.tratamientos_mes },
-        traslados: { semana: row.traslados_semana, mes: row.traslados_mes, anio: row.traslados_anio },
+        ventas: { semana: row.ventas_semana, mes: row.ventas_mes, anio: row.ventas_anio, ventas_animales_mes: row.ventas_animales_mes, animales_vendidos_mes: row.animales_vendidos_mes, ventas_productos_mes: row.ventas_productos_mes },
+        produccion: { hoy: row.produccion_hoy, ayer: row.produccion_ayer, semana: row.produccion_semana, mes: row.produccion_mes, vacas_hoy: row.vacas_hoy, promedio_vaca_hoy: row.promedio_vaca_hoy, tanque_hoy: row.tanque_hoy },
+        tratamientos: { hoy: row.tratamientos_hoy, semana: row.tratamientos_semana, mes: row.tratamientos_mes, animales_mes: row.tratamientos_animales_mes, medicamentos_mes: row.tratamientos_medicamentos_mes },
+        traslados: { semana: row.traslados_semana, mes: row.traslados_mes, anio: row.traslados_anio, rotaciones_mes: row.rotaciones_mes, cambios_grupo_mes: row.cambios_grupo_mes, propiedades_mes: row.propiedades_mes, combinados_mes: row.combinados_mes, grupos_completos_mes: row.grupos_completos_mes, selecciones_manuales_mes: row.selecciones_manuales_mes, animales_mes: row.animales_trasladados_mes },
         potreros: { total: row.potreros_total, ocupados: row.potreros_ocupados, descanso: Math.max(0, Number(row.potreros_total) - Number(row.potreros_ocupados)) },
         grupos: { total: row.grupos_total, con_animales: row.grupos_con_animales, animales_agrupados: row.animales_agrupados },
         reproduccion: { celos_abiertos: row.celos_abiertos, preneces_confirmadas: row.preneces_confirmadas, proximos_partos: row.proximos_partos, partos_mes: row.partos_mes },
