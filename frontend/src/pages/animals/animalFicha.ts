@@ -20,6 +20,7 @@ export interface AnimalFichaData {
   totalCrias?:number|null;
   prenezConfirmada?:boolean;
   marquilla?:string|null;
+  generatedBy?:string|null;
 }
 
 type FichaFormat='png'|'pdf';
@@ -60,8 +61,14 @@ async function loadPicture(url?:string|null){
   return new Promise<HTMLImageElement|null>((resolve)=>{const image=new Image();image.crossOrigin='anonymous';image.onload=()=>resolve(image);image.onerror=()=>resolve(null);image.src=url;});
 }
 
-function drawCoverPicture(ctx:CanvasRenderingContext2D,picture:HTMLImageElement,x:number,y:number,width:number,height:number){
+function drawCroppedPicture(ctx:CanvasRenderingContext2D,picture:HTMLImageElement,x:number,y:number,width:number,height:number){
   const scale=Math.max(width/picture.naturalWidth,height/picture.naturalHeight);
+  const renderedWidth=picture.naturalWidth*scale;const renderedHeight=picture.naturalHeight*scale;
+  ctx.drawImage(picture,x+(width-renderedWidth)/2,y+(height-renderedHeight)/2,renderedWidth,renderedHeight);
+}
+
+function drawContainedPicture(ctx:CanvasRenderingContext2D,picture:HTMLImageElement,x:number,y:number,width:number,height:number){
+  const scale=Math.min(width/picture.naturalWidth,height/picture.naturalHeight);
   const renderedWidth=picture.naturalWidth*scale;const renderedHeight=picture.naturalHeight*scale;
   ctx.drawImage(picture,x+(width-renderedWidth)/2,y+(height-renderedHeight)/2,renderedWidth,renderedHeight);
 }
@@ -83,12 +90,12 @@ async function fichaCanvas(animal:AnimalFichaData){
   const [picture,coverPicture]=await Promise.all([loadPicture(animal.fotoPerfil),loadPicture(animal.fotoPortada)]);
   const coverX=72,coverY=238,coverWidth=1096,coverHeight=380;
   roundedRect(ctx,coverX,coverY,coverWidth,coverHeight,34);ctx.fillStyle='#dfece5';ctx.fill();ctx.save();roundedRect(ctx,coverX,coverY,coverWidth,coverHeight,34);ctx.clip();
-  if(coverPicture)drawCoverPicture(ctx,coverPicture,coverX,coverY,coverWidth,coverHeight);else{const gradient=ctx.createLinearGradient(coverX,coverY,coverX+coverWidth,coverY+coverHeight);gradient.addColorStop(0,'#174a34');gradient.addColorStop(1,'#2c9d66');ctx.fillStyle=gradient;ctx.fillRect(coverX,coverY,coverWidth,coverHeight);}
+  if(coverPicture)drawContainedPicture(ctx,coverPicture,coverX,coverY,coverWidth,coverHeight);else{const gradient=ctx.createLinearGradient(coverX,coverY,coverX+coverWidth,coverY+coverHeight);gradient.addColorStop(0,'#174a34');gradient.addColorStop(1,'#2c9d66');ctx.fillStyle=gradient;ctx.fillRect(coverX,coverY,coverWidth,coverHeight);}
   const shade=ctx.createLinearGradient(0,coverY+180,0,coverY+coverHeight);shade.addColorStop(0,'rgba(0,0,0,0)');shade.addColorStop(1,'rgba(0,0,0,.62)');ctx.fillStyle=shade;ctx.fillRect(coverX,coverY,coverWidth,coverHeight);ctx.restore();
 
   const photoX=100,photoY=506,photoSize=190;
   roundedRect(ctx,photoX,photoY,photoSize,photoSize,38);ctx.fillStyle='#dff3e7';ctx.fill();ctx.save();roundedRect(ctx,photoX,photoY,photoSize,photoSize,38);ctx.clip();
-  if(picture){drawCoverPicture(ctx,picture,photoX,photoY,photoSize,photoSize);}else{ctx.fillStyle='#2c9d66';ctx.font='800 82px sans-serif';ctx.textAlign='center';ctx.fillText(animal.nombre.slice(0,1).toUpperCase(),photoX+photoSize/2,photoY+125);ctx.textAlign='left';}ctx.restore();
+  if(picture){drawCroppedPicture(ctx,picture,photoX,photoY,photoSize,photoSize);}else{ctx.fillStyle='#2c9d66';ctx.font='800 82px sans-serif';ctx.textAlign='center';ctx.fillText(animal.nombre.slice(0,1).toUpperCase(),photoX+photoSize/2,photoY+125);ctx.textAlign='left';}ctx.restore();
   ctx.strokeStyle='#ffffff';ctx.lineWidth=9;roundedRect(ctx,photoX,photoY,photoSize,photoSize,38);ctx.stroke();
 
   ctx.fillStyle='#173126';drawFittedText(ctx,animal.nombre,326,681,700);
@@ -106,7 +113,7 @@ async function fichaCanvas(animal:AnimalFichaData){
   y+=Math.ceil(fields.length/2)*136+4;
   if(animal.descripcion){roundedRect(ctx,72,y,1096,118,24);ctx.fillStyle='#ffffff';ctx.fill();ctx.strokeStyle='#d9e8df';ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#718077';ctx.font='500 24px sans-serif';ctx.fillText('Descripción',100,y+36);ctx.fillStyle='#183025';ctx.font='500 27px sans-serif';lines(ctx,animal.descripcion,1040,2).forEach((row,index)=>ctx.fillText(row,100,y+75+index*31));}
   ctx.fillStyle='#718077';ctx.font='400 22px sans-serif';ctx.fillText(`Ficha generada el ${new Intl.DateTimeFormat('es-EC',{dateStyle:'long'}).format(new Date())}`,72,HEIGHT-60);
-  ctx.textAlign='right';ctx.fillText('Información proporcionada por SGB',WIDTH-72,HEIGHT-60);ctx.textAlign='left';
+  ctx.textAlign='right';ctx.fillText(animal.generatedBy?`Generada por ${animal.generatedBy}`:'Generada desde SGB',WIDTH-72,HEIGHT-60);ctx.textAlign='left';
   return canvas;
 }
 

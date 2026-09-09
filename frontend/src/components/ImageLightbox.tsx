@@ -35,36 +35,60 @@ function attachmentUrl(item:LightboxMedia) {
 }
 
 async function downloadMedia(item:LightboxMedia) {
+  const filename=safeFilename(item);
   try {
     const response=await fetch(item.url);
     if(!response.ok)throw new Error('No se pudo descargar el archivo.');
     const objectUrl=URL.createObjectURL(await response.blob());
     const link=document.createElement('a');
-    link.href=objectUrl;link.download=safeFilename(item);document.body.appendChild(link);link.click();link.remove();
+    link.href=objectUrl;link.download=filename;document.body.appendChild(link);link.click();link.remove();
     setTimeout(()=>URL.revokeObjectURL(objectUrl),1000);
   } catch {
     const link=document.createElement('a');
-    link.href=attachmentUrl(item);link.download=safeFilename(item);document.body.appendChild(link);link.click();link.remove();
+    link.href=attachmentUrl(item);link.download=filename;document.body.appendChild(link);link.click();link.remove();
   }
 }
 
 export function ImageLightbox({items,initialIndex,onClose,actions}:ImageLightboxProps) {
   const [index,setIndex]=useState(initialIndex);
-  const touchStart=useRef<number|null>(null);
+  const stageRef=useRef<HTMLDivElement|null>(null);
+  const [view,setView]=useState({scale:1,x:0,y:0});
+  const touchStart=useRef<{x:number;y:number;view:{scale:number;x:number;y:number}}|null>(null);
+  const pinchStart=useRef<{distance:number;midX:number;midY:number;view:{scale:number;x:number;y:number}}|null>(null);
+  const dragStart=useRef<{pointerId:number;x:number;y:number;view:{scale:number;x:number;y:number}}|null>(null);
   const current=items[index];
   const previous=()=>setIndex((value)=>(value-1+items.length)%items.length);
   const next=()=>setIndex((value)=>(value+1)%items.length);
 
+  const constrained=(candidate:{scale:number;x:number;y:number})=>{
+    const scale=Math.min(5,Math.max(1,candidate.scale));
+    if(scale<=1)return{scale:1,x:0,y:0};
+    const stage=stageRef.current;
+    if(!stage)return{scale,x:candidate.x,y:candidate.y};
+    const maxX=Math.max(24,stage.clientWidth*(scale-1)/2);
+    const maxY=Math.max(24,stage.clientHeight*(scale-1)/2);
+    return{scale,x:Math.min(maxX,Math.max(-maxX,candidate.x)),y:Math.min(maxY,Math.max(-maxY,candidate.y))};
+  };
+  const zoomAt=(nextScale:number,clientX:number,clientY:number)=>setView((currentView)=>{
+    const stage=stageRef.current;
+    if(!stage)return constrained({...currentView,scale:nextScale});
+    const rect=stage.getBoundingClientRect();
+    const pointX=clientX-(rect.left+rect.width/2);const pointY=clientY-(rect.top+rect.height/2);
+    const scale=Math.min(5,Math.max(1,nextScale));
+    return constrained({scale,x:pointX-(pointX-currentView.x)*scale/currentView.scale,y:pointY-(pointY-currentView.y)*scale/currentView.scale});
+  });
+
   useEffect(()=>setIndex(Math.min(Math.max(initialIndex,0),Math.max(items.length-1,0))),[initialIndex,items.length]);
+  useEffect(()=>setView({scale:1,x:0,y:0}),[index]);
   useEffect(()=>{
     const onKey=(event:KeyboardEvent)=>{
       if(event.key==='Escape')onClose();
-      if(items.length>1&&event.key==='ArrowLeft')previous();
-      if(items.length>1&&event.key==='ArrowRight')next();
+      if(view.scale===1&&items.length>1&&event.key==='ArrowLeft')setIndex((value)=>(value-1+items.length)%items.length);
+      if(view.scale===1&&items.length>1&&event.key==='ArrowRight')setIndex((value)=>(value+1)%items.length);
     };
     window.addEventListener('keydown',onKey);
     return()=>window.removeEventListener('keydown',onKey);
-  });
+  },[items.length,onClose,view.scale]);
 
   if(!current)return null;
   return <div
@@ -72,23 +96,49 @@ export function ImageLightbox({items,initialIndex,onClose,actions}:ImageLightbox
     role="dialog"
     aria-modal="true"
     onMouseDown={(event)=>{if(event.target===event.currentTarget)onClose();}}
-    onTouchStart={(event)=>{touchStart.current=event.touches[0]?.clientX??null;}}
+    onTouchStart={(event)=>{
+      if(current.type==='VIDEO')return;
+      if(event.touches.length===2){
+        const [first,second]=[event.touches[0],event.touches[1]];
+        pinchStart.current={distance:Math.hypot(second.clientX-first.clientX,second.clientY-first.clientY),midX:(first.clientX+second.clientX)/2,midY:(first.clientY+second.clientY)/2,view};
+        touchStart.current=null;
+      }else if(event.touches[0])touchStart.current={x:event.touches[0].clientX,y:event.touches[0].clientY,view};
+    }}
+    onTouchMove={(event)=>{
+      if(current.type==='VIDEO')return;
+      if(event.touches.length===2&&pinchStart.current){
+        event.preventDefault();const [first,second]=[event.touches[0],event.touches[1]];const start=pinchStart.current;
+        const distance=Math.hypot(second.clientX-first.clientX,second.clientY-first.clientY);const scale=Math.min(5,Math.max(1,start.view.scale*distance/start.distance));
+        const midX=(first.clientX+second.clientX)/2;const midY=(first.clientY+second.clientY)/2;const rect=stageRef.current?.getBoundingClientRect();
+        const centerX=rect?rect.left+rect.width/2:0;const centerY=rect?rect.top+rect.height/2:0;
+        setView(constrained({scale,x:midX-centerX-(start.midX-centerX-start.view.x)*scale/start.view.scale,y:midY-centerY-(start.midY-centerY-start.view.y)*scale/start.view.scale}));
+      }else if(event.touches.length===1&&touchStart.current&&view.scale>1){
+        event.preventDefault();const touch=event.touches[0];const start=touchStart.current;
+        setView(constrained({...start.view,x:start.view.x+touch.clientX-start.x,y:start.view.y+touch.clientY-start.y}));
+      }
+    }}
     onTouchEnd={(event)=>{
-      if(touchStart.current===null)return;
-      const delta=(event.changedTouches[0]?.clientX??touchStart.current)-touchStart.current;
-      if(items.length>1&&delta>45)previous();
-      if(items.length>1&&delta<-45)next();
+      if(pinchStart.current){if(event.touches.length<2)pinchStart.current=null;if(event.touches.length===1)touchStart.current={x:event.touches[0].clientX,y:event.touches[0].clientY,view};return;}
+      if(!touchStart.current)return;
+      const delta=(event.changedTouches[0]?.clientX??touchStart.current.x)-touchStart.current.x;
+      if(view.scale===1&&items.length>1&&delta>45)previous();
+      if(view.scale===1&&items.length>1&&delta<-45)next();
       touchStart.current=null;
     }}
   >
     <IconButton className="lightbox-download" label="Descargar archivo" onClick={()=>void downloadMedia(current)}><Download size={22}/></IconButton>
     <IconButton className="lightbox-close" label="Cerrar visor" onClick={onClose}><X size={28}/></IconButton>
-    {items.length>1?<>
-      <IconButton className="lightbox-arrow lightbox-arrow-left" label="Archivo anterior" onClick={previous}><ChevronLeft size={34}/></IconButton>
-      <IconButton className="lightbox-arrow lightbox-arrow-right" label="Archivo siguiente" onClick={next}><ChevronRight size={34}/></IconButton>
-    </>:null}
+    {items.length>1&&view.scale===1?<><IconButton className="lightbox-arrow lightbox-arrow-left" label="Archivo anterior" onClick={previous}><ChevronLeft size={34}/></IconButton><IconButton className="lightbox-arrow lightbox-arrow-right" label="Archivo siguiente" onClick={next}><ChevronRight size={34}/></IconButton></>:null}
     <div className="image-lightbox-content">
-      {current.type==='VIDEO'?<video src={current.url} controls autoPlay/>:<img src={current.url} alt={current.title}/>} 
+      <div ref={stageRef} className={`lightbox-media-stage ${view.scale>1?'zoomed':''} ${dragStart.current?'dragging':''}`}
+        onDoubleClick={(event)=>{if(current.type==='VIDEO')return;if(view.scale>1)setView({scale:1,x:0,y:0});else zoomAt(2.5,event.clientX,event.clientY);}}
+        onWheel={(event)=>{if(current.type==='VIDEO')return;event.preventDefault();zoomAt(view.scale+(event.deltaY<0?.3:-.3),event.clientX,event.clientY);}}
+        onPointerDown={(event)=>{if(current.type==='VIDEO'||event.pointerType!=='mouse'||view.scale<=1)return;event.currentTarget.setPointerCapture(event.pointerId);dragStart.current={pointerId:event.pointerId,x:event.clientX,y:event.clientY,view};}}
+        onPointerMove={(event)=>{const start=dragStart.current;if(!start||start.pointerId!==event.pointerId)return;setView(constrained({...start.view,x:start.view.x+event.clientX-start.x,y:start.view.y+event.clientY-start.y}));}}
+        onPointerUp={(event)=>{if(dragStart.current?.pointerId===event.pointerId){dragStart.current=null;event.currentTarget.releasePointerCapture(event.pointerId);}}}
+        onPointerCancel={()=>{dragStart.current=null;}}>
+        {current.type==='VIDEO'?<video src={current.url} controls autoPlay/>:<img draggable={false} src={current.url} alt={current.title} style={{transform:`translate3d(${view.x}px,${view.y}px,0) scale(${view.scale})`}}/>}
+      </div>
       <div className="image-lightbox-details">
         <div><strong>{current.title}</strong><small>{[current.subtitle,current.date?formatDate(current.date):null,items.length>1?`${index+1} de ${items.length}`:null].filter(Boolean).join(' · ')}</small></div>
         {actions?.(current)}

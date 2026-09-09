@@ -168,6 +168,7 @@ export interface PublicAnimal {
   total_crias: number;
   prenez_confirmada: boolean;
   compartido_desde: string;
+  compartido_por: string;
 }
 
 export interface AnimalRegisteredChild { id_animal:string;nombre:string;codigo_arete:string|null;sexo:'MACHO'|'HEMBRA';fecha_nacimiento:string|null;id_parto:string|null;fecha_parto:string|null;parentesco:'MADRE'|'PADRE' }
