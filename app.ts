@@ -31,8 +31,8 @@ import { settingsRouter } from './modules/settings/settings.routes.js';
 import { purchasesRouter } from './modules/purchases/purchases.routes.js';
 import { activitiesRouter } from './modules/activities/activities.routes.js';
 import { healthRouter } from './modules/health/health.routes.js';
+import { bootstrapRouter } from './modules/bootstrap/bootstrap.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
-import { publicAnimalsRouter } from './modules/animals/public-animals.routes.js';
 
 export const app=express();
 app.set('trust proxy',1);
@@ -44,12 +44,14 @@ app.use(express.json({limit:'2mb'}));
 app.use(express.urlencoded({extended:true,limit:'2mb'}));
 app.get('/health', asyncHandler(async (_req, res) => {
   await pool.query('SELECT 1');
-  return res.json({ ok: true, service: 'MM Ganadería API', database: 'ok', time: new Date().toISOString() });
+  return res.json({ ok: true, service: 'SIGVB API', database: 'ok', time: new Date().toISOString() });
 }));
 const api=express.Router();
 api.use('/auth',authRouter);
 api.use('/versiones',versionsRouter);
-api.use('/publico/animales',publicAnimalsRouter);
+// Debe permanecer antes de `authenticate`: crea únicamente el primer administrador
+// y exige una clave temporal configurada en el entorno del servidor.
+api.use('/bootstrap',bootstrapRouter);
 api.use(authenticate);
 api.use('/dashboard',dashboardRouter);
 api.use('/catalogos',catalogsRouter);
