@@ -140,20 +140,27 @@ const tankSchema = z.object({
 });
 recordsRouter.get('/producciones/vacas-activas', requirePermission('PRODUCCION_CONSULTAR'), asyncHandler(async (req, res) => {
     const date = z.string().date().catch(new Date().toISOString().slice(0, 10)).parse(req.query.fecha);
-    return ok(res, (await pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,l.id_lactancia,l.fecha_inicio,p.fecha_parto
-     FROM animal a
+    return ok(res, (await pool.query(`WITH vacas AS (
+       SELECT a.*,COALESCE(cp.dias_maximos_ordeno_posparto,305)::int AS dias_maximos_ordeno
+       FROM animal a
+       LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
+       LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
+       LEFT JOIN configuracion_propiedad cp ON cp.id_propiedad=COALESCE(g.id_propiedad,u.id_propiedad)
+     )
+     SELECT a.id_animal,a.nombre,a.codigo_arete,l.id_lactancia,l.fecha_inicio,p.fecha_parto
+     FROM vacas a
      JOIN LATERAL(
        SELECT parto.fecha_parto FROM parto
        WHERE parto.id_madre=a.id_animal AND parto.deleted_at IS NULL
          AND parto.fecha_parto<=$1::date
-         AND parto.fecha_parto + fn_dias_maximos_ordeno(a.id_animal)>=$1::date
+         AND parto.fecha_parto + a.dias_maximos_ordeno>=$1::date
        ORDER BY parto.fecha_parto DESC LIMIT 1
      ) p ON TRUE
      LEFT JOIN LATERAL(
        SELECT lactancia.id_lactancia,lactancia.fecha_inicio FROM lactancia
        WHERE lactancia.id_vaca=a.id_animal AND lactancia.deleted_at IS NULL
          AND lactancia.activa=TRUE AND lactancia.fecha_inicio<=$1::date
-         AND lactancia.fecha_inicio + fn_dias_maximos_ordeno(a.id_animal)>=$1::date
+         AND lactancia.fecha_inicio + a.dias_maximos_ordeno>=$1::date
          AND (lactancia.fecha_fin IS NULL OR lactancia.fecha_fin>=$1::date)
        ORDER BY lactancia.fecha_inicio DESC LIMIT 1
      ) l ON TRUE
@@ -162,14 +169,21 @@ recordsRouter.get('/producciones/vacas-activas', requirePermission('PRODUCCION_C
 }));
 recordsRouter.get('/producciones/vacas-elegibles', requirePermission('PRODUCCION_CONSULTAR'), asyncHandler(async (req, res) => {
     const date = z.string().date().catch(new Date().toISOString().slice(0, 10)).parse(req.query.fecha);
-    return ok(res, (await pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,a.en_ordeno,p.fecha_parto,
+    return ok(res, (await pool.query(`WITH vacas AS (
+       SELECT a.*,COALESCE(cp.dias_maximos_ordeno_posparto,305)::int AS dias_maximos_ordeno
+       FROM animal a
+       LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
+       LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
+       LEFT JOIN configuracion_propiedad cp ON cp.id_propiedad=COALESCE(g.id_propiedad,u.id_propiedad)
+     )
+     SELECT a.id_animal,a.nombre,a.codigo_arete,a.en_ordeno,p.fecha_parto,
        l.id_lactancia,l.fecha_inicio,l.activa lactancia_activa
-     FROM animal a
+     FROM vacas a
      JOIN LATERAL(
        SELECT parto.fecha_parto FROM parto
        WHERE parto.id_madre=a.id_animal AND parto.deleted_at IS NULL
          AND parto.fecha_parto<=$1::date
-         AND parto.fecha_parto + fn_dias_maximos_ordeno(a.id_animal)>=$1::date
+         AND parto.fecha_parto + a.dias_maximos_ordeno>=$1::date
        ORDER BY parto.fecha_parto DESC LIMIT 1
      ) p ON TRUE
      LEFT JOIN LATERAL(
@@ -177,7 +191,7 @@ recordsRouter.get('/producciones/vacas-elegibles', requirePermission('PRODUCCION
        FROM lactancia
        WHERE lactancia.id_vaca=a.id_animal AND lactancia.deleted_at IS NULL
          AND lactancia.activa=TRUE AND lactancia.fecha_inicio<=$1::date
-         AND lactancia.fecha_inicio + fn_dias_maximos_ordeno(a.id_animal)>=$1::date
+         AND lactancia.fecha_inicio + a.dias_maximos_ordeno>=$1::date
          AND (lactancia.fecha_fin IS NULL OR lactancia.fecha_fin>=$1::date)
        ORDER BY lactancia.fecha_inicio DESC LIMIT 1
      ) l ON TRUE
