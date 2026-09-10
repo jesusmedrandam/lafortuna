@@ -140,55 +140,68 @@ const tankSchema = z.object({
 });
 recordsRouter.get('/producciones/vacas-activas', requirePermission('PRODUCCION_CONSULTAR'), asyncHandler(async (req, res) => {
     const date = z.string().date().catch(new Date().toISOString().slice(0, 10)).parse(req.query.fecha);
-    return ok(res, (await pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,l.id_lactancia,l.fecha_inicio,p.fecha_parto
-     FROM animal a
-     JOIN LATERAL(
-       SELECT parto.fecha_parto FROM parto
-       WHERE parto.id_madre=a.id_animal AND parto.deleted_at IS NULL
-         AND parto.fecha_parto<=$1::date
-         AND parto.fecha_parto + fn_dias_maximos_ordeno(a.id_animal)>=$1::date
-       ORDER BY parto.fecha_parto DESC LIMIT 1
-     ) p ON TRUE
-     LEFT JOIN LATERAL(
-       SELECT lactancia.id_lactancia,lactancia.fecha_inicio FROM lactancia
-       WHERE lactancia.id_vaca=a.id_animal AND lactancia.deleted_at IS NULL
-         AND lactancia.activa=TRUE AND lactancia.fecha_inicio<=$1::date
-         AND lactancia.fecha_inicio + fn_dias_maximos_ordeno(a.id_animal)>=$1::date
-         AND (lactancia.fecha_fin IS NULL OR lactancia.fecha_fin>=$1::date)
-       ORDER BY lactancia.fecha_inicio DESC LIMIT 1
-     ) l ON TRUE
-     WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='HEMBRA' AND a.en_ordeno=TRUE
-     ORDER BY a.nombre,a.codigo_arete`, [date])).rows);
+    return ok(res, (await pool.query(`WITH vacas AS MATERIALIZED (
+       SELECT a.id_animal,a.nombre,a.codigo_arete,
+         COALESCE(cp.dias_maximos_ordeno_posparto,305)::int AS dias_maximos_ordeno
+       FROM animal a
+       LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
+       LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
+       LEFT JOIN configuracion_propiedad cp ON cp.id_propiedad=COALESCE(g.id_propiedad,u.id_propiedad)
+       WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='HEMBRA' AND a.en_ordeno=TRUE
+     ), partos AS (
+       SELECT DISTINCT ON (p.id_madre) p.id_madre,p.fecha_parto
+       FROM parto p JOIN vacas v ON v.id_animal=p.id_madre
+       WHERE p.deleted_at IS NULL AND p.fecha_parto<=$1::date
+         AND p.fecha_parto+v.dias_maximos_ordeno>=$1::date
+       ORDER BY p.id_madre,p.fecha_parto DESC
+     ), lactancias AS (
+       SELECT DISTINCT ON (l.id_vaca) l.id_vaca,l.id_lactancia,l.fecha_inicio
+       FROM lactancia l JOIN vacas v ON v.id_animal=l.id_vaca
+       WHERE l.deleted_at IS NULL AND l.activa=TRUE AND l.fecha_inicio<=$1::date
+         AND l.fecha_inicio+v.dias_maximos_ordeno>=$1::date
+         AND (l.fecha_fin IS NULL OR l.fecha_fin>=$1::date)
+       ORDER BY l.id_vaca,l.fecha_inicio DESC
+     )
+     SELECT v.id_animal,v.nombre,v.codigo_arete,l.id_lactancia,l.fecha_inicio,p.fecha_parto
+     FROM vacas v JOIN partos p ON p.id_madre=v.id_animal
+     LEFT JOIN lactancias l ON l.id_vaca=v.id_animal
+     ORDER BY v.nombre,v.codigo_arete`, [date])).rows);
 }));
 recordsRouter.get('/producciones/vacas-elegibles', requirePermission('PRODUCCION_CONSULTAR'), asyncHandler(async (req, res) => {
     const date = z.string().date().catch(new Date().toISOString().slice(0, 10)).parse(req.query.fecha);
-    return ok(res, (await pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,a.en_ordeno,p.fecha_parto,
-       l.id_lactancia,l.fecha_inicio,l.activa lactancia_activa
-     FROM animal a
-     JOIN LATERAL(
-       SELECT parto.fecha_parto FROM parto
-       WHERE parto.id_madre=a.id_animal AND parto.deleted_at IS NULL
-         AND parto.fecha_parto<=$1::date
-         AND parto.fecha_parto + fn_dias_maximos_ordeno(a.id_animal)>=$1::date
-       ORDER BY parto.fecha_parto DESC LIMIT 1
-     ) p ON TRUE
-     LEFT JOIN LATERAL(
-       SELECT lactancia.id_lactancia,lactancia.fecha_inicio,lactancia.activa
-       FROM lactancia
-       WHERE lactancia.id_vaca=a.id_animal AND lactancia.deleted_at IS NULL
-         AND lactancia.activa=TRUE AND lactancia.fecha_inicio<=$1::date
-         AND lactancia.fecha_inicio + fn_dias_maximos_ordeno(a.id_animal)>=$1::date
-         AND (lactancia.fecha_fin IS NULL OR lactancia.fecha_fin>=$1::date)
-       ORDER BY lactancia.fecha_inicio DESC LIMIT 1
-     ) l ON TRUE
-     WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='HEMBRA'
+    return ok(res, (await pool.query(`WITH vacas AS MATERIALIZED (
+       SELECT a.id_animal,a.nombre,a.codigo_arete,a.en_ordeno,
+         COALESCE(cp.dias_maximos_ordeno_posparto,305)::int AS dias_maximos_ordeno
+       FROM animal a
+       LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
+       LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
+       LEFT JOIN configuracion_propiedad cp ON cp.id_propiedad=COALESCE(g.id_propiedad,u.id_propiedad)
+       WHERE a.deleted_at IS NULL AND a.estado='ACTIVO' AND a.sexo='HEMBRA'
        AND COALESCE((
          SELECT policy.permitido FROM operacion_categoria_animal policy
          WHERE policy.id_categoria_animal=a.id_categoria_animal
            AND policy.codigo_operacion='PRODUCCION_LECHE' AND policy.deleted_at IS NULL
          LIMIT 1
        ),TRUE)=TRUE
-     ORDER BY a.nombre,a.codigo_arete`, [date])).rows);
+     ), partos AS (
+       SELECT DISTINCT ON (p.id_madre) p.id_madre,p.fecha_parto
+       FROM parto p JOIN vacas v ON v.id_animal=p.id_madre
+       WHERE p.deleted_at IS NULL AND p.fecha_parto<=$1::date
+         AND p.fecha_parto+v.dias_maximos_ordeno>=$1::date
+       ORDER BY p.id_madre,p.fecha_parto DESC
+     ), lactancias AS (
+       SELECT DISTINCT ON (l.id_vaca) l.id_vaca,l.id_lactancia,l.fecha_inicio,l.activa
+       FROM lactancia l JOIN vacas v ON v.id_animal=l.id_vaca
+       WHERE l.deleted_at IS NULL AND l.activa=TRUE AND l.fecha_inicio<=$1::date
+         AND l.fecha_inicio+v.dias_maximos_ordeno>=$1::date
+         AND (l.fecha_fin IS NULL OR l.fecha_fin>=$1::date)
+       ORDER BY l.id_vaca,l.fecha_inicio DESC
+     )
+     SELECT v.id_animal,v.nombre,v.codigo_arete,v.en_ordeno,p.fecha_parto,
+       l.id_lactancia,l.fecha_inicio,l.activa lactancia_activa
+     FROM vacas v JOIN partos p ON p.id_madre=v.id_animal
+     LEFT JOIN lactancias l ON l.id_vaca=v.id_animal
+     ORDER BY v.nombre,v.codigo_arete`, [date])).rows);
 }));
 const milkingStateSchema = z.object({
     en_ordeno: z.boolean(),
@@ -384,7 +397,7 @@ recordsRouter.post('/:module', asyncHandler(async (req, res) => {
     if (d.table === 'tratamiento_animal') {
         const row = await transaction(async (client) => {
             const condition = await linkedHealthCondition(client, data.id_condicion_salud, animalId);
-            await assertMedicationApplication(client, data.id_medicamento, data.id_via_administracion, data.id_unidad_dosis);
+            await assertMedicationApplication(client, data.id_medicamento, data.id_via_administracion, data.id_unidad_dosis, data.id_tipo_tratamiento);
             const saved = (await client.query(buildInsert(d.table, { ...data, id_condicion_salud: data.id_condicion_salud ?? null, registrado_por: req.user.id }))).rows[0];
             if (condition)
                 await client.query("UPDATE condicion_salud SET estado='EN_TRATAMIENTO',updated_at=NOW() WHERE id_condicion_salud=$1", [condition.id_condicion_salud]);
@@ -475,7 +488,7 @@ recordsRouter.patch('/:module/:id', asyncHandler(async (req, res) => {
             const conditionId = (Object.prototype.hasOwnProperty.call(data, 'id_condicion_salud') ? data.id_condicion_salud : current.id_condicion_salud);
             await assertAnimalOperationAllowed(client, animalId, d.operation);
             const condition = await linkedHealthCondition(client, conditionId, animalId);
-            await assertMedicationApplication(client, data.id_medicamento ?? current.id_medicamento, data.id_via_administracion ?? current.id_via_administracion, data.id_unidad_dosis ?? current.id_unidad_dosis);
+            await assertMedicationApplication(client, data.id_medicamento ?? current.id_medicamento, data.id_via_administracion ?? current.id_via_administracion, data.id_unidad_dosis ?? current.id_unidad_dosis, data.id_tipo_tratamiento ?? current.id_tipo_tratamiento);
             const saved = (await client.query(buildUpdate(d.table, d.id, id, { ...data, id_animal: animalId, id_condicion_salud: conditionId ?? null }))).rows[0];
             if (condition)
                 await client.query("UPDATE condicion_salud SET estado='EN_TRATAMIENTO',updated_at=NOW() WHERE id_condicion_salud=$1", [condition.id_condicion_salud]);
