@@ -5,12 +5,12 @@ import { transaction } from '../../database/transaction.js';
 import { asyncHandler } from '../../core/async-handler.js';
 import { routeParam } from '../../core/route-param.js';
 import { created, noContent, ok } from '../../core/http.js';
-import { NotFoundError, ValidationError } from '../../core/errors.js';
+import { AppError, NotFoundError, ValidationError } from '../../core/errors.js';
 import { requirePermission } from '../../middleware/permission.js';
 import { buildInsert, buildUpdate } from '../shared/sql.js';
 import { assertAnimalOperationAllowed } from '../../services/animal-operation-policy.js';
 import { notifyReproductionEvent } from '../notifications/business-notifications.service.js';
-import { assertFemaleReproductionRules, assertMinimumAge } from '../../services/reproduction-policy.js';
+import { assertFemaleReproductionRules, assertMinimumAge, reproductionRulesForAnimal } from '../../services/reproduction-policy.js';
 const GESTATION_DAYS = 283;
 const heatSchema = z.object({
     id_vaca: z.string().uuid(),
@@ -65,6 +65,14 @@ async function eligibleAnimal(client, id, sex, role, operation) {
         throw new ValidationError(`${role} debe ser un animal ${sex === 'HEMBRA' ? 'hembra' : 'macho'} activo.`);
     }
     await assertAnimalOperationAllowed(client, id, operation);
+    return animal;
+}
+async function activeAnimal(client, id, sex, role) {
+    const animal = (await client.query(`SELECT id_animal,id_especie,nombre,sexo,fecha_nacimiento,estado
+     FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR SHARE`, [id])).rows[0];
+    if (!animal || animal.sexo !== sex || animal.estado !== 'ACTIVO') {
+        throw new ValidationError(`${role} debe ser un animal ${sex === 'HEMBRA' ? 'hembra' : 'macho'} activo.`);
+    }
     return animal;
 }
 function addDays(value, days) {
@@ -161,6 +169,97 @@ async function pregnancyData(client, input, excludePregnancyId) {
     };
 }
 export const reproductionRouter = Router();
+async function actionAvailability(check) {
+    try {
+        await check();
+        return { permitido: true, motivo: null };
+    }
+    catch (error) {
+        if (error instanceof AppError)
+            return { permitido: false, motivo: error.message };
+        throw error;
+    }
+}
+reproductionRouter.get('/disponibilidad/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
+    const animalId = routeParam(req.params.id, 'id');
+    const date = z.string().date().catch(new Date().toISOString().slice(0, 10)).parse(req.query.fecha);
+    const animal = (await pool.query(`SELECT id_animal,nombre,sexo,estado,fecha_nacimiento
+     FROM animal WHERE id_animal=$1 AND deleted_at IS NULL`, [animalId])).rows[0];
+    if (!animal)
+        throw new NotFoundError('Animal no encontrado.');
+    const activePregnancy = (await pool.query(`SELECT id_prenez FROM prenez
+     WHERE id_vaca=$1 AND estado='CONFIRMADA' AND deleted_at IS NULL
+     ORDER BY fecha_confirmacion DESC LIMIT 1`, [animalId])).rows[0];
+    const validFemale = animal.estado === 'ACTIVO' && animal.sexo === 'HEMBRA';
+    const unavailable = (message) => ({ permitido: false, motivo: message });
+    const femaleCheck = () => {
+        if (!validFemale)
+            throw new ValidationError('Esta operación solo está disponible para hembras activas.');
+    };
+    const reproductiveCheck = async (operation, kind, falseHeat = false) => {
+        femaleCheck();
+        await assertAnimalOperationAllowed(pool, animalId, operation);
+        const rules = await assertFemaleReproductionRules(pool, animalId, date, kind, falseHeat);
+        await assertMinimumAge(pool, animal.fecha_nacimiento, date, rules.edad_minima_celo_meses, 'La hembra');
+    };
+    const productionHistory = Number((await pool.query(`SELECT COUNT(*)::int total FROM produccion_leche
+     WHERE id_vaca=$1 AND deleted_at IS NULL`, [animalId])).rows[0]?.total ?? 0);
+    const production = await actionAvailability(async () => {
+        femaleCheck();
+        await assertAnimalOperationAllowed(pool, animalId, 'PRODUCCION_LECHE');
+        const state = (await pool.query(`SELECT en_ordeno FROM animal WHERE id_animal=$1 AND deleted_at IS NULL`, [animalId])).rows[0];
+        if (!state?.en_ordeno)
+            throw new ValidationError('La hembra no está marcada como en ordeño.');
+        const rules = await reproductionRulesForAnimal(pool, animalId);
+        const recentBirth = (await pool.query(`SELECT 1 FROM parto
+       WHERE id_madre=$1 AND deleted_at IS NULL AND fecha_parto::date<=$2::date
+         AND fecha_parto+(INTERVAL '1 day'*$3::int)>=$2::date
+       LIMIT 1`, [animalId, date, rules.dias_maximos_ordeno_posparto])).rowCount;
+        if (!recentBirth)
+            throw new ValidationError(`No tiene un parto dentro de los ${rules.dias_maximos_ordeno_posparto} días permitidos para ordeño.`);
+    });
+    const unavailableActions = [
+        unavailable('Esta operación solo está disponible para hembras activas.'),
+        unavailable('Esta operación solo está disponible para hembras activas.'),
+        unavailable('Esta operación solo está disponible para hembras activas.'),
+        unavailable('Esta operación solo está disponible para hembras activas.'),
+        unavailable('Esta operación solo está disponible para hembras activas.'),
+        unavailable('Esta operación solo está disponible para hembras activas.'),
+        unavailable('Esta operación solo está disponible para hembras activas.'),
+    ];
+    const [normalHeat, falseHeat, pregnancy, insemination, embryo, birth, abortion] = validFemale ? await Promise.all([
+        actionAvailability(() => reproductiveCheck('CELO', 'CELO', false)),
+        actionAvailability(() => reproductiveCheck('CELO', 'CELO', true)),
+        actionAvailability(() => reproductiveCheck('PRENEZ', 'PRENEZ')),
+        actionAvailability(() => reproductiveCheck('INSEMINACION_ARTIFICIAL', 'PRENEZ')),
+        actionAvailability(() => reproductiveCheck('TRANSFERENCIA_EMBRIONES', 'PRENEZ')),
+        actionAvailability(async () => {
+            femaleCheck();
+            await assertAnimalOperationAllowed(pool, animalId, 'PARTO');
+            if (!activePregnancy)
+                throw new ValidationError('Primero debe existir una preñez confirmada.');
+        }),
+        actionAvailability(async () => {
+            femaleCheck();
+            await assertAnimalOperationAllowed(pool, animalId, 'ABORTO');
+            if (!activePregnancy)
+                throw new ValidationError('Solo se puede registrar un aborto si existe una preñez confirmada.');
+        }),
+    ]) : unavailableActions;
+    return ok(res, {
+        id_animal: animalId,
+        fecha: date,
+        produccion: { consultar: productionHistory > 0 || production.permitido, registrar: production.permitido, motivo: production.motivo },
+        aplica_reproduccion: validFemale,
+        id_prenez_confirmada: activePregnancy?.id_prenez ?? null,
+        celo: { permitido: normalHeat.permitido || falseHeat.permitido, solo_falso: !normalHeat.permitido && falseHeat.permitido, motivo: normalHeat.motivo ?? falseHeat.motivo },
+        prenez: pregnancy,
+        inseminacion: insemination,
+        embrion: embryo,
+        parto: birth,
+        aborto: abortion,
+    });
+}));
 reproductionRouter.get('/opciones', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => {
     const [females, males] = await Promise.all([
         pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,a.fecha_nacimiento,a.id_especie,
@@ -244,7 +343,8 @@ reproductionRouter.delete('/celos/:id', requirePermission('PARTO_ADMINISTRAR'), 
     return noContent(res);
 }));
 async function assistedServiceData(client, input) {
-    const cow = await eligibleAnimal(client, input.id_vaca, 'HEMBRA', 'La receptora', 'PRENEZ');
+    const operation = input.tipo === 'INSEMINACION_ARTIFICIAL' ? 'INSEMINACION_ARTIFICIAL' : 'TRANSFERENCIA_EMBRIONES';
+    const cow = await eligibleAnimal(client, input.id_vaca, 'HEMBRA', 'La receptora', operation);
     const rules = await assertFemaleReproductionRules(client, input.id_vaca, input.fecha, 'PRENEZ', false);
     await assertMinimumAge(client, cow.fecha_nacimiento, input.fecha, rules.edad_minima_celo_meses, 'La receptora');
     if (input.id_celo) {
@@ -253,13 +353,13 @@ async function assistedServiceData(client, input) {
             throw new ValidationError('El celo seleccionado no corresponde a la receptora o está marcado como falso.');
     }
     if (input.id_padre) {
-        const father = await eligibleAnimal(client, input.id_padre, 'MACHO', 'El padre', 'PRENEZ');
+        const father = await activeAnimal(client, input.id_padre, 'MACHO', 'El padre');
         if (father.id_especie !== cow.id_especie)
             throw new ValidationError('El padre y la receptora deben pertenecer a la misma especie.');
         await assertMinimumAge(client, father.fecha_nacimiento, input.fecha, rules.edad_minima_padre_meses, 'El padre');
     }
     if (input.id_donante) {
-        const donor = await eligibleAnimal(client, input.id_donante, 'HEMBRA', 'La donante', 'PRENEZ');
+        const donor = await activeAnimal(client, input.id_donante, 'HEMBRA', 'La donante');
         if (donor.id_especie !== cow.id_especie)
             throw new ValidationError('La donante y la receptora deben pertenecer a la misma especie.');
     }
