@@ -114,22 +114,36 @@ async function milkingLactation(client:Parameters<Parameters<typeof transaction>
   if(!cow)throw new NotFoundError('Vaca no encontrada o inactiva.');
   if(cow.sexo!=='HEMBRA')throw new ValidationError('La producción de leche solo puede registrarse para una hembra.');
   if(!cow.en_ordeno)throw new ValidationError('La vaca no está marcada como en ordeño.');
-  const rules=await reproductionRulesForAnimal(client,animalId);
+  const rules=(await client.query(
+    `SELECT COALESCE(cp.dias_maximos_ordeno_posparto,305)::int dias_maximos_ordeno_posparto
+     FROM animal a
+     LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
+     LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
+     LEFT JOIN configuracion_propiedad cp ON cp.id_propiedad=COALESCE(
+       g.id_propiedad,u.id_propiedad,(
+         SELECT p.id_propiedad FROM propiedad_ganadera p
+         WHERE p.deleted_at IS NULL AND p.activa=TRUE
+         ORDER BY p.es_principal DESC LIMIT 1
+       )
+     )
+     WHERE a.id_animal=$1`,[animalId],
+  )).rows[0] as {dias_maximos_ordeno_posparto:number}|undefined;
+  const maxDays=Number(rules?.dias_maximos_ordeno_posparto??305);
   const eligible=(await client.query(
     `SELECT EXISTS(
        SELECT 1 FROM parto p
        WHERE p.id_madre=$1 AND p.deleted_at IS NULL
          AND p.fecha_parto<=$2::date
          AND p.fecha_parto + $3::int >=$2::date
-     ) permitido`,[animalId,date,rules.dias_maximos_ordeno_posparto],
+     ) permitido`,[animalId,date,maxDays],
   )).rows[0] as {permitido:boolean};
-  if(!eligible.permitido)throw new ValidationError(`La vaca debe tener un parto registrado dentro de los ${rules.dias_maximos_ordeno_posparto} días configurados.`);
+  if(!eligible.permitido)throw new ValidationError(`La vaca debe tener un parto registrado dentro de los ${maxDays} días configurados.`);
   const rows=(await client.query(
     `SELECT id_lactancia FROM lactancia
      WHERE id_vaca=$1 AND deleted_at IS NULL AND activa=TRUE
        AND fecha_inicio<=$2::date AND fecha_inicio + $3::int >=$2::date
        AND (fecha_fin IS NULL OR fecha_fin>=$2::date)
-     ORDER BY fecha_inicio DESC FOR SHARE`,[animalId,date,rules.dias_maximos_ordeno_posparto],
+     ORDER BY fecha_inicio DESC FOR SHARE`,[animalId,date,maxDays],
   )).rows as Array<{id_lactancia:string}>;
   if(rows.length>1)throw new ValidationError('La vaca tiene más de una lactancia activa. Cierra el registro duplicado antes de continuar.');
   return rows[0]?.id_lactancia??null;
