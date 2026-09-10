@@ -1413,3 +1413,7 @@ body, .shell-main, .page-content, .topbar, .card, .input, .modal { transition: b
 .medication-route-selector label{min-height:34px;padding:6px 10px;border:1px solid var(--border);border-radius:999px;display:inline-flex;align-items:center;gap:7px;background:var(--surface);font-size:.76rem;cursor:pointer}
 .medication-route-selector label.selected{border-color:var(--primary);color:var(--primary-dark);background:var(--primary-soft)}
 .medication-route-selector input{width:15px;height:15px;accent-color:var(--primary)}
+
+/* El contenido ya comienza bajo el encabezado; no se reserva una segunda
+   altura para los controles de animales. */
+.animals-page .animal-controls-sticky{top:0;padding-top:3px}

@@ -68,7 +68,7 @@ export function AnimalsPage() {
   };
   const visibleRaces = options.data?.razas.filter((item) => !filters.id_especie || !item.id_especie || item.id_especie === filters.id_especie) ?? [];
 
-  return <div>
+  return <div className="module-no-header animals-page">
     <PageHeader title="Animales" description="Listado general. Selecciona una fila para abrir el resumen actual del animal." action={hasPermission('ANIMAL_CREAR') ? <IconButton label="Agregar animal" onClick={() => setCreating(true)}><Plus size={20} /></IconButton> : undefined} />
     <div className="toolbar animal-search-toolbar">
       <SearchBox value={search} onChange={(value) => { setSearch(value); updateParam('q', value); }} placeholder="Buscar por nombre, arete o descripción…" />
