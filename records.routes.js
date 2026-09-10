@@ -57,8 +57,8 @@ async function validateLactation(client, input, excludeId) {
     if (cow.sexo !== 'HEMBRA')
         throw new ValidationError('Solo se puede registrar una lactancia para una hembra.');
     const rules = await reproductionRulesForAnimal(client, input.id_vaca);
-    const birth = (await client.query(`SELECT id_madre,fecha_parto::text AS fecha_parto,
-       (fecha_parto + $2::int)::date::text AS fecha_limite
+    const birth = (await client.query(`SELECT id_madre,fecha_parto::date::text AS fecha_parto,
+       (fecha_parto::date + $2::int)::text AS fecha_limite
      FROM parto
      WHERE id_parto=$1 AND deleted_at IS NULL FOR SHARE`, [input.id_parto, rules.dias_maximos_ordeno_posparto])).rows[0];
     if (!birth)
@@ -80,7 +80,7 @@ async function validateLactation(client, input, excludeId) {
     const overlap = (await client.query(`SELECT id_lactancia FROM lactancia
      WHERE id_vaca=$1 AND deleted_at IS NULL
        AND ($4::uuid IS NULL OR id_lactancia<>$4::uuid)
-       AND daterange(fecha_inicio,COALESCE(fecha_fin,'infinity'::date),'[]')
+       AND daterange(fecha_inicio::date,COALESCE(fecha_fin::date,'infinity'::date),'[]')
            && daterange($2::date,COALESCE($3::date,'infinity'::date),'[]')
      LIMIT 1 FOR SHARE`, [input.id_vaca, startDate, input.activa ? null : (input.fecha_fin ?? null), excludeId ?? null])).rows[0];
     if (overlap)
@@ -113,15 +113,15 @@ async function milkingLactation(client, animalId, date) {
     const eligible = (await client.query(`SELECT EXISTS(
        SELECT 1 FROM parto p
        WHERE p.id_madre=$1 AND p.deleted_at IS NULL
-         AND p.fecha_parto<=$2::date
-         AND p.fecha_parto + $3::int >=$2::date
+         AND p.fecha_parto::date<=$2::date
+         AND p.fecha_parto::date + $3::int >=$2::date
      ) permitido`, [animalId, date, maxDays])).rows[0];
     if (!eligible.permitido)
         throw new ValidationError(`La vaca debe tener un parto registrado dentro de los ${maxDays} días configurados.`);
     const rows = (await client.query(`SELECT id_lactancia FROM lactancia
      WHERE id_vaca=$1 AND deleted_at IS NULL AND activa=TRUE
-       AND fecha_inicio<=$2::date AND fecha_inicio + $3::int >=$2::date
-       AND (fecha_fin IS NULL OR fecha_fin>=$2::date)
+       AND fecha_inicio::date<=$2::date AND fecha_inicio::date + $3::int >=$2::date
+       AND (fecha_fin IS NULL OR fecha_fin::date>=$2::date)
      ORDER BY fecha_inicio DESC FOR SHARE`, [animalId, date, maxDays])).rows;
     if (rows.length > 1)
         throw new ValidationError('La vaca tiene más de una lactancia activa. Cierra el registro duplicado antes de continuar.');
@@ -163,15 +163,15 @@ recordsRouter.get('/producciones/vacas-activas', requirePermission('PRODUCCION_C
      ), partos AS (
        SELECT DISTINCT ON (p.id_madre) p.id_madre,p.fecha_parto
        FROM parto p JOIN vacas v ON v.id_animal=p.id_madre
-       WHERE p.deleted_at IS NULL AND p.fecha_parto<=$1::date
-         AND p.fecha_parto+v.dias_maximos_ordeno>=$1::date
+       WHERE p.deleted_at IS NULL AND p.fecha_parto::date<=$1::date
+         AND p.fecha_parto::date+v.dias_maximos_ordeno>=$1::date
        ORDER BY p.id_madre,p.fecha_parto DESC
      ), lactancias AS (
        SELECT DISTINCT ON (l.id_vaca) l.id_vaca,l.id_lactancia,l.fecha_inicio
        FROM lactancia l JOIN vacas v ON v.id_animal=l.id_vaca
-       WHERE l.deleted_at IS NULL AND l.activa=TRUE AND l.fecha_inicio<=$1::date
-         AND l.fecha_inicio+v.dias_maximos_ordeno>=$1::date
-         AND (l.fecha_fin IS NULL OR l.fecha_fin>=$1::date)
+       WHERE l.deleted_at IS NULL AND l.activa=TRUE AND l.fecha_inicio::date<=$1::date
+         AND l.fecha_inicio::date+v.dias_maximos_ordeno>=$1::date
+         AND (l.fecha_fin IS NULL OR l.fecha_fin::date>=$1::date)
        ORDER BY l.id_vaca,l.fecha_inicio DESC
      )
      SELECT v.id_animal,v.nombre,v.codigo_arete,l.id_lactancia,l.fecha_inicio,p.fecha_parto
@@ -198,15 +198,15 @@ recordsRouter.get('/producciones/vacas-elegibles', requirePermission('PRODUCCION
      ), partos AS (
        SELECT DISTINCT ON (p.id_madre) p.id_madre,p.fecha_parto
        FROM parto p JOIN vacas v ON v.id_animal=p.id_madre
-       WHERE p.deleted_at IS NULL AND p.fecha_parto<=$1::date
-         AND p.fecha_parto+v.dias_maximos_ordeno>=$1::date
+       WHERE p.deleted_at IS NULL AND p.fecha_parto::date<=$1::date
+         AND p.fecha_parto::date+v.dias_maximos_ordeno>=$1::date
        ORDER BY p.id_madre,p.fecha_parto DESC
      ), lactancias AS (
        SELECT DISTINCT ON (l.id_vaca) l.id_vaca,l.id_lactancia,l.fecha_inicio,l.activa
        FROM lactancia l JOIN vacas v ON v.id_animal=l.id_vaca
-       WHERE l.deleted_at IS NULL AND l.activa=TRUE AND l.fecha_inicio<=$1::date
-         AND l.fecha_inicio+v.dias_maximos_ordeno>=$1::date
-         AND (l.fecha_fin IS NULL OR l.fecha_fin>=$1::date)
+       WHERE l.deleted_at IS NULL AND l.activa=TRUE AND l.fecha_inicio::date<=$1::date
+         AND l.fecha_inicio::date+v.dias_maximos_ordeno>=$1::date
+         AND (l.fecha_fin IS NULL OR l.fecha_fin::date>=$1::date)
        ORDER BY l.id_vaca,l.fecha_inicio DESC
      )
      SELECT v.id_animal,v.nombre,v.codigo_arete,v.en_ordeno,p.fecha_parto,
@@ -234,8 +234,8 @@ recordsRouter.put('/producciones/vacas/:id/ordeno', requirePermission('PRODUCCIO
         const rules = await reproductionRulesForAnimal(client, id);
         if (input.en_ordeno) {
             const recentBirth = (await client.query(`SELECT id_parto FROM parto
-         WHERE id_madre=$1 AND deleted_at IS NULL AND fecha_parto<=$2::date
-           AND fecha_parto + $3::int >=$2::date
+         WHERE id_madre=$1 AND deleted_at IS NULL AND fecha_parto::date<=$2::date
+           AND fecha_parto::date + $3::int >=$2::date
          ORDER BY fecha_parto DESC LIMIT 1 FOR SHARE`, [id, referenceDate, rules.dias_maximos_ordeno_posparto])).rows[0];
             if (!recentBirth)
                 throw new ValidationError(`Para iniciar el ordeño la vaca debe tener un parto dentro de los últimos ${rules.dias_maximos_ordeno_posparto} días.`);
@@ -251,7 +251,7 @@ recordsRouter.put('/producciones/vacas/:id/ordeno', requirePermission('PRODUCCIO
            SELECT l2.id_lactancia FROM lactancia l2
            JOIN parto p2 ON p2.id_parto=l2.id_parto AND p2.deleted_at IS NULL
            WHERE l2.id_vaca=$1 AND l2.deleted_at IS NULL AND l2.activa=TRUE
-             AND p2.fecha_parto<=$2::date AND p2.fecha_parto + $3::int >=$2::date
+             AND p2.fecha_parto::date<=$2::date AND p2.fecha_parto::date + $3::int >=$2::date
            ORDER BY p2.fecha_parto DESC LIMIT 1
          ),FALSE),updated_at=NOW()
          WHERE id_vaca=$1 AND deleted_at IS NULL AND activa=TRUE`, [id, referenceDate, rules.dias_maximos_ordeno_posparto]);
