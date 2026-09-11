@@ -138,6 +138,9 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
         id_ubicacion: z.string().uuid().optional(),
         id_especie: z.string().uuid().optional(),
         id_categoria_animal: z.string().uuid().optional(),
+        categoria_codigo: z.enum(['EN_PROPIEDAD', 'FUERA_PROPIEDAD']).optional(),
+        clasificacion: z.enum(['VACA', 'VACONA', 'TORO', 'TORETE', 'TERNERA', 'TERNERO', 'SIN_CLASIFICAR']).optional(),
+        propiedad_principal: z.literal('true').optional(),
         id_propietario: z.string().uuid().optional(),
         id_raza: z.string().uuid().optional(),
         id_color: z.string().uuid().optional(),
@@ -196,6 +199,12 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
         add('a.id_especie=?', p.id_especie);
     if (p.id_categoria_animal)
         add('a.id_categoria_animal=?', p.id_categoria_animal);
+    if (p.categoria_codigo)
+        add('ca.codigo=?', p.categoria_codigo);
+    if (p.clasificacion)
+        add('fn_clasificacion_animal(a.id_animal,CURRENT_DATE)=?', p.clasificacion);
+    if (p.propiedad_principal)
+        where.push('pg.es_principal=TRUE');
     if (p.id_propietario)
         add(`EXISTS (
     SELECT 1 FROM animal_propietario apf
@@ -222,7 +231,8 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
     const limitIndex = params.length - 1;
     const offsetIndex = params.length;
     const result = await pool.query(`SELECT a.*,e.nombre especie,oa.nombre origen,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,
-      g.nombre grupo,u.nombre ubicacion,pg.nombre propiedad,im.secure_url foto_perfil,
+      fn_clasificacion_animal(a.id_animal,CURRENT_DATE) clasificacion_codigo,
+      g.nombre grupo,u.nombre ubicacion,pg.nombre propiedad,pg.es_principal propiedad_es_principal,im.secure_url foto_perfil,
       mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
       COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)
        FROM marquilla_usuario mu JOIN usuario mu_u ON mu_u.id_usuario=mu.id_usuario AND mu_u.deleted_at IS NULL

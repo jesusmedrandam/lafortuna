@@ -104,6 +104,7 @@ export interface Animal {
   id_ubicacion_actual: string | null;
   ubicacion: string | null;
   propiedad?: string | null;
+  propiedad_es_principal?: boolean | null;
   estado: string;
   condicion?: string;
   foto_perfil: string | null;

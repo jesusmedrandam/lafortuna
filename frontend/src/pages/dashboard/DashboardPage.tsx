@@ -93,52 +93,64 @@ function renderValue(value: unknown, format?: MetricDefinition['format']) {
   return formatNumber(Number(value ?? 0));
 }
 
-function DashboardModuleHeading({ module }: { module: ModuleDefinition }) {
+function DashboardModuleHeading({ module, onClick }: { module: ModuleDefinition; onClick?: () => void }) {
   const Icon = module.icon;
-  return <div className="dashboard-module-heading">
+  const content = <>
     <span className="stat-icon"><Icon size={22} /></span>
     <span><strong>{module.label}</strong><small>{module.description}</small></span>
     <ArrowRight size={17} />
-  </div>;
+  </>;
+  return onClick
+    ? <button type="button" className="dashboard-module-heading dashboard-module-heading-link" onClick={onClick}>{content}</button>
+    : <div className="dashboard-module-heading">{content}</div>;
+}
+
+function animalListRoute(filters: Record<string, string>) {
+  return `/animales?${new URLSearchParams(filters).toString()}`;
 }
 
 function AnimalsDashboardCard({ module, values, onOpen }: {
   module: ModuleDefinition;
   values: DashboardSummary['animales'];
-  onOpen: () => void;
+  onOpen: (route?: string) => void;
 }) {
   const groups = values?.grupos ?? [];
-  return <Card className="dashboard-module-card dashboard-animals-card stat-green" onClick={onOpen}>
-    <DashboardModuleHeading module={module} />
+  const metric = (label: string, value: unknown, route: string, highlighted = false) => <button
+    type="button"
+    className={`dashboard-animal-metric${highlighted ? ' highlighted' : ''}`}
+    onClick={() => onOpen(route)}
+    title={`Mostrar ${label.toLocaleLowerCase('es')}`}
+  ><small>{label}</small><strong>{formatNumber(Number(value ?? 0))}</strong></button>;
+  return <Card className="dashboard-module-card dashboard-animals-card stat-green">
+    <DashboardModuleHeading module={module} onClick={() => onOpen('/animales')} />
     <div className="dashboard-feature-summary">
-      <span><strong>{formatNumber(values?.activos ?? 0)}</strong><small>Animales activos</small></span>
-      <span><strong>{formatNumber(values?.principal_total ?? 0)}</strong><small>Propiedad principal</small></span>
-      <span><strong>{formatNumber(values?.fuera_propiedad ?? 0)}</strong><small>Fuera de propiedad</small></span>
-      <span><strong>{formatNumber(values?.inactivos ?? 0)}</strong><small>No activos</small></span>
+      {metric('Activos', values?.activos, animalListRoute({ categoria_codigo: 'TODAS', estado: 'ACTIVO' }))}
+      {metric('En propiedad', values?.en_propiedad, animalListRoute({ categoria_codigo: 'EN_PROPIEDAD' }), true)}
+      {metric('Fuera de p.', values?.fuera_propiedad, animalListRoute({ categoria_codigo: 'FUERA_PROPIEDAD' }))}
     </div>
     <div className="dashboard-animal-sections">
       <section>
         <h3>Grupos · propiedad principal</h3>
-        <div className="dashboard-flat-counts">
-          {groups.length ? groups.map((group) => <span key={group.id_grupo}><small>{group.nombre}</small><strong>{formatNumber(group.total)}</strong></span>) : <small className="muted">No hay grupos registrados.</small>}
+        <div className="dashboard-animal-metric-grid">
+          {groups.length ? groups.map((group) => <span key={group.id_grupo}>{metric(group.nombre, group.total, animalListRoute({ categoria_codigo: 'EN_PROPIEDAD', id_grupo: group.id_grupo }))}</span>) : <small className="muted">No hay grupos registrados.</small>}
         </div>
       </section>
       <section>
         <h3>Clasificación</h3>
-        <div className="dashboard-flat-counts">
-          <span><small>Vacas</small><strong>{formatNumber(values?.vacas ?? 0)}</strong></span>
-          <span><small>Vaconas</small><strong>{formatNumber(values?.vaconas ?? 0)}</strong></span>
-          <span><small>Toros</small><strong>{formatNumber(values?.toros ?? 0)}</strong></span>
-          <span><small>Toretes</small><strong>{formatNumber(values?.toretes ?? 0)}</strong></span>
-          <span><small>Terneras</small><strong>{formatNumber(values?.terneras ?? 0)}</strong></span>
-          <span><small>Terneros</small><strong>{formatNumber(values?.terneros ?? 0)}</strong></span>
+        <div className="dashboard-animal-metric-grid">
+          {metric('Vacas', values?.vacas, animalListRoute({ categoria_codigo: 'EN_PROPIEDAD', clasificacion: 'VACA', propiedad_principal: 'true', estado: 'ACTIVO' }))}
+          {metric('Vaconas', values?.vaconas, animalListRoute({ categoria_codigo: 'EN_PROPIEDAD', clasificacion: 'VACONA', propiedad_principal: 'true', estado: 'ACTIVO' }))}
+          {metric('Terneras', values?.terneras, animalListRoute({ categoria_codigo: 'EN_PROPIEDAD', clasificacion: 'TERNERA', propiedad_principal: 'true', estado: 'ACTIVO' }))}
+          {metric('Toros', values?.toros, animalListRoute({ categoria_codigo: 'EN_PROPIEDAD', clasificacion: 'TORO', propiedad_principal: 'true', estado: 'ACTIVO' }))}
+          {metric('Toretes', values?.toretes, animalListRoute({ categoria_codigo: 'EN_PROPIEDAD', clasificacion: 'TORETE', propiedad_principal: 'true', estado: 'ACTIVO' }))}
+          {metric('Terneros', values?.terneros, animalListRoute({ categoria_codigo: 'EN_PROPIEDAD', clasificacion: 'TERNERO', propiedad_principal: 'true', estado: 'ACTIVO' }))}
         </div>
       </section>
       <section>
         <h3>Sexo</h3>
-        <div className="dashboard-flat-counts">
-          <span><small>Hembras</small><strong>{formatNumber(values?.hembras ?? 0)}</strong></span>
-          <span><small>Machos</small><strong>{formatNumber(values?.machos ?? 0)}</strong></span>
+        <div className="dashboard-animal-metric-grid">
+          {metric('Hembras', values?.hembras, animalListRoute({ categoria_codigo: 'EN_PROPIEDAD', sexo: 'HEMBRA', propiedad_principal: 'true', estado: 'ACTIVO' }))}
+          {metric('Machos', values?.machos, animalListRoute({ categoria_codigo: 'EN_PROPIEDAD', sexo: 'MACHO', propiedad_principal: 'true', estado: 'ACTIVO' }))}
         </div>
       </section>
     </div>
@@ -153,7 +165,12 @@ function IncomeDashboardCard({ module, values, onOpen }: {
   const concepts = (values?.conceptos ?? []).filter((concept) => Number(concept.total) > 0);
   return <Card className="dashboard-module-card dashboard-income-card stat-lime" onClick={onOpen}>
     <DashboardModuleHeading module={module} />
-    <div className="dashboard-income-total"><small>Total del año</small><strong>{money(values?.anio)}</strong></div>
+    <div className="dashboard-income-periods">
+      <span><small>Esta semana</small><strong>{money(values?.semana)}</strong></span>
+      <span><small>Este mes</small><strong>{money(values?.mes)}</strong></span>
+      <span className="highlighted"><small>Este año</small><strong>{money(values?.anio)}</strong></span>
+    </div>
+    <h3 className="dashboard-income-caption">Este año por concepto</h3>
     <div className="dashboard-income-concepts">
       {concepts.length ? concepts.map((concept) => <span key={concept.codigo}><small>{concept.nombre}</small><strong>{money(concept.total)}</strong></span>) : <small className="muted">Aún no hay ingresos registrados este año.</small>}
     </div>
@@ -227,7 +244,7 @@ export function DashboardPage() {
       {visibleModules.map((module) => {
         const values = query.data?.[module.key] as unknown as Record<string, unknown>;
         const selectedMetrics = module.metrics.filter((metric) => currentConfiguration[module.key]?.includes(metric.key));
-        if (module.key === 'animales') return <AnimalsDashboardCard key={module.key} module={module} values={query.data!.animales} onOpen={() => navigate(module.route)} />;
+        if (module.key === 'animales') return <AnimalsDashboardCard key={module.key} module={module} values={query.data!.animales} onOpen={(route) => navigate(route ?? module.route)} />;
         if (module.key === 'ingresos') return <IncomeDashboardCard key={module.key} module={module} values={query.data!.ingresos} onOpen={() => navigate(module.route)} />;
         return <Card key={module.key} className={`dashboard-module-card stat-${module.tone}`} onClick={() => navigate(module.route)}>
           <DashboardModuleHeading module={module} />
