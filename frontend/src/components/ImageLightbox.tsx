@@ -18,6 +18,7 @@ interface ImageLightboxProps {
   initialIndex: number;
   onClose: () => void;
   actions?: (item: LightboxMedia) => ReactNode;
+  minimalControls?: boolean;
 }
 
 function safeFilename(item:LightboxMedia) {
@@ -49,9 +50,12 @@ async function downloadMedia(item:LightboxMedia) {
   }
 }
 
-export function ImageLightbox({items,initialIndex,onClose,actions}:ImageLightboxProps) {
+export function ImageLightbox({items,initialIndex,onClose,actions,minimalControls=false}:ImageLightboxProps) {
   const [index,setIndex]=useState(initialIndex);
   const stageRef=useRef<HTMLDivElement|null>(null);
+  const onCloseRef=useRef(onClose);
+  const historyEntryActive=useRef(false);
+  const historyMarker=useRef(`sgb-lightbox-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const [view,setView]=useState({scale:1,x:0,y:0});
   const touchStart=useRef<{x:number;y:number;view:{scale:number;x:number;y:number}}|null>(null);
   const pinchStart=useRef<{distance:number;midX:number;midY:number;view:{scale:number;x:number;y:number}}|null>(null);
@@ -80,6 +84,25 @@ export function ImageLightbox({items,initialIndex,onClose,actions}:ImageLightbox
 
   useEffect(()=>setIndex(Math.min(Math.max(initialIndex,0),Math.max(items.length-1,0))),[initialIndex,items.length]);
   useEffect(()=>setView({scale:1,x:0,y:0}),[index]);
+  useEffect(()=>{onCloseRef.current=onClose;},[onClose]);
+  useEffect(()=>{
+    const marker=historyMarker.current;
+    window.history.pushState({...window.history.state,sgbLightbox:marker},'',window.location.href);
+    historyEntryActive.current=true;
+    const onPopState=()=>{
+      if(!historyEntryActive.current)return;
+      historyEntryActive.current=false;
+      onCloseRef.current();
+    };
+    window.addEventListener('popstate',onPopState);
+    return()=>{
+      window.removeEventListener('popstate',onPopState);
+      if(historyEntryActive.current&&window.history.state?.sgbLightbox===marker){
+        historyEntryActive.current=false;
+        window.history.back();
+      }
+    };
+  },[]);
   useEffect(()=>{
     const onKey=(event:KeyboardEvent)=>{
       if(event.key==='Escape')onClose();
@@ -92,7 +115,7 @@ export function ImageLightbox({items,initialIndex,onClose,actions}:ImageLightbox
 
   if(!current)return null;
   return <div
-    className="image-lightbox"
+    className={`image-lightbox ${minimalControls?'lightbox-minimal-controls':''}`}
     role="dialog"
     aria-modal="true"
     onMouseDown={(event)=>{if(event.target===event.currentTarget)onClose();}}
@@ -126,9 +149,9 @@ export function ImageLightbox({items,initialIndex,onClose,actions}:ImageLightbox
       touchStart.current=null;
     }}
   >
-    <IconButton className="lightbox-download" label="Descargar archivo" onClick={()=>void downloadMedia(current)}><Download size={22}/></IconButton>
-    <IconButton className="lightbox-close" label="Cerrar visor" onClick={onClose}><X size={28}/></IconButton>
-    {items.length>1&&view.scale===1?<><IconButton className="lightbox-arrow lightbox-arrow-left" label="Archivo anterior" onClick={previous}><ChevronLeft size={34}/></IconButton><IconButton className="lightbox-arrow lightbox-arrow-right" label="Archivo siguiente" onClick={next}><ChevronRight size={34}/></IconButton></>:null}
+    {!minimalControls?<IconButton className="lightbox-download" label="Descargar archivo" onClick={()=>void downloadMedia(current)}><Download size={22}/></IconButton>:null}
+    {!minimalControls?<IconButton className="lightbox-close" label="Cerrar visor" onClick={onClose}><X size={28}/></IconButton>:null}
+    {!minimalControls&&items.length>1&&view.scale===1?<><IconButton className="lightbox-arrow lightbox-arrow-left" label="Archivo anterior" onClick={previous}><ChevronLeft size={34}/></IconButton><IconButton className="lightbox-arrow lightbox-arrow-right" label="Archivo siguiente" onClick={next}><ChevronRight size={34}/></IconButton></>:null}
     <div className="image-lightbox-content">
       <div ref={stageRef} className={`lightbox-media-stage ${view.scale>1?'zoomed':''} ${dragStart.current?'dragging':''}`}
         onDoubleClick={(event)=>{if(current.type==='VIDEO')return;if(view.scale>1)setView({scale:1,x:0,y:0});else zoomAt(2.5,event.clientX,event.clientY);}}
@@ -138,10 +161,11 @@ export function ImageLightbox({items,initialIndex,onClose,actions}:ImageLightbox
         onPointerUp={(event)=>{if(dragStart.current?.pointerId===event.pointerId){dragStart.current=null;event.currentTarget.releasePointerCapture(event.pointerId);}}}
         onPointerCancel={()=>{dragStart.current=null;}}>
         {current.type==='VIDEO'?<video src={current.url} controls autoPlay/>:<img draggable={false} src={current.url} alt={current.title} style={{transform:`translate3d(${view.x}px,${view.y}px,0) scale(${view.scale})`}}/>}
+        {minimalControls?<IconButton className="lightbox-download-overlay" label="Descargar archivo" onClick={(event)=>{event.stopPropagation();void downloadMedia(current);}}><Download size={22}/></IconButton>:null}
       </div>
       <div className="image-lightbox-details">
         <div><strong>{current.title}</strong><small>{[current.subtitle,current.date?formatDate(current.date):null,items.length>1?`${index+1} de ${items.length}`:null].filter(Boolean).join(' · ')}</small></div>
-        {actions?.(current)}
+        {!minimalControls?actions?.(current):null}
       </div>
     </div>
   </div>;

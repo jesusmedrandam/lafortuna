@@ -473,6 +473,7 @@ export function AnimalDetailPage() {
       items={viewerImages.map((image) => ({ key: image.key, url: image.url, type: image.type, title: image.title, date: image.createdAt }))}
       initialIndex={viewerIndex}
       onClose={() => setViewerIndex(null)}
+      minimalControls
       actions={(media) => {
         const image = viewerImages.find((item) => item.key === media.key);
         if (!hasPermission('IMAGEN_ADMINISTRAR')) return null;

@@ -251,14 +251,20 @@ function textSource(value) {
 async function notifyOverdueCleanings(client, today) {
     const rows = (await client.query(`SELECT p.id_potrero,u.nombre,MAX(COALESCE(l.fecha_finalizacion,l.fecha_inicio))::text ultima_limpieza,
        CASE WHEN MAX(COALESCE(l.fecha_finalizacion,l.fecha_inicio)) IS NULL THEN NULL
-         ELSE ($1::date-MAX(COALESCE(l.fecha_finalizacion,l.fecha_inicio)))::int END dias
+         ELSE DATE_PART(
+           'day',
+           $1::date::timestamp-MAX(COALESCE(l.fecha_finalizacion,l.fecha_inicio))::date::timestamp
+         )::int END dias
      FROM potrero p
      JOIN ubicacion u ON u.id_ubicacion=p.id_ubicacion
      LEFT JOIN limpieza_potrero l ON l.id_potrero=p.id_potrero AND l.estado='COMPLETADO' AND l.deleted_at IS NULL
      WHERE p.deleted_at IS NULL AND u.deleted_at IS NULL AND u.activo=TRUE
      GROUP BY p.id_potrero,u.nombre
      HAVING MAX(COALESCE(l.fecha_finalizacion,l.fecha_inicio)) IS NULL
-       OR $1::date-MAX(COALESCE(l.fecha_finalizacion,l.fecha_inicio)) >= $2`, [today, env.CLEANING_ALERT_DAYS])).rows;
+       OR DATE_PART(
+         'day',
+         $1::date::timestamp-MAX(COALESCE(l.fecha_finalizacion,l.fecha_inicio))::date::timestamp
+       ) >= $2::int`, [today, env.CLEANING_ALERT_DAYS])).rows;
     const month = today.slice(0, 7);
     for (const row of rows) {
         const never = row.dias === null;

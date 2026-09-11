@@ -261,7 +261,7 @@ imagesRouter.get('/multimedia', requirePermission('IMAGEN_CONSULTAR'), asyncHand
               WHERE pc.id_parto=bp.id_parto AND pc.deleted_at IS NULL)
           )
         )
-        ORDER BY (bp.id_parto=i.id_parto) DESC,ABS(bp.fecha_parto-i.fecha_toma::date),bp.created_at DESC
+        ORDER BY (bp.id_parto=i.id_parto) DESC,ABS(bp.fecha_parto::date-i.fecha_toma::date),bp.created_at DESC
         LIMIT 1
       ) p ON TRUE
       LEFT JOIN animal madre ON madre.id_animal=p.id_madre
