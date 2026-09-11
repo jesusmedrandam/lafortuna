@@ -315,6 +315,7 @@ export interface MultimediaItem {
   titulo: string;
   subtitulo: string | null;
   secure_url: string;
+  thumbnail_url?: string | null;
   public_id: string;
   nombre_original: string | null;
   descripcion: string | null;

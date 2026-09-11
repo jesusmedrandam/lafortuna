@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, Download, X } from 'lucide-react';
 import { IconButton } from './ui';
 import { formatDate } from '../utils';
+import { optimizedCloudinaryMediaUrl } from '../media';
 
 export interface LightboxMedia {
   key: string;
@@ -25,8 +26,8 @@ function safeFilename(item:LightboxMedia) {
   const extension=item.type==='VIDEO'?'mp4':'jpg';
   const base=(item.filename||item.title||'archivo')
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[^a-zA-Z0-9._-]+/g,'-').replace(/^-+|-+$/g,'');
-  return base.includes('.')?base:`${base||'archivo'}.${extension}`;
+    .replace(/[^a-zA-Z0-9._-]+/g,'-').replace(/\.[^.]+$/,'').replace(/^-+|-+$/g,'');
+  return `${base||'archivo'}.${extension}`;
 }
 
 function attachmentUrl(item:LightboxMedia) {
@@ -37,8 +38,9 @@ function attachmentUrl(item:LightboxMedia) {
 
 async function downloadMedia(item:LightboxMedia) {
   const filename=safeFilename(item);
+  const downloadUrl=optimizedCloudinaryMediaUrl(item.url,item.type??'IMAGEN','download');
   try {
-    const response=await fetch(item.url);
+    const response=await fetch(downloadUrl);
     if(!response.ok)throw new Error('No se pudo descargar el archivo.');
     const objectUrl=URL.createObjectURL(await response.blob());
     const link=document.createElement('a');
@@ -46,7 +48,7 @@ async function downloadMedia(item:LightboxMedia) {
     setTimeout(()=>URL.revokeObjectURL(objectUrl),1000);
   } catch {
     const link=document.createElement('a');
-    link.href=attachmentUrl(item);link.download=filename;document.body.appendChild(link);link.click();link.remove();
+    link.href=attachmentUrl({...item,url:downloadUrl});link.download=filename;document.body.appendChild(link);link.click();link.remove();
   }
 }
 
@@ -61,6 +63,7 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
   const pinchStart=useRef<{distance:number;midX:number;midY:number;view:{scale:number;x:number;y:number}}|null>(null);
   const dragStart=useRef<{pointerId:number;x:number;y:number;view:{scale:number;x:number;y:number}}|null>(null);
   const current=items[index];
+  const displayUrl=current?optimizedCloudinaryMediaUrl(current.url,current.type??'IMAGEN','display'):'';
   const previous=()=>setIndex((value)=>(value-1+items.length)%items.length);
   const next=()=>setIndex((value)=>(value+1)%items.length);
 
@@ -160,7 +163,7 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
         onPointerMove={(event)=>{const start=dragStart.current;if(!start||start.pointerId!==event.pointerId)return;setView(constrained({...start.view,x:start.view.x+event.clientX-start.x,y:start.view.y+event.clientY-start.y}));}}
         onPointerUp={(event)=>{if(dragStart.current?.pointerId===event.pointerId){dragStart.current=null;event.currentTarget.releasePointerCapture(event.pointerId);}}}
         onPointerCancel={()=>{dragStart.current=null;}}>
-        {current.type==='VIDEO'?<video src={current.url} controls autoPlay/>:<img draggable={false} src={current.url} alt={current.title} style={{transform:`translate3d(${view.x}px,${view.y}px,0) scale(${view.scale})`}}/>}
+        {current.type==='VIDEO'?<video src={displayUrl} controls autoPlay/>:<img draggable={false} src={displayUrl} alt={current.title} style={{transform:`translate3d(${view.x}px,${view.y}px,0) scale(${view.scale})`}}/>}
         {minimalControls?<IconButton className="lightbox-download-overlay" label="Descargar archivo" onClick={(event)=>{event.stopPropagation();void downloadMedia(current);}}><Download size={22}/></IconButton>:null}
       </div>
       <div className="image-lightbox-details">

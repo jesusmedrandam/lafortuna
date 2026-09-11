@@ -115,7 +115,7 @@ animalImagesRouter.post('/', requirePermission('IMAGEN_ADMINISTRAR'), mediaUploa
     if (profile && !file.mimetype.startsWith('image/'))
         throw new ValidationError('La foto de perfil debe ser una imagen.');
     const ids = profile ? [primary] : animalIds(req.body.id_animales, primary);
-    const cloud = profile ? await uploadAnimalImage(file.buffer, primary) : await uploadAnimalMedia(file.buffer, primary);
+    const cloud = profile ? await uploadAnimalImage(file.buffer, primary) : await uploadAnimalMedia(file.buffer, primary, file.mimetype);
     try {
         const row = await transaction(async (client) => {
             await assertAnimals(client, ids);

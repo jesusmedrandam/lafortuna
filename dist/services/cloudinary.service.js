@@ -47,24 +47,39 @@ function uploadBuffer(buffer, options) {
         stream.end(buffer);
     });
 }
+const storedPhotoTransformation = [{
+        width: 2048,
+        height: 2048,
+        crop: 'limit',
+        quality: 'auto:good',
+    }];
+const storedVideoTransformation = [{
+        width: 1920,
+        height: 1920,
+        crop: 'limit',
+        quality: 'auto:good',
+        video_codec: 'h264',
+        audio_codec: 'aac',
+    }];
 export function uploadAnimalImage(buffer, animalId) {
-    // f_auto/fetch_format se aplica al entregar la imagen, no durante la carga.
-    // Guardamos el original y Cloudinary optimiza las URLs derivadas cuando se soliciten.
     return uploadBuffer(buffer, {
         folder: `${configuredFolder}/${animalId}`,
         resource_type: 'image',
         overwrite: false,
         unique_filename: true,
         use_filename: false,
+        transformation: storedPhotoTransformation,
     });
 }
-export function uploadAnimalMedia(buffer, animalId) {
+export function uploadAnimalMedia(buffer, animalId, mimeType) {
+    const isVideo = mimeType.toLowerCase().startsWith('video/');
     return uploadBuffer(buffer, {
         folder: `${configuredFolder}/${animalId}`,
-        resource_type: 'auto',
+        resource_type: isVideo ? 'video' : 'image',
         overwrite: false,
         unique_filename: true,
         use_filename: false,
+        transformation: isVideo ? storedVideoTransformation : storedPhotoTransformation,
     });
 }
 export function uploadMarkImage(buffer, markId) {
@@ -73,7 +88,7 @@ export function uploadMarkImage(buffer, markId) {
         resource_type: 'image',
         overwrite: true,
         invalidate: true,
-        transformation: [{ width: 1200, height: 900, crop: 'fill', gravity: 'auto' }],
+        transformation: [{ width: 1200, height: 900, crop: 'fill', gravity: 'auto', quality: 'auto:good' }],
     });
 }
 export function uploadUserProfileImage(buffer, userId) {
@@ -82,6 +97,7 @@ export function uploadUserProfileImage(buffer, userId) {
         resource_type: 'image',
         overwrite: true,
         invalidate: true,
+        transformation: [{ width: 1200, height: 1200, crop: 'limit', quality: 'auto:good' }],
     });
 }
 export function uploadRecordImage(buffer, moduleName, recordId) {
@@ -92,6 +108,7 @@ export function uploadRecordImage(buffer, moduleName, recordId) {
         overwrite: false,
         unique_filename: true,
         use_filename: false,
+        transformation: storedPhotoTransformation,
     });
 }
 export function cloudinaryThumbnailUrl(publicId, resourceType = 'image') {
