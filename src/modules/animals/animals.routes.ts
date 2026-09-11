@@ -145,7 +145,32 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
   };
   if (p.q) {
     params.push(`%${p.q}%`);
-    where.push(`(a.nombre ILIKE $${params.length} OR a.codigo_arete ILIKE $${params.length} OR COALESCE(a.descripcion,'') ILIKE $${params.length})`);
+    where.push(`(
+      a.nombre ILIKE $${params.length}
+      OR COALESCE(a.codigo_arete,'') ILIKE $${params.length}
+      OR COALESCE(a.descripcion,'') ILIKE $${params.length}
+      OR COALESCE(oa.nombre,'') ILIKE $${params.length}
+      OR COALESCE(oa.codigo,'') ILIKE $${params.length}
+      OR COALESCE(pg.nombre,'') ILIKE $${params.length}
+      OR COALESCE(pg.codigo,'') ILIKE $${params.length}
+      OR COALESCE(mq.nombre,'') ILIKE $${params.length}
+      OR COALESCE(mq.codigo,'') ILIKE $${params.length}
+      OR REPLACE(fn_clasificacion_animal(a.id_animal,CURRENT_DATE),'_',' ') ILIKE $${params.length}
+      OR EXISTS(
+        SELECT 1 FROM animal_propietario apq
+        JOIN usuario upq ON upq.id_usuario=apq.id_usuario AND upq.deleted_at IS NULL
+        WHERE apq.id_animal=a.id_animal AND apq.fecha_hasta IS NULL AND apq.deleted_at IS NULL
+          AND (TRIM(CONCAT(upq.nombres,' ',upq.apellidos)) ILIKE $${params.length}
+            OR upq.correo ILIKE $${params.length})
+      )
+      OR EXISTS(
+        SELECT 1 FROM marquilla_usuario muq
+        JOIN usuario umq ON umq.id_usuario=muq.id_usuario AND umq.deleted_at IS NULL
+        WHERE muq.id_marquilla=a.id_marquilla AND muq.deleted_at IS NULL
+          AND (TRIM(CONCAT(umq.nombres,' ',umq.apellidos)) ILIKE $${params.length}
+            OR umq.correo ILIKE $${params.length})
+      )
+    )`);
   }
   if (p.sexo) add('a.sexo=?', p.sexo);
   if (p.estado) add('a.estado=?', p.estado);
@@ -173,7 +198,8 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
   const limitIndex = params.length - 1;
   const offsetIndex = params.length;
   const result = await pool.query(
-    `SELECT a.*,e.nombre especie,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,im.secure_url foto_perfil,
+    `SELECT a.*,e.nombre especie,oa.nombre origen,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,
+      g.nombre grupo,u.nombre ubicacion,pg.nombre propiedad,im.secure_url foto_perfil,
       mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
       COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)
        FROM marquilla_usuario mu JOIN usuario mu_u ON mu_u.id_usuario=mu.id_usuario AND mu_u.deleted_at IS NULL
@@ -190,10 +216,12 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
       COUNT(*) OVER()::int total
      FROM animal a
      JOIN especie e ON e.id_especie=a.id_especie
+     LEFT JOIN origen_animal oa ON oa.id_origen=a.id_origen AND oa.deleted_at IS NULL
      JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
      LEFT JOIN condicion_animal coa ON coa.codigo=a.estado
      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
      LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
+     LEFT JOIN propiedad_ganadera pg ON pg.id_propiedad=COALESCE(g.id_propiedad,u.id_propiedad) AND pg.deleted_at IS NULL
      LEFT JOIN marquilla mq ON mq.id_marquilla=a.id_marquilla AND mq.deleted_at IS NULL
      LEFT JOIN animal_imagen im ON im.id_animal=a.id_animal AND im.es_perfil AND im.deleted_at IS NULL
      WHERE ${where.join(' AND ')}
@@ -271,6 +299,7 @@ animalsRouter.delete('/enlaces-publicos/:shareId', requirePermission('ANIMAL_MOD
 animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
   const result = await pool.query(
     `SELECT a.*,e.nombre especie,oa.nombre origen,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
+      fn_clasificacion_animal(a.id_animal,CURRENT_DATE) clasificacion_codigo,
       mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
       COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)
        FROM marquilla_usuario mu JOIN usuario mu_u ON mu_u.id_usuario=mu.id_usuario AND mu_u.deleted_at IS NULL

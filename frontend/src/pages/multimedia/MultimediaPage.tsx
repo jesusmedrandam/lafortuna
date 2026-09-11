@@ -46,9 +46,10 @@ export function MultimediaPage(){
   const [viewerIndex,setViewerIndex]=useState<number|null>(null);
   const page=Math.max(1,Number(params.get('page')??1));
   const order=params.get('orden')??'NEWEST';
-  const filters=Object.fromEntries(filterKeys.map((key)=>[key,params.get(key)??''])) as Record<(typeof filterKeys)[number],string>;
-  const category=filters.categoria;
-  const activeCount=filterKeys.filter((key)=>Boolean(filters[key])).length;
+  const requestedCategory=params.get('categoria');
+  const category=requestedCategory===null?'ANIMALES':requestedCategory==='TODAS'?'':requestedCategory;
+  const filters={...Object.fromEntries(filterKeys.map((key)=>[key,params.get(key)??''])),categoria:category} as Record<(typeof filterKeys)[number],string>;
+  const activeCount=filterKeys.filter((key)=>key!=='categoria'&&Boolean(filters[key])).length;
 
   const options=useQuery({queryKey:['animal-filter-options'],queryFn:()=>apiRequest<AnimalFilterOptions>('/animales/opciones/filtros'),staleTime:10*60_000});
   const tags=useCatalog('etiquetas-multimedia');
@@ -65,8 +66,8 @@ export function MultimediaPage(){
   const viewerItems=useMemo<LightboxMedia[]>(()=>items.map((item)=>({key:item.id_multimedia,url:item.secure_url,type:item.tipo_archivo,title:item.titulo,subtitle:[item.subcategoria,item.subtitulo].filter(Boolean).join(' · '),date:item.fecha_toma,filename:item.nombre_original})),[items]);
 
   const setParam=(key:string,value:string)=>{const next=new URLSearchParams(params);if(value)next.set(key,value);else next.delete(key);if(key!=='page')next.set('page','1');setParams(next);};
-  const setCategory=(value:string)=>{const next=new URLSearchParams(params);contextualKeys.forEach((key)=>next.delete(key));if(value)next.set('categoria',value);else next.delete('categoria');next.set('page','1');setParams(next);};
-  const clearFilters=()=>{const next=new URLSearchParams(params);filterKeys.forEach((key)=>next.delete(key));next.set('page','1');setParams(next);};
+  const setCategory=(value:string)=>{const next=new URLSearchParams(params);contextualKeys.forEach((key)=>next.delete(key));next.set('categoria',value||'TODAS');next.set('page','1');setParams(next);};
+  const clearFilters=()=>{const next=new URLSearchParams(params);filterKeys.filter((key)=>key!=='categoria').forEach((key)=>next.delete(key));next.set('page','1');setParams(next);};
 
   const upload=useMutation({mutationFn:async()=>{if(!uploadFile||!uploadIds.length)throw new Error('Selecciona un archivo y al menos un animal.');const data=new FormData();data.set('archivo',uploadFile);data.set('es_perfil','false');data.set('id_animales',JSON.stringify(uploadIds));data.set('fecha_toma',uploadDate);data.set('id_etiquetas',JSON.stringify(uploadTags));return apiRequest(`/animales/${uploadIds[0]}/imagenes`,{method:'POST',body:data});},onSuccess:()=>{toast.show('Archivo subido correctamente.');setUploadFile(null);setUploadIds([]);setUploadTags([]);setUploadDate(currentDateInput());void client.invalidateQueries({queryKey:['multimedia']});},onError:(error)=>toast.show(error instanceof ApiError?error.message:(error as Error).message,'error')});
   const update=useMutation({mutationFn:()=>apiRequest(`/imagenes/${editing?.id_origen}`,{method:'PATCH',body:{...(editing?.es_perfil?{}:{id_animales:editIds}),fecha_toma:editDate,id_etiquetas:editTags}}),onSuccess:()=>{toast.show('Datos de la fotografía actualizados.');setEditing(null);void client.invalidateQueries({queryKey:['multimedia']});void client.invalidateQueries({queryKey:['animal']});},onError:(error)=>toast.show((error as ApiError).message,'error')});

@@ -128,6 +128,8 @@ function AnimalsDashboardCard({ module, values, onOpen }: {
         <div className="dashboard-flat-counts">
           <span><small>Vacas</small><strong>{formatNumber(values?.vacas ?? 0)}</strong></span>
           <span><small>Vaconas</small><strong>{formatNumber(values?.vaconas ?? 0)}</strong></span>
+          <span><small>Toros</small><strong>{formatNumber(values?.toros ?? 0)}</strong></span>
+          <span><small>Toretes</small><strong>{formatNumber(values?.toretes ?? 0)}</strong></span>
           <span><small>Terneros</small><strong>{formatNumber(values?.terneros ?? 0)}</strong></span>
         </div>
       </section>

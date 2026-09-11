@@ -48,7 +48,7 @@ export interface Profile {
 export interface DashboardSummary {
   animales: {
     en_propiedad: number; fuera_propiedad: number; activos: number; inactivos: number;
-    principal_total: number; vacas: number; vaconas: number; terneros: number; hembras: number; machos: number;
+    principal_total: number; vacas: number; vaconas: number; toros: number; toretes: number; terneros: number; hembras: number; machos: number;
     grupos: Array<{ id_grupo: string; nombre: string; total: number }>;
   };
   ingresos: {
@@ -93,6 +93,7 @@ export interface Animal {
   id_categoria_animal: string;
   categoria?: string;
   categoria_codigo?: string;
+  clasificacion_codigo?: 'VACA' | 'VACONA' | 'TORO' | 'TORETE' | 'TERNERA' | 'TERNERO' | 'SIN_CLASIFICAR';
   id_marquilla: string | null;
   marquilla?: string | null;
   marquilla_codigo?: string | null;
@@ -102,6 +103,7 @@ export interface Animal {
   grupo: string | null;
   id_ubicacion_actual: string | null;
   ubicacion: string | null;
+  propiedad?: string | null;
   estado: string;
   condicion?: string;
   foto_perfil: string | null;

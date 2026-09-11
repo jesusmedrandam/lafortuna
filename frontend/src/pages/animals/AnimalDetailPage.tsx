@@ -440,6 +440,7 @@ export function AnimalDetailPage() {
         {animal.grupo ? <CompactInfo icon={Users} label="Grupo" value={animal.grupo} /> : null}
         {animal.ubicacion ? <CompactInfo icon={MapPin} label="Ubicación actual" value={animal.ubicacion} /> : null}
         {animal.categoria ? <CompactInfo icon={Tag} label="Categoría" value={animal.categoria} /> : null}
+        {animal.clasificacion_codigo && animal.clasificacion_codigo !== 'SIN_CLASIFICAR' ? <CompactInfo icon={Beef} label="Clasificación" value={humanizeCode(animal.clasificacion_codigo)} /> : null}
         {animal.origen ? <CompactInfo icon={MapPin} label="Origen" value={animal.origen} /> : null}
         {animal.ultimo_pesaje ? <CompactInfo icon={Weight} label="Último peso" value={`${formatNumber(animal.ultimo_pesaje.peso_kg)} kg · ${formatDate(animal.ultimo_pesaje.fecha)}`} /> : null}
         {ownerText ? <CompactInfo icon={UserRound} label="Propietario(s)" value={ownerText} wide /> : null}

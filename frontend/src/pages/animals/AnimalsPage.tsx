@@ -71,7 +71,7 @@ export function AnimalsPage() {
   return <div className="module-no-header animals-page">
     <PageHeader title="Animales" description="Listado general. Selecciona una fila para abrir el resumen actual del animal." action={hasPermission('ANIMAL_CREAR') ? <IconButton label="Agregar animal" onClick={() => setCreating(true)}><Plus size={20} /></IconButton> : undefined} />
     <div className="toolbar animal-search-toolbar">
-      <SearchBox value={search} onChange={(value) => { setSearch(value); updateParam('q', value); }} placeholder="Buscar por nombre, arete o descripción…" />
+      <SearchBox value={search} onChange={(value) => { setSearch(value); updateParam('q', value); }} placeholder="Buscar animal, propietario, fierro, propiedad u origen…" />
       <div className="toolbar-filters">
         <Select aria-label="Filtrar por sexo" value={filters.sexo} onChange={(event) => updateParam('sexo', event.target.value)}><option value="">Todos los sexos</option><option value="HEMBRA">Hembras</option><option value="MACHO">Machos</option></Select>
         <Select aria-label="Filtrar por propietario" value={filters.id_propietario} onChange={(event) => updateParam('id_propietario', event.target.value)}><option value="">Todos los propietarios</option>{options.data?.propietarios.map((item) => <option key={item.id_usuario} value={item.id_usuario}>{item.nombre}</option>)}</Select>

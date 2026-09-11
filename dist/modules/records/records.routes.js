@@ -151,7 +151,11 @@ const tankSchema = z.object({
     referencia_externa: z.string().trim().max(160).nullable().optional(), observaciones: z.string().nullable().optional(),
 });
 recordsRouter.get('/producciones/vacas-activas', requirePermission('PRODUCCION_CONSULTAR'), asyncHandler(async (req, res) => {
-    const date = z.string().date().catch(new Date().toISOString().slice(0, 10)).parse(req.query.fecha);
+    const query = z.object({
+        fecha: z.string().date().catch(new Date().toISOString().slice(0, 10)),
+        turno: z.enum(['MANANA', 'TARDE', 'NOCHE', 'UNICO']).catch('UNICO'),
+        excluir_id: z.string().uuid().optional(),
+    }).parse(req.query);
     return ok(res, (await pool.query(`WITH vacas AS MATERIALIZED (
        SELECT a.id_animal,a.nombre,a.codigo_arete,
          COALESCE(cp.dias_maximos_ordeno_posparto,305)::int AS dias_maximos_ordeno
@@ -190,7 +194,15 @@ recordsRouter.get('/producciones/vacas-activas', requirePermission('PRODUCCION_C
      SELECT v.id_animal,v.nombre,v.codigo_arete,l.id_lactancia,l.fecha_inicio,p.fecha_parto
      FROM vacas v JOIN partos p ON p.id_madre=v.id_animal
      LEFT JOIN lactancias l ON l.id_vaca=v.id_animal
-     ORDER BY v.nombre,v.codigo_arete`, [date])).rows);
+     WHERE NOT EXISTS(
+       SELECT 1 FROM produccion_leche registrada
+       WHERE registrada.id_vaca=v.id_animal
+         AND registrada.fecha_produccion=$1::date
+         AND registrada.turno=$2
+         AND registrada.deleted_at IS NULL
+         AND ($3::uuid IS NULL OR registrada.id_produccion<>$3::uuid)
+     )
+     ORDER BY v.nombre,v.codigo_arete`, [query.fecha, query.turno, query.excluir_id ?? null])).rows);
 }));
 recordsRouter.get('/producciones/vacas-elegibles', requirePermission('PRODUCCION_CONSULTAR'), asyncHandler(async (req, res) => {
     const date = z.string().date().catch(new Date().toISOString().slice(0, 10)).parse(req.query.fecha);

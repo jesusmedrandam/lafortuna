@@ -32,12 +32,13 @@ dashboardRouter.patch('/preferencias', requirePermission('DASHBOARD_CONSULTAR'),
      RETURNING configuracion`, [req.user.id, JSON.stringify(configuracion)])).rows[0];
     return ok(res, row);
 }));
-dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, await cache.rememberComposite(['animales', 'produccion', 'sanidad', 'grupos', 'ubicaciones', 'ventas', 'compras', 'reproduccion'], 'dashboard-resumen-v3', 60, async () => {
-    const row = (await pool.query(`WITH animales_principal AS (
-      SELECT a.*
+dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, await cache.rememberComposite(['animales', 'produccion', 'sanidad', 'grupos', 'ubicaciones', 'ventas', 'compras', 'reproduccion'], 'dashboard-resumen-v4', 60, async () => {
+    const row = (await pool.query(`WITH animales_principal AS MATERIALIZED (
+      SELECT a.*,fn_clasificacion_animal(a.id_animal,CURRENT_DATE) clasificacion_codigo
       FROM animal a
-      JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual AND u.deleted_at IS NULL
-      JOIN propiedad_ganadera propiedad ON propiedad.id_propiedad=u.id_propiedad
+      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual AND g.deleted_at IS NULL
+      LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual AND u.deleted_at IS NULL
+      JOIN propiedad_ganadera propiedad ON propiedad.id_propiedad=COALESCE(g.id_propiedad,u.id_propiedad)
         AND propiedad.deleted_at IS NULL AND propiedad.es_principal=TRUE
       WHERE a.deleted_at IS NULL AND a.estado='ACTIVO'
     )
@@ -49,23 +50,11 @@ dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncH
       (SELECT COUNT(*)::int FROM animales_principal) animales_principal_total,
       (SELECT COUNT(*)::int FROM animales_principal a WHERE a.sexo='HEMBRA') animales_principal_hembras,
       (SELECT COUNT(*)::int FROM animales_principal a WHERE a.sexo='MACHO') animales_principal_machos,
-      (SELECT COUNT(*)::int FROM animales_principal a
-       WHERE a.sexo='HEMBRA' AND (
-         EXISTS(SELECT 1 FROM parto p WHERE p.id_madre=a.id_animal AND p.deleted_at IS NULL)
-         OR EXISTS(SELECT 1 FROM animal cria WHERE cria.id_madre=a.id_animal AND cria.deleted_at IS NULL)
-       )) animales_principal_vacas,
-      (SELECT COUNT(*)::int FROM animales_principal a
-       WHERE a.sexo='HEMBRA'
-         AND (a.fecha_nacimiento IS NULL OR a.fecha_nacimiento<=CURRENT_DATE-INTERVAL '1 year')
-         AND NOT EXISTS(SELECT 1 FROM parto p WHERE p.id_madre=a.id_animal AND p.deleted_at IS NULL)
-         AND NOT EXISTS(SELECT 1 FROM animal cria WHERE cria.id_madre=a.id_animal AND cria.deleted_at IS NULL)
-      ) animales_principal_vaconas,
-      (SELECT COUNT(*)::int FROM animales_principal a
-       WHERE a.sexo='MACHO'
-         AND a.fecha_nacimiento<=CURRENT_DATE-INTERVAL '1 year'
-         AND NOT EXISTS(SELECT 1 FROM parto p WHERE p.id_padre=a.id_animal AND p.deleted_at IS NULL)
-         AND NOT EXISTS(SELECT 1 FROM animal cria WHERE cria.id_padre=a.id_animal AND cria.deleted_at IS NULL)
-      ) animales_principal_terneros,
+      (SELECT COUNT(*)::int FROM animales_principal WHERE clasificacion_codigo='VACA') animales_principal_vacas,
+      (SELECT COUNT(*)::int FROM animales_principal WHERE clasificacion_codigo='VACONA') animales_principal_vaconas,
+      (SELECT COUNT(*)::int FROM animales_principal WHERE clasificacion_codigo='TORO') animales_principal_toros,
+      (SELECT COUNT(*)::int FROM animales_principal WHERE clasificacion_codigo='TORETE') animales_principal_toretes,
+      (SELECT COUNT(*)::int FROM animales_principal WHERE clasificacion_codigo IN ('TERNERA','TERNERO')) animales_principal_terneros,
 
       ((SELECT COALESCE(SUM(precio_total),0) FROM venta_animal WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('week',CURRENT_DATE))+
        (SELECT COALESCE(SUM(precio_total),0) FROM venta_producto WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('week',CURRENT_DATE)))::numeric ingresos_semana,
@@ -172,6 +161,8 @@ dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncH
             principal_total: row.animales_principal_total,
             vacas: row.animales_principal_vacas,
             vaconas: row.animales_principal_vaconas,
+            toros: row.animales_principal_toros,
+            toretes: row.animales_principal_toretes,
             terneros: row.animales_principal_terneros,
             hembras: row.animales_principal_hembras,
             machos: row.animales_principal_machos,
