@@ -93,6 +93,70 @@ function renderValue(value: unknown, format?: MetricDefinition['format']) {
   return formatNumber(Number(value ?? 0));
 }
 
+function DashboardModuleHeading({ module }: { module: ModuleDefinition }) {
+  const Icon = module.icon;
+  return <div className="dashboard-module-heading">
+    <span className="stat-icon"><Icon size={22} /></span>
+    <span><strong>{module.label}</strong><small>{module.description}</small></span>
+    <ArrowRight size={17} />
+  </div>;
+}
+
+function AnimalsDashboardCard({ module, values, onOpen }: {
+  module: ModuleDefinition;
+  values: DashboardSummary['animales'];
+  onOpen: () => void;
+}) {
+  const groups = values?.grupos ?? [];
+  return <Card className="dashboard-module-card dashboard-animals-card stat-green" onClick={onOpen}>
+    <DashboardModuleHeading module={module} />
+    <div className="dashboard-feature-summary">
+      <span><strong>{formatNumber(values?.activos ?? 0)}</strong><small>Animales activos</small></span>
+      <span><strong>{formatNumber(values?.principal_total ?? 0)}</strong><small>Propiedad principal</small></span>
+      <span><strong>{formatNumber(values?.fuera_propiedad ?? 0)}</strong><small>Fuera de propiedad</small></span>
+      <span><strong>{formatNumber(values?.inactivos ?? 0)}</strong><small>No activos</small></span>
+    </div>
+    <div className="dashboard-animal-sections">
+      <section>
+        <h3>Grupos · propiedad principal</h3>
+        <div className="dashboard-flat-counts">
+          {groups.length ? groups.map((group) => <span key={group.id_grupo}><small>{group.nombre}</small><strong>{formatNumber(group.total)}</strong></span>) : <small className="muted">No hay grupos registrados.</small>}
+        </div>
+      </section>
+      <section>
+        <h3>Clasificación</h3>
+        <div className="dashboard-flat-counts">
+          <span><small>Vacas</small><strong>{formatNumber(values?.vacas ?? 0)}</strong></span>
+          <span><small>Vaconas</small><strong>{formatNumber(values?.vaconas ?? 0)}</strong></span>
+          <span><small>Terneros</small><strong>{formatNumber(values?.terneros ?? 0)}</strong></span>
+        </div>
+      </section>
+      <section>
+        <h3>Sexo</h3>
+        <div className="dashboard-flat-counts">
+          <span><small>Hembras</small><strong>{formatNumber(values?.hembras ?? 0)}</strong></span>
+          <span><small>Machos</small><strong>{formatNumber(values?.machos ?? 0)}</strong></span>
+        </div>
+      </section>
+    </div>
+  </Card>;
+}
+
+function IncomeDashboardCard({ module, values, onOpen }: {
+  module: ModuleDefinition;
+  values: DashboardSummary['ingresos'];
+  onOpen: () => void;
+}) {
+  const concepts = (values?.conceptos ?? []).filter((concept) => Number(concept.total) > 0);
+  return <Card className="dashboard-module-card dashboard-income-card stat-lime" onClick={onOpen}>
+    <DashboardModuleHeading module={module} />
+    <div className="dashboard-income-total"><small>Total del año</small><strong>{money(values?.anio)}</strong></div>
+    <div className="dashboard-income-concepts">
+      {concepts.length ? concepts.map((concept) => <span key={concept.codigo}><small>{concept.nombre}</small><strong>{money(concept.total)}</strong></span>) : <small className="muted">Aún no hay ingresos registrados este año.</small>}
+    </div>
+  </Card>;
+}
+
 function sanitizeConfiguration(value: DashboardConfiguration): DashboardConfiguration {
   return Object.fromEntries(modules.flatMap((module)=>{
     const allowed=new Set(module.metrics.map((metric)=>metric.key));
@@ -158,15 +222,12 @@ export function DashboardPage() {
 
     {visibleModules.length ? <div className="dashboard-module-grid">
       {visibleModules.map((module) => {
-        const Icon = module.icon;
         const values = query.data?.[module.key] as unknown as Record<string, unknown>;
         const selectedMetrics = module.metrics.filter((metric) => currentConfiguration[module.key]?.includes(metric.key));
+        if (module.key === 'animales') return <AnimalsDashboardCard key={module.key} module={module} values={query.data!.animales} onOpen={() => navigate(module.route)} />;
+        if (module.key === 'ingresos') return <IncomeDashboardCard key={module.key} module={module} values={query.data!.ingresos} onOpen={() => navigate(module.route)} />;
         return <Card key={module.key} className={`dashboard-module-card stat-${module.tone}`} onClick={() => navigate(module.route)}>
-          <div className="dashboard-module-heading">
-            <span className="stat-icon"><Icon size={22} /></span>
-            <span><strong>{module.label}</strong><small>{module.description}</small></span>
-            <ArrowRight size={17} />
-          </div>
+          <DashboardModuleHeading module={module} />
           <div className={`dashboard-module-metrics metrics-${Math.min(selectedMetrics.length, 4)}`}>
             {selectedMetrics.map((metric) => <span key={metric.key}><strong>{renderValue(values?.[metric.key], metric.format)}</strong><small>{metric.label}</small></span>)}
           </div>

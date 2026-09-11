@@ -216,6 +216,27 @@ pasturesRouter.get('/:id/resumen', requirePermission('POTRERO_CONSULTAR'), async
     LEFT JOIN period_animals ON period_animals.periodo=rested.periodo
     ORDER BY inicio DESC
   `, [pasture.id_ubicacion])).rows;
+    const cleaningHistory = (await pool.query(`
+    SELECT l.id_limpieza,l.fecha_inicio,l.fecha_finalizacion,l.estado,
+      l.unidad_aplicacion,l.cantidad_tanques,l.capacidad_tanque_litros,
+      COALESCE((SELECT string_agg(tla.nombre,', ' ORDER BY tla.nombre)
+        FROM limpieza_potrero_actividad la
+        JOIN tipo_limpieza_potrero tla ON tla.id_tipo_limpieza=la.id_tipo_limpieza
+        WHERE la.id_limpieza=l.id_limpieza AND la.deleted_at IS NULL),tl.nombre) tipo_limpieza,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'producto',producto.nombre_comercial,
+        'cantidad_total',detalle.cantidad_total,
+        'unidad',COALESCE(unidad.simbolo,unidad.nombre)
+      ) ORDER BY producto.nombre_comercial)
+      FROM limpieza_potrero_producto detalle
+      JOIN producto_agroquimico producto ON producto.id_producto=detalle.id_producto
+      JOIN unidad_medida unidad ON unidad.id_unidad=detalle.id_unidad
+      WHERE detalle.id_limpieza=l.id_limpieza AND detalle.deleted_at IS NULL),'[]'::jsonb) productos
+    FROM limpieza_potrero l
+    JOIN tipo_limpieza_potrero tl ON tl.id_tipo_limpieza=l.id_tipo_limpieza
+    WHERE l.id_potrero=$1 AND l.deleted_at IS NULL
+    ORDER BY l.fecha_inicio DESC,l.created_at DESC
+  `, [id])).rows;
     const latest = history[0];
     const occupied = Number(pasture.total_animales) > 0;
     const currentOccupation = occupied
@@ -247,6 +268,7 @@ pasturesRouter.get('/:id/resumen', requirePermission('POTRERO_CONSULTAR'), async
             total_animales: Number(pasture.total_animales),
         },
         historial_ocupaciones: history,
+        historial_limpiezas: cleaningHistory,
     });
 }));
 pasturesRouter.post('/', requirePermission('POTRERO_ADMINISTRAR'), asyncHandler(async (req, res) => { const input = pastureSchema.parse(req.body); const result = await transaction(async (c) => { const location = await productiveLocation(c, input.ubicacion); const u = (await c.query(buildInsert('ubicacion', { ...location, tipo: 'POTRERO' }))).rows[0]; const { ubicacion, pastos, ...rest } = input; const p = (await c.query(buildInsert('potrero', { ...rest, id_ubicacion: u.id_ubicacion }))).rows[0]; for (const item of pastos)

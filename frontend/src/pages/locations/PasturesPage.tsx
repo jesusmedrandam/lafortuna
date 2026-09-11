@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import {
   CalendarDays,
   ChevronRight,
@@ -44,6 +45,7 @@ import type {
 import {
   formatDate,
   formatNumber,
+  humanizeCode,
   nullIfEmpty,
   numberOrNull,
 } from "../../utils";
@@ -868,6 +870,7 @@ export function PasturesPage() {
 }
 
 function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
+  const navigate = useNavigate();
   const status = pasture.ocupacion.estado;
   const [selectedOccupation, setSelectedOccupation] =
     useState<PastureOccupationPeriod | null>(null);
@@ -1004,6 +1007,31 @@ function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
           ) : null}
         </section>
       ) : null}
+      <section className="pasture-detail-section">
+        <div className="section-heading-inline">
+          <div>
+            <h3>Historial de limpiezas</h3>
+            <p className="muted">Mantenimientos y productos aplicados en este potrero.</p>
+          </div>
+        </div>
+        {(pasture.historial_limpiezas ?? []).length ? (
+          <div className="pasture-cleaning-history">
+            {(pasture.historial_limpiezas ?? []).map((cleaning) => {
+              const application = cleaning.cantidad_tanques == null ? null : `${formatNumber(cleaning.cantidad_tanques)} ${cleaning.unidad_aplicacion === "BOMBADAS" ? "bombadas" : "tanques"}`;
+              const products = (cleaning.productos ?? []).map((product) => `${product.producto}: ${formatNumber(product.cantidad_total, 4)} ${product.unidad}`).join(" · ");
+              return <button type="button" key={cleaning.id_limpieza} onClick={() => navigate(`/limpiezas?limpieza=${cleaning.id_limpieza}`)}>
+                <span>
+                  <strong>{cleaning.tipo_limpieza || "Limpieza de potrero"}</strong>
+                  <small>{formatDate(cleaning.fecha_inicio)}{application ? ` · ${application}` : ""}</small>
+                  {products ? <small>{products}</small> : null}
+                </span>
+                <Badge tone={cleaning.estado === "COMPLETADO" ? "success" : cleaning.estado === "CANCELADO" ? "danger" : "warning"}>{humanizeCode(cleaning.estado)}</Badge>
+                <ChevronRight size={18} />
+              </button>;
+            })}
+          </div>
+        ) : <p className="muted">Este potrero todavía no registra limpiezas.</p>}
+      </section>
       <section className="pasture-detail-section">
         <div className="section-heading-inline">
           <div>

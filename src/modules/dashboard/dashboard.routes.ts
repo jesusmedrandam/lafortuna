@@ -45,14 +45,42 @@ dashboardRouter.patch('/preferencias', requirePermission('DASHBOARD_CONSULTAR'),
 
 dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, await cache.rememberComposite(
   ['animales', 'produccion', 'sanidad', 'grupos', 'ubicaciones', 'ventas', 'compras', 'reproduccion'],
-  'dashboard-resumen-v2',
+  'dashboard-resumen-v3',
   60,
   async () => {
-    const row = (await pool.query(`SELECT
+    const row = (await pool.query(`WITH animales_principal AS (
+      SELECT a.*
+      FROM animal a
+      JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual AND u.deleted_at IS NULL
+      JOIN propiedad_ganadera propiedad ON propiedad.id_propiedad=u.id_propiedad
+        AND propiedad.deleted_at IS NULL AND propiedad.es_principal=TRUE
+      WHERE a.deleted_at IS NULL AND a.estado='ACTIVO'
+    )
+    SELECT
       (SELECT COUNT(*)::int FROM animal WHERE deleted_at IS NULL AND id_categoria_animal='00000000-0000-4000-8000-000000000101') animales_en_propiedad,
       (SELECT COUNT(*)::int FROM animal WHERE deleted_at IS NULL AND id_categoria_animal='00000000-0000-4000-8000-000000000102') animales_fuera_propiedad,
       (SELECT COUNT(*)::int FROM animal WHERE deleted_at IS NULL AND estado='ACTIVO') animales_activos,
       (SELECT COUNT(*)::int FROM animal WHERE deleted_at IS NULL AND estado<>'ACTIVO') animales_inactivos,
+      (SELECT COUNT(*)::int FROM animales_principal) animales_principal_total,
+      (SELECT COUNT(*)::int FROM animales_principal a WHERE a.sexo='HEMBRA') animales_principal_hembras,
+      (SELECT COUNT(*)::int FROM animales_principal a WHERE a.sexo='MACHO') animales_principal_machos,
+      (SELECT COUNT(*)::int FROM animales_principal a
+       WHERE a.sexo='HEMBRA' AND (
+         EXISTS(SELECT 1 FROM parto p WHERE p.id_madre=a.id_animal AND p.deleted_at IS NULL)
+         OR EXISTS(SELECT 1 FROM animal cria WHERE cria.id_madre=a.id_animal AND cria.deleted_at IS NULL)
+       )) animales_principal_vacas,
+      (SELECT COUNT(*)::int FROM animales_principal a
+       WHERE a.sexo='HEMBRA'
+         AND (a.fecha_nacimiento IS NULL OR a.fecha_nacimiento<=CURRENT_DATE-INTERVAL '1 year')
+         AND NOT EXISTS(SELECT 1 FROM parto p WHERE p.id_madre=a.id_animal AND p.deleted_at IS NULL)
+         AND NOT EXISTS(SELECT 1 FROM animal cria WHERE cria.id_madre=a.id_animal AND cria.deleted_at IS NULL)
+      ) animales_principal_vaconas,
+      (SELECT COUNT(*)::int FROM animales_principal a
+       WHERE a.sexo='MACHO'
+         AND a.fecha_nacimiento<=CURRENT_DATE-INTERVAL '1 year'
+         AND NOT EXISTS(SELECT 1 FROM parto p WHERE p.id_padre=a.id_animal AND p.deleted_at IS NULL)
+         AND NOT EXISTS(SELECT 1 FROM animal cria WHERE cria.id_padre=a.id_animal AND cria.deleted_at IS NULL)
+      ) animales_principal_terneros,
 
       ((SELECT COALESCE(SUM(precio_total),0) FROM venta_animal WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('week',CURRENT_DATE))+
        (SELECT COALESCE(SUM(precio_total),0) FROM venta_producto WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('week',CURRENT_DATE)))::numeric ingresos_semana,
@@ -117,9 +145,56 @@ dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncH
       (SELECT COUNT(*)::int FROM animal WHERE deleted_at IS NULL AND estado='ACTIVO' AND sexo='HEMBRA') hembras,
       (SELECT COUNT(*)::int FROM animal WHERE deleted_at IS NULL AND estado='ACTIVO' AND sexo='MACHO') machos`)).rows[0];
 
+    const [groupRows,incomeProductRows,incomeAnimalRows]=await Promise.all([
+      pool.query(`SELECT g.id_grupo,g.nombre,COUNT(a.id_animal)::int total
+        FROM grupo g
+        JOIN propiedad_ganadera propiedad ON propiedad.id_propiedad=g.id_propiedad
+          AND propiedad.deleted_at IS NULL AND propiedad.es_principal=TRUE
+        LEFT JOIN animal a ON a.id_grupo_actual=g.id_grupo
+          AND a.deleted_at IS NULL AND a.estado='ACTIVO'
+        WHERE g.deleted_at IS NULL AND g.activo=TRUE
+        GROUP BY g.id_grupo,g.nombre
+        ORDER BY g.nombre`),
+      pool.query(`SELECT producto.codigo,producto.nombre,
+          COALESCE(SUM(detalle.subtotal),0)::numeric total
+        FROM venta_producto venta
+        JOIN venta_producto_detalle detalle ON detalle.id_venta_producto=venta.id_venta_producto
+          AND detalle.deleted_at IS NULL
+        JOIN producto_venta producto ON producto.id_producto_venta=detalle.id_producto_venta
+          AND producto.deleted_at IS NULL
+        WHERE venta.deleted_at IS NULL AND venta.estado='COMPLETADA'
+          AND venta.fecha_venta>=date_trunc('year',CURRENT_DATE)
+        GROUP BY producto.codigo,producto.nombre
+        HAVING COALESCE(SUM(detalle.subtotal),0)>0
+        ORDER BY producto.nombre`),
+      pool.query(`SELECT COALESCE(SUM(precio_total),0)::numeric total FROM venta_animal
+        WHERE deleted_at IS NULL AND estado='COMPLETADA'
+          AND fecha_venta>=date_trunc('year',CURRENT_DATE)`),
+    ]);
+    const incomeConcepts=[
+      {codigo:'ANIMALES',nombre:'Venta de animales',total:Number(incomeAnimalRows.rows[0]?.total??0)},
+      ...incomeProductRows.rows.map((item)=>({
+        codigo:String(item.codigo),
+        nombre:`Venta de ${String(item.nombre).toLocaleLowerCase('es')}`,
+        total:Number(item.total),
+      })),
+    ].filter((item)=>item.total>0);
+
     return {
-      animales: { en_propiedad: row.animales_en_propiedad, fuera_propiedad: row.animales_fuera_propiedad, activos: row.animales_activos, inactivos: row.animales_inactivos },
-      ingresos: { semana: row.ingresos_semana, mes: row.ingresos_mes, anio: row.ingresos_anio },
+      animales: {
+        en_propiedad: row.animales_en_propiedad,
+        fuera_propiedad: row.animales_fuera_propiedad,
+        activos: row.animales_activos,
+        inactivos: row.animales_inactivos,
+        principal_total: row.animales_principal_total,
+        vacas: row.animales_principal_vacas,
+        vaconas: row.animales_principal_vaconas,
+        terneros: row.animales_principal_terneros,
+        hembras: row.animales_principal_hembras,
+        machos: row.animales_principal_machos,
+        grupos: groupRows.rows,
+      },
+      ingresos: { semana: row.ingresos_semana, mes: row.ingresos_mes, anio: row.ingresos_anio, conceptos: incomeConcepts },
       egresos: { semana: row.egresos_semana, mes: row.egresos_mes, anio: row.egresos_anio },
       ventas: { semana: row.ventas_semana, mes: row.ventas_mes, anio: row.ventas_anio, ventas_animales_mes: row.ventas_animales_mes, animales_vendidos_mes: row.animales_vendidos_mes, ventas_productos_mes: row.ventas_productos_mes },
       produccion: { hoy: row.produccion_hoy, ayer: row.produccion_ayer, semana: row.produccion_semana, mes: row.produccion_mes, vacas_hoy: row.vacas_hoy, promedio_vaca_hoy: row.promedio_vaca_hoy, tanque_hoy: row.tanque_hoy },

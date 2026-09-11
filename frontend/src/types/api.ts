@@ -46,8 +46,15 @@ export interface Profile {
 }
 
 export interface DashboardSummary {
-  animales: { en_propiedad: number; fuera_propiedad: number; activos: number; inactivos: number };
-  ingresos: { semana: string | number; mes: string | number; anio: string | number };
+  animales: {
+    en_propiedad: number; fuera_propiedad: number; activos: number; inactivos: number;
+    principal_total: number; vacas: number; vaconas: number; terneros: number; hembras: number; machos: number;
+    grupos: Array<{ id_grupo: string; nombre: string; total: number }>;
+  };
+  ingresos: {
+    semana: string | number; mes: string | number; anio: string | number;
+    conceptos: Array<{ codigo: string; nombre: string; total: string | number }>;
+  };
   egresos: { semana: string | number; mes: string | number; anio: string | number };
   ventas: { semana: number; mes: number; anio: number };
   produccion: { hoy: string | number; semana: string | number; mes: string | number };
@@ -458,6 +465,18 @@ export interface PastureOccupationPeriod {
   }>;
 }
 
+export interface PastureCleaningHistoryItem {
+  id_limpieza: string;
+  fecha_inicio: string;
+  fecha_finalizacion: string | null;
+  estado: string;
+  unidad_aplicacion: 'TANQUES' | 'BOMBADAS' | null;
+  cantidad_tanques: number | string | null;
+  capacidad_tanque_litros: number | string | null;
+  tipo_limpieza: string;
+  productos: Array<{ producto: string; cantidad_total: number | string; unidad: string }>;
+}
+
 export interface PastureDetail extends Pasture {
   ocupacion: {
     estado: 'OCUPADO' | 'DESCANSO';
@@ -474,6 +493,7 @@ export interface PastureDetail extends Pasture {
     total_animales: number;
   };
   historial_ocupaciones: PastureOccupationPeriod[];
+  historial_limpiezas: PastureCleaningHistoryItem[];
 }
 
 export interface Corral {

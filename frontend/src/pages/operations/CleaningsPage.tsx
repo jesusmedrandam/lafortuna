@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, ChevronRight, Droplets, Edit3, Gauge, ImagePlus, MapPin, Plus, Sprout, Trash2, UserRound, UsersRound } from 'lucide-react';
 import { apiRequest, ApiError } from '../../api/client';
@@ -10,6 +10,7 @@ import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
 import { useListControls } from '../../hooks/useListControls';
 import type { Operator, Pasture, PastureCleaning, RecordImage } from '../../types/api';
 import { currentDateInput, dateInputValue, formatDate, formatNumber, humanizeCode, nullIfEmpty, numberOrNull } from '../../utils';
+import { useSearchParams } from 'react-router-dom';
 
 interface ProductLine { id_producto: string; id_unidad: string; cantidad_por_tanque: string; observaciones: string; }
 interface OperatorLine { id_operador: string; funcion: string; observaciones: string; }
@@ -24,6 +25,8 @@ interface OperatorForm { id_operador?: string; nombres: string; apellidos: strin
 const emptyOperator = (): OperatorForm => ({ nombres: '', apellidos: '', telefono: '', especialidad: '', activo: true });
 
 export function CleaningsPage() {
+  const [searchParams] = useSearchParams();
+  const consumedDetail = useRef(false);
   const { hasPermission } = useAuth();
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -42,6 +45,21 @@ export function CleaningsPage() {
   const types = useCatalog('tipos-limpieza');
   const products = useCatalog('agroquimicos');
   const units = useCatalog('unidades');
+
+  useEffect(() => {
+    if (consumedDetail.current || !cleanings.data) return;
+    const cleaningId = searchParams.get('limpieza');
+    const pastureId = searchParams.get('potrero');
+    const match = cleaningId
+      ? cleanings.data.find((item) => item.id_limpieza === cleaningId)
+      : pastureId
+        ? cleanings.data.find((item) => item.id_potrero === pastureId)
+        : undefined;
+    if (match) {
+      setSelected(match);
+      consumedDetail.current = true;
+    }
+  }, [cleanings.data, searchParams]);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -163,7 +181,7 @@ function CleaningDetail({item,onClose,onEdit}:{item:PastureCleaning;onClose:()=>
       <section><h3>Operadores responsables</h3>{current.operadores.length?<div className="cleaning-detail-lines">{current.operadores.map((operator)=><div key={`${current.id_limpieza}-${operator.id_operador}`}><strong>{operator.nombre}</strong><span>{operator.funcion || 'Sin función registrada'}</span>{operator.observaciones?<small>{operator.observaciones}</small>:null}</div>)}</div>:<p className="muted">No se registraron operadores.</p>}</section>
       <section><h3>Fotografías del estado del potrero</h3>{current.imagenes?.length?<div className="record-photo-grid record-photo-gallery">{current.imagenes.map((image,index)=><button className="record-photo-view" type="button" key={image.id_limpieza_imagen} onClick={()=>setViewer(index)} aria-label={`Abrir fotografía ${index+1} del potrero ${current.potrero}`}><img src={image.secure_url} alt={`Estado de ${current.potrero}`}/><span>Fotografía {index+1}</span></button>)}</div>:<p className="muted">No hay fotografías registradas en esta limpieza.</p>}</section>
       <section><h3>Observaciones generales</h3><p>{current.observaciones||'Sin observaciones.'}</p></section>
-    </div>{viewer!==null?<ImageLightbox items={current.imagenes.map((image,index)=>({key:image.id_limpieza_imagen??String(index),url:image.secure_url,title:`Limpieza de ${current.potrero}`,subtitle:current.tipo_limpieza,date:current.fecha_inicio,filename:image.nombre_original}))} initialIndex={viewer} onClose={()=>setViewer(null)}/>:null}
+    </div>{viewer!==null?<ImageLightbox minimalControls items={current.imagenes.map((image,index)=>({key:image.id_limpieza_imagen??String(index),url:image.secure_url,title:`Limpieza de ${current.potrero}`,subtitle:current.tipo_limpieza,date:current.fecha_inicio,filename:image.nombre_original}))} initialIndex={viewer} onClose={()=>setViewer(null)}/>:null}
   </Modal>;
 }
 
