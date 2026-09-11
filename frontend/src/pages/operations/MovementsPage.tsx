@@ -91,15 +91,22 @@ export function MovementsPage() {
 
   useEffect(() => {
     if (consumedInitialAnimal.current) return;
-    const initialAnimal = (route.state as { initialAnimal?: SelectableAnimal } | null)?.initialAnimal;
+    const initialState = route.state as { initialAnimal?: SelectableAnimal; initialKind?: MovementKind; initialGroupId?: string } | null;
+    const initialAnimal = initialState?.initialAnimal;
     if (!initialAnimal) return;
-    if (!locations.data) return;
+    const initialKind = initialState?.initialKind ?? 'GRUPO';
+    if (!locations.data || (initialKind === 'UBICACION' && !groups.data)) return;
     consumedInitialAnimal.current = true;
-    const initialLocation = locations.data?.find((item) => item.id_ubicacion === initialAnimal.id_ubicacion_actual);
-    setForm({ ...emptyForm(), kind: 'GRUPO', id_propiedad_origen: locationPropertyId(initialLocation) || MAIN_PROPERTY, selection: { mode: 'SELECCION_MANUAL', groupId: '', animals: [{ ...initialAnimal, seleccionado: true }] } });
+    const initialGroupId = initialState?.initialGroupId ?? initialAnimal.id_grupo_actual ?? '';
+    const initialGroup = groups.data?.find((item) => item.id_grupo === initialGroupId);
+    const initialLocation = locations.data.find((item) => item.id_ubicacion === (initialGroup?.id_ubicacion_actual ?? initialAnimal.id_ubicacion_actual));
+    const propertyId = groupPropertyId(initialGroup) || locationPropertyId(initialLocation) || MAIN_PROPERTY;
+    setForm(initialKind === 'UBICACION'
+      ? { ...emptyForm(), kind: 'UBICACION', id_propiedad_origen: propertyId, selection: { mode: 'GRUPO', groupId: initialGroupId, animals: [] }, id_grupo_destino: initialGroupId }
+      : { ...emptyForm(), kind: initialKind, id_propiedad_origen: propertyId, selection: { mode: 'SELECCION_MANUAL', groupId: '', animals: [{ ...initialAnimal, seleccionado: true }] } });
     setCreating(true);
     navigate(route.pathname, { replace: true, state: null });
-  }, [locations.data, navigate, route.pathname, route.state]);
+  }, [groups.data, locations.data, navigate, route.pathname, route.state]);
 
   useEffect(() => {
     if (!form.id_grupo_destino || !targetGroups || targetGroups.some((item) => item.id_grupo === form.id_grupo_destino)) return;

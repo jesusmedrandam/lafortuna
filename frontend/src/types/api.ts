@@ -48,7 +48,7 @@ export interface Profile {
 export interface DashboardSummary {
   animales: {
     en_propiedad: number; fuera_propiedad: number; activos: number; inactivos: number;
-    principal_total: number; vacas: number; vaconas: number; toros: number; toretes: number; terneros: number; hembras: number; machos: number;
+    principal_total: number; vacas: number; vaconas: number; toros: number; toretes: number; terneras: number; terneros: number; hembras: number; machos: number;
     grupos: Array<{ id_grupo: string; nombre: string; total: number }>;
   };
   ingresos: {
@@ -205,6 +205,10 @@ export interface AnimalMovementHistory {
   ubicacion_destino: string | null;
   grupo_origen: string | null;
   grupo_destino: string | null;
+  id_propiedad_origen?: string | null;
+  id_propiedad_destino?: string | null;
+  propiedad_origen?: string | null;
+  propiedad_destino?: string | null;
 }
 
 export interface AnimalTreatmentHistory {
@@ -237,6 +241,24 @@ export interface AnimalConditionEvent {
   observaciones: string | null;
   ubicacion: string | null;
   grupo: string | null;
+  imagen?: {id_imagen:string;secure_url:string;public_id:string;nombre_original:string|null;fecha_toma:string|null}|null;
+}
+
+export interface AnimalStatusNews {
+  id_novedad:string;
+  id_registro:string;
+  tipo:'DESAPARECIDO'|'RECUPERADO'|'MUERTO';
+  fecha:string;
+  id_animal:string;
+  animal:string;
+  codigo_arete:string|null;
+  categoria_codigo:string|null;
+  detalle:string|null;
+  observaciones:string|null;
+  ubicacion:string|null;
+  grupo:string|null;
+  usuario:string|null;
+  imagen:{id_imagen:string;secure_url:string;public_id:string;nombre_original:string|null;fecha_toma:string|null;created_at?:string}|null;
 }
 
 export interface Mark {

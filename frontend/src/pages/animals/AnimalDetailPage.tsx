@@ -94,6 +94,8 @@ export function AnimalDetailPage() {
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [conditionAction, setConditionAction] = useState<ConditionAction | null>(null);
+  const [conditionPhoto, setConditionPhoto] = useState<File | null>(null);
+  const [movementOpen, setMovementOpen] = useState(false);
   const [conditionForm, setConditionForm] = useState({ fecha_evento: currentDateInput(), id_grupo_actual: '', id_ubicacion_actual: '', observaciones: '' });
 
   const query = useQuery({
@@ -153,16 +155,22 @@ export function AnimalDetailPage() {
   });
 
   const conditionMutation = useMutation({
-    mutationFn: () => apiRequest(`/animales/${id}/condicion`, {
-      method: 'POST',
-      body: {
+    mutationFn: () => {
+      const payload = {
         accion: conditionAction,
         fecha_evento: conditionForm.fecha_evento,
         id_grupo_actual: conditionAction === 'REGISTRAR_HALLAZGO' ? conditionForm.id_grupo_actual || null : undefined,
         id_ubicacion_actual: conditionAction === 'REGISTRAR_HALLAZGO' ? conditionForm.id_ubicacion_actual || null : undefined,
         observaciones: conditionForm.observaciones.trim() || null,
-      },
-    }),
+      };
+      if (conditionAction === 'REGISTRAR_HALLAZGO' && conditionPhoto) {
+        const data = new FormData();
+        data.set('data', JSON.stringify(payload));
+        data.set('imagen', conditionPhoto);
+        return apiRequest(`/animales/${id}/condicion`, { method: 'POST', body: data });
+      }
+      return apiRequest(`/animales/${id}/condicion`, { method: 'POST', body: payload });
+    },
     onSuccess: async () => {
       const message = conditionAction === 'REGISTRAR_HALLAZGO'
         ? 'Hallazgo registrado y animal reactivado.'
@@ -173,12 +181,14 @@ export function AnimalDetailPage() {
             : 'Animal reactivado para operaciones.';
       toast.show(message);
       setConditionAction(null);
+      setConditionPhoto(null);
       await Promise.all([
         client.invalidateQueries({ queryKey: ['animal', id] }),
         client.invalidateQueries({ queryKey: ['animals'] }),
         client.invalidateQueries({ queryKey: ['dashboard'] }),
         client.invalidateQueries({ queryKey: ['locations'] }),
         client.invalidateQueries({ queryKey: ['groups'] }),
+        client.invalidateQueries({ queryKey: ['animal-status-news'] }),
       ]);
     },
     onError: (error) => toast.show((error as ApiError).message, 'error'),
@@ -294,6 +304,7 @@ export function AnimalDetailPage() {
   }
   function openConditionAction(action: ConditionAction) {
     setConditionForm({ fecha_evento: currentDateInput(), id_grupo_actual: '', id_ubicacion_actual: '', observaciones: '' });
+    setConditionPhoto(null);
     setConditionAction(action);
   }
 
@@ -418,7 +429,7 @@ export function AnimalDetailPage() {
     </section>
 
     <div className="animal-detail-actions animal-detail-primary-actions">
-      {animal.estado === 'ACTIVO' && hasPermission('MOVIMIENTO_CREAR') ? <Button variant="ghost" onClick={() => navigate('/movimientos', { state: { initialAnimal: animalSelection } })}><ArrowRightLeft size={18} />Traslado</Button> : null}
+      {animal.estado === 'ACTIVO' && hasPermission('MOVIMIENTO_CREAR') ? <Button variant="ghost" onClick={() => setMovementOpen(true)}><ArrowRightLeft size={18} />Movimiento</Button> : null}
       {animal.estado === 'ACTIVO' && hasPermission('ANIMAL_MODIFICAR') ? <Button variant="ghost" onClick={() => openConditionAction('DESACTIVAR')}><Ban size={18} />Inactivar</Button> : null}
       {animal.estado === 'INACTIVO' && hasPermission('ANIMAL_MODIFICAR') ? <Button variant="ghost" onClick={() => openConditionAction('REACTIVAR')}><CheckCircle2 size={18} />Reactivar</Button> : null}
       {animal.estado === 'DESAPARECIDO' && hasPermission('ANIMAL_MODIFICAR') ? <Button variant="ghost" onClick={() => openConditionAction('REGISTRAR_HALLAZGO')}><MapPin size={18} />Registrar hallazgo</Button> : null}
@@ -502,9 +513,16 @@ export function AnimalDetailPage() {
     </Modal> : null}
 
     {editing ? <AnimalFormModal animal={animal} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void query.refetch(); }} /> : null}
+    {movementOpen ? <Modal title={`Movimiento de ${animal.nombre}`} onClose={() => setMovementOpen(false)}>
+      <div className="profile-quick-action-list">
+        <button type="button" onClick={() => navigate('/movimientos', { state: { initialAnimal: animalSelection, initialKind: 'GRUPO' } })}><Users size={21} /><span><strong>Cambiar de grupo</strong><small>{animal.nombre} quedará seleccionado automáticamente.</small></span><ChevronRight size={18} /></button>
+        <button type="button" onClick={() => navigate('/movimientos', { state: { initialAnimal: animalSelection, initialKind: 'PROPIEDAD' } })}><MapPin size={21} /><span><strong>Cambiar de propiedad</strong><small>{animal.nombre} quedará seleccionado automáticamente.</small></span><ChevronRight size={18} /></button>
+        {animal.id_grupo_actual ? <button type="button" onClick={() => navigate('/movimientos', { state: { initialAnimal: animalSelection, initialKind: 'UBICACION', initialGroupId: animal.id_grupo_actual } })}><ArrowRightLeft size={21} /><span><strong>Rotación de potrero</strong><small>Se trasladará todo el grupo {animal.grupo || 'actual'}.</small></span><ChevronRight size={18} /></button> : null}
+      </div>
+    </Modal> : null}
     {conditionAction ? <Modal
       title={conditionAction === 'DESACTIVAR' ? 'Desactivar animal' : conditionAction === 'REACTIVAR' ? 'Reactivar animal' : conditionAction === 'REPORTAR_DESAPARICION' ? 'Reportar desaparición' : 'Registrar hallazgo'}
-      onClose={() => setConditionAction(null)}
+      onClose={() => { setConditionAction(null); setConditionPhoto(null); }}
       footer={<><Button variant="ghost" onClick={() => setConditionAction(null)}>Cancelar</Button><Button onClick={() => conditionMutation.mutate()} loading={conditionMutation.isPending}>{conditionAction === 'REGISTRAR_HALLAZGO' ? 'Registrar hallazgo' : 'Confirmar'}</Button></>}
     >
       <div className="form-stack">
@@ -519,6 +537,7 @@ export function AnimalDetailPage() {
           <Field label="Ubicación del hallazgo"><Select value={conditionForm.id_ubicacion_actual} onChange={(event) => setConditionForm((current) => ({ ...current, id_ubicacion_actual: event.target.value, id_grupo_actual: '' }))}><option value="">Sin ubicación específica</option>{locations.data?.filter((item) => item.activo).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.categoria}</option>)}</Select></Field>
           <Field label="Grupo al reincorporarse"><Select value={conditionForm.id_grupo_actual} onChange={(event) => setConditionForm((current) => ({ ...current, id_grupo_actual: event.target.value }))}><option value="">Sin grupo</option>{groups.data?.filter((item) => item.activo && (!hallazgoCategoryId || item.id_categoria_animal === hallazgoCategoryId)).map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre} · {item.categoria}</option>)}</Select></Field>
         </div> : null}
+        {conditionAction === 'REGISTRAR_HALLAZGO' ? <Field label="Fotografía de la recuperación" hint="Opcional. Se admite una sola imagen."><label className="photo-upload-button"><ImagePlus size={18} />{conditionPhoto ? 'Cambiar fotografía' : 'Seleccionar fotografía'}<input type="file" accept="image/*" onChange={(event) => { setConditionPhoto(event.target.files?.[0] ?? null); event.currentTarget.value = ''; }} /></label>{conditionPhoto ? <small>{conditionPhoto.name}</small> : null}</Field> : null}
         <Field label="Motivo u observaciones"><Textarea rows={3} value={conditionForm.observaciones} onChange={(event) => setConditionForm((current) => ({ ...current, observaciones: event.target.value }))} /></Field>
       </div>
     </Modal> : null}

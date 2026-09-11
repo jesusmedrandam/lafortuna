@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
@@ -10,7 +11,7 @@ import { created, noContent, ok } from '../../core/http.js';
 import { NotFoundError, ValidationError } from '../../core/errors.js';
 import { assertPermission, requirePermission } from '../../middleware/permission.js';
 import { buildInsert, buildUpdate } from '../shared/sql.js';
-import { deleteCloudinaryImage, uploadAnimalImage } from '../../services/cloudinary.service.js';
+import { deleteCloudinaryImage, uploadAnimalImage, uploadRecordImage } from '../../services/cloudinary.service.js';
 import { assertAnimalOperationAllowed, type AnimalOperationCode } from '../../services/animal-operation-policy.js';
 import { assertMedicationApplication } from '../../services/medication-policy.js';
 import { reproductionRulesForAnimal } from '../../services/reproduction-policy.js';
@@ -46,6 +47,24 @@ function allowedBody(body: Record<string, unknown>, columns: string[]) {
   if (!Object.keys(data).length) throw new ValidationError('No hay campos válidos para guardar.');
   return data;
 }
+
+function recordRequestBody(body:unknown){
+  if(typeof body==='object'&&body!==null&&'data' in body){
+    const raw=(body as {data?:unknown}).data;
+    if(typeof raw!=='string')throw new ValidationError('Los datos del registro no son válidos.');
+    try{return JSON.parse(raw) as Record<string,unknown>;}
+    catch{throw new ValidationError('Los datos del registro no contienen un JSON válido.');}
+  }
+  return body as Record<string,unknown>;
+}
+
+const recordImageUpload=multer({
+  storage:multer.memoryStorage(),
+  limits:{fileSize:env.MAX_IMAGE_MB*1024*1024},
+  fileFilter:(_req,file,callback)=>file.mimetype.startsWith('image/')
+    ?callback(null,true)
+    :callback(new ValidationError('La evidencia debe ser una imagen.')),
+});
 
 export const recordsRouter = Router();
 
@@ -437,13 +456,18 @@ recordsRouter.get('/:module', asyncHandler(async (req, res) => {
   assertPermission(req.user, d.read);
   const treatmentSelect=d.table==='tratamiento_animal' ? ',cs.estado condicion_estado,cs.descripcion condicion_descripcion,tcs.nombre condicion_tipo' : '';
   const abortionSelect=d.table==='aborto' ? ',pr.fecha_confirmacion prenez_fecha,pr.estado prenez_estado' : '';
+  const deathSelect=d.table==='muerte' ? `,(SELECT jsonb_build_object(
+    'id_imagen',di.id_imagen,'secure_url',di.secure_url,'public_id',di.public_id,
+    'nombre_original',di.nombre_original,'fecha_toma',di.fecha_toma,'created_at',di.created_at
+  ) FROM animal_imagen di WHERE di.id_muerte=r.id_muerte AND di.deleted_at IS NULL
+    ORDER BY di.created_at DESC LIMIT 1) imagen` : '';
   const treatmentJoins=d.table==='tratamiento_animal'
     ? 'LEFT JOIN condicion_salud cs ON cs.id_condicion_salud=r.id_condicion_salud LEFT JOIN tipo_condicion_salud tcs ON tcs.id_tipo_condicion_salud=cs.id_tipo_condicion_salud'
     : '';
   const abortionJoins=d.table==='aborto' ? 'LEFT JOIN prenez pr ON pr.id_prenez=r.id_prenez' : '';
   const rows = (await pool.query(
     `SELECT r.*, a.nombre animal, a.codigo_arete,a.id_categoria_animal,
-      ca.codigo categoria_codigo,ca.nombre categoria ${treatmentSelect}${abortionSelect}
+      ca.codigo categoria_codigo,ca.nombre categoria ${treatmentSelect}${abortionSelect}${deathSelect}
      FROM ${d.table} r
      LEFT JOIN animal a ON a.id_animal = r.${d.animalColumn}
      LEFT JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
@@ -454,11 +478,12 @@ recordsRouter.get('/:module', asyncHandler(async (req, res) => {
   )).rows;
   return ok(res, rows);
 }));
-recordsRouter.post('/:module', asyncHandler(async (req, res) => {
+recordsRouter.post('/:module', recordImageUpload.single('imagen'), asyncHandler(async (req, res) => {
   const d = definition(routeParam(req.params.module, 'module'));
   assertPermission(req.user, d.write);
+  const requestBody=recordRequestBody(req.body);
   if(d.table==='lactancia') {
-    const parsed=lactationSchema.parse(req.body);
+    const parsed=lactationSchema.parse(requestBody);
     const input={...parsed,id_parto:parsed.id_parto??null,fecha_fin:parsed.activa?null:(parsed.fecha_fin??null),observaciones:parsed.observaciones??null};
     const row=await transaction(async client=>{
       const fechaInicio=await validateLactation(client,input);
@@ -469,7 +494,8 @@ recordsRouter.post('/:module', asyncHandler(async (req, res) => {
     },req.user!.id);
     return created(res,row);
   }
-  const data = allowedBody(req.body as Record<string, unknown>, d.columns);
+  const data = allowedBody(requestBody, d.columns);
+  if(req.file&&d.table!=='muerte')throw new ValidationError('Este tipo de registro no admite una fotografía adjunta.');
   if(d.table==='aborto'&&typeof data.id_prenez==='string') {
     const pregnancy=(await pool.query(
       `SELECT id_vaca,estado FROM prenez WHERE id_prenez=$1 AND deleted_at IS NULL`,[data.id_prenez],
@@ -480,6 +506,48 @@ recordsRouter.post('/:module', asyncHandler(async (req, res) => {
   }
   const animalId = data[d.animalColumn];
   if (typeof animalId !== 'string') throw new ValidationError('Selecciona un animal.');
+  if(d.table==='muerte'){
+    const deathId=randomUUID();
+    let cloud:Awaited<ReturnType<typeof uploadRecordImage>>|null=null;
+    if(req.file)cloud=await uploadRecordImage(req.file.buffer,'muertes',deathId);
+    try{
+      const saved=await transaction(async client=>{
+        await assertAnimalOperationAllowed(client,animalId,'MUERTE');
+        const row=(await client.query(buildInsert('muerte',{
+          id_muerte:deathId,...data,registrado_por:req.user!.id,
+        }))).rows[0];
+        await client.query(
+          `UPDATE animal SET estado='MUERTO',en_ordeno=FALSE,updated_at=NOW()
+           WHERE id_animal=$1`,[animalId],
+        );
+        await client.query(
+          `UPDATE lactancia SET en_ordeno=FALSE,activa=FALSE,
+             fecha_fin=COALESCE(fecha_fin,$2::date),updated_at=NOW()
+           WHERE id_vaca=$1 AND deleted_at IS NULL AND activa=TRUE`,
+          [animalId,String(data.fecha)],
+        );
+        let image=null;
+        if(cloud&&req.file){
+          image=(await client.query(buildInsert('animal_imagen',{
+            id_animal:animalId,id_muerte:deathId,public_id:cloud.public_id,url:cloud.url,
+            secure_url:cloud.secure_url,formato:cloud.format,ancho:cloud.width,alto:cloud.height,
+            bytes:cloud.bytes,tipo_archivo:'IMAGEN',mime_type:req.file.mimetype,
+            nombre_original:req.file.originalname,es_perfil:false,fecha_toma:String(data.fecha),
+            descripcion:'Fotografía asociada al registro de muerte.',registrado_por:req.user!.id,
+          }))).rows[0];
+          await client.query(buildInsert('animal_imagen_relacion',{
+            id_imagen:image.id_imagen,id_animal:animalId,registrado_por:req.user!.id,
+          }));
+        }
+        await notifyRecordCreated(client,'muertes',row,req.user!.id);
+        return {...row,imagen:image};
+      },req.user!.id);
+      return created(res,saved);
+    }catch(error){
+      if(cloud?.public_id)await deleteCloudinaryImage(cloud.public_id).catch(()=>undefined);
+      throw error;
+    }
+  }
   await assertAnimalOperationAllowed(pool, animalId, d.operation);
   if(d.table==='aborto') {
     const row=await transaction(async client=>{
@@ -612,7 +680,31 @@ recordsRouter.patch('/:module/:id', asyncHandler(async (req, res) => {
 recordsRouter.delete('/:module/:id', asyncHandler(async (req, res) => {
   const d = definition(routeParam(req.params.module, 'module'));
   assertPermission(req.user, d.write);
-  const result = await pool.query(`UPDATE ${d.table} SET deleted_at=NOW() WHERE ${d.id}=$1 AND deleted_at IS NULL`, [routeParam(req.params.id, 'id')]);
+  const id=routeParam(req.params.id,'id');
+  if(d.table==='muerte'){
+    const publicId=await transaction(async client=>{
+      const current=(await client.query(
+        `SELECT id_animal FROM muerte WHERE id_muerte=$1 AND deleted_at IS NULL FOR UPDATE`,[id],
+      )).rows[0] as {id_animal:string}|undefined;
+      if(!current)throw new NotFoundError();
+      const image=(await client.query(
+        `UPDATE animal_imagen SET deleted_at=NOW(),updated_at=NOW()
+         WHERE id_muerte=$1 AND deleted_at IS NULL RETURNING public_id`,[id],
+      )).rows[0] as {public_id:string}|undefined;
+      await client.query(`UPDATE muerte SET deleted_at=NOW() WHERE id_muerte=$1`,[id]);
+      const another=(await client.query(
+        `SELECT 1 FROM muerte WHERE id_animal=$1 AND deleted_at IS NULL LIMIT 1`,[current.id_animal],
+      )).rowCount;
+      if(!another)await client.query(
+        `UPDATE animal SET estado='ACTIVO',updated_at=NOW()
+         WHERE id_animal=$1 AND estado='MUERTO'`,[current.id_animal],
+      );
+      return image?.public_id??null;
+    },req.user!.id);
+    if(publicId)await deleteCloudinaryImage(publicId).catch(()=>undefined);
+    return noContent(res);
+  }
+  const result = await pool.query(`UPDATE ${d.table} SET deleted_at=NOW() WHERE ${d.id}=$1 AND deleted_at IS NULL`, [id]);
   if (!result.rowCount) throw new NotFoundError();
   return noContent(res);
 }));

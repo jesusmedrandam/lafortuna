@@ -12,7 +12,7 @@ import { created, noContent, ok } from '../../core/http.js';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../core/errors.js';
 import { paginationSchema, offset } from '../../core/pagination.js';
 import { requirePermission } from '../../middleware/permission.js';
-import { deleteCloudinaryImage, uploadAnimalImage } from '../../services/cloudinary.service.js';
+import { deleteCloudinaryImage, uploadAnimalImage, uploadRecordImage } from '../../services/cloudinary.service.js';
 import { buildInsert, buildUpdate } from '../shared/sql.js';
 
 const relation = z.object({
@@ -80,6 +80,16 @@ const conditionActionSchema = z.object({
   observaciones: z.string().trim().max(1000).nullable().optional(),
 });
 
+function conditionActionPayload(body: unknown) {
+  if (typeof body === 'object' && body !== null && 'data' in body) {
+    const raw=(body as {data?:unknown}).data;
+    if(typeof raw!=='string')throw new ValidationError('Los datos de la novedad no son válidos.');
+    try{return conditionActionSchema.parse(JSON.parse(raw));}
+    catch(error){if(error instanceof SyntaxError)throw new ValidationError('Los datos de la novedad no contienen un JSON válido.');throw error;}
+  }
+  return conditionActionSchema.parse(body);
+}
+
 const createUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: env.MAX_IMAGE_MB * 1024 * 1024 },
@@ -90,6 +100,14 @@ const createUpload = multer({
     }
     callback(null, true);
   },
+});
+
+const conditionUpload=multer({
+  storage:multer.memoryStorage(),
+  limits:{fileSize:env.MAX_IMAGE_MB*1024*1024},
+  fileFilter:(_req,file,callback)=>file.mimetype.startsWith('image/')
+    ?callback(null,true)
+    :callback(new ValidationError('La evidencia debe ser una imagen.')),
 });
 
 function createPayload(body: unknown) {
@@ -271,6 +289,60 @@ animalsRouter.get('/opciones/propietarios', requirePermission('ANIMAL_CONSULTAR'
   return ok(res, rows);
 }));
 
+animalsRouter.get('/novedades', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (_req,res)=>{
+  const rows=(await pool.query(
+    `SELECT * FROM (
+       SELECT
+         CONCAT('CONDICION:',ace.id_evento::text) id_novedad,
+         ace.id_evento id_registro,
+         CASE ace.tipo_evento WHEN 'REPORTAR_DESAPARICION' THEN 'DESAPARECIDO' ELSE 'RECUPERADO' END tipo,
+         ace.fecha_evento fecha,ace.id_animal,a.nombre animal,a.codigo_arete,ca.codigo categoria_codigo,
+         ace.observaciones detalle,ace.observaciones,ug.nombre ubicacion,gg.nombre grupo,
+         ace.registrado_por,TRIM(CONCAT(ur.nombres,' ',ur.apellidos)) usuario,
+         CASE WHEN ai.id_imagen IS NULL THEN NULL ELSE jsonb_build_object(
+           'id_imagen',ai.id_imagen,'secure_url',ai.secure_url,'public_id',ai.public_id,
+           'nombre_original',ai.nombre_original,'fecha_toma',ai.fecha_toma,'created_at',ai.created_at
+         ) END imagen
+       FROM animal_condicion_evento ace
+       JOIN animal a ON a.id_animal=ace.id_animal AND a.deleted_at IS NULL
+       LEFT JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
+       LEFT JOIN ubicacion ug ON ug.id_ubicacion=ace.id_ubicacion_destino
+       LEFT JOIN grupo gg ON gg.id_grupo=ace.id_grupo_destino
+       LEFT JOIN usuario ur ON ur.id_usuario=ace.registrado_por
+       LEFT JOIN LATERAL(
+         SELECT image.* FROM animal_imagen image
+         WHERE image.id_evento_condicion=ace.id_evento AND image.deleted_at IS NULL
+         ORDER BY image.created_at DESC LIMIT 1
+       ) ai ON TRUE
+       WHERE ace.deleted_at IS NULL
+         AND ace.tipo_evento IN ('REPORTAR_DESAPARICION','REGISTRAR_HALLAZGO')
+       UNION ALL
+       SELECT
+         CONCAT('MUERTE:',m.id_muerte::text) id_novedad,m.id_muerte id_registro,'MUERTO' tipo,
+         m.fecha::timestamptz fecha,m.id_animal,a.nombre animal,a.codigo_arete,ca.codigo categoria_codigo,
+         CONCAT_WS(' · ',NULLIF(m.causa,''),NULLIF(m.descripcion,'')) detalle,
+         m.descripcion observaciones,NULL::varchar ubicacion,NULL::varchar grupo,
+         m.registrado_por,TRIM(CONCAT(ur.nombres,' ',ur.apellidos)) usuario,
+         CASE WHEN ai.id_imagen IS NULL THEN NULL ELSE jsonb_build_object(
+           'id_imagen',ai.id_imagen,'secure_url',ai.secure_url,'public_id',ai.public_id,
+           'nombre_original',ai.nombre_original,'fecha_toma',ai.fecha_toma,'created_at',ai.created_at
+         ) END imagen
+       FROM muerte m
+       JOIN animal a ON a.id_animal=m.id_animal AND a.deleted_at IS NULL
+       LEFT JOIN categoria_animal ca ON ca.id_categoria_animal=a.id_categoria_animal
+       LEFT JOIN usuario ur ON ur.id_usuario=m.registrado_por
+       LEFT JOIN LATERAL(
+         SELECT image.* FROM animal_imagen image
+         WHERE image.id_muerte=m.id_muerte AND image.deleted_at IS NULL
+         ORDER BY image.created_at DESC LIMIT 1
+       ) ai ON TRUE
+       WHERE m.deleted_at IS NULL
+     ) novedades
+     ORDER BY fecha DESC,animal`,
+  )).rows;
+  return ok(res,rows);
+}));
+
 animalsRouter.get('/enlaces-publicos', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
   if (!req.user!.roles.includes('ADMINISTRADOR')) throw new ForbiddenError('Solo un administrador puede gestionar todos los enlaces públicos.');
   const rows = (await pool.query(
@@ -386,7 +458,13 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
         'id_evento',ace.id_evento,'tipo_evento',ace.tipo_evento,
         'estado_anterior',ace.estado_anterior,'estado_nuevo',ace.estado_nuevo,
         'fecha_evento',ace.fecha_evento,'observaciones',ace.observaciones,
-        'ubicacion',ace_u.nombre,'grupo',ace_g.nombre
+        'ubicacion',ace_u.nombre,'grupo',ace_g.nombre,
+        'imagen',(SELECT jsonb_build_object(
+          'id_imagen',ace_i.id_imagen,'secure_url',ace_i.secure_url,'public_id',ace_i.public_id,
+          'nombre_original',ace_i.nombre_original,'fecha_toma',ace_i.fecha_toma
+        ) FROM animal_imagen ace_i
+          WHERE ace_i.id_evento_condicion=ace.id_evento AND ace_i.deleted_at IS NULL
+          ORDER BY ace_i.created_at DESC LIMIT 1)
       ) ORDER BY ace.fecha_evento DESC)
       FROM animal_condicion_evento ace
       LEFT JOIN ubicacion ace_u ON ace_u.id_ubicacion=ace.id_ubicacion_destino
@@ -475,7 +553,10 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
         'fecha',COALESCE(hmd.aplicado_en,hmv.aplicado_en,hmv.fecha_movimiento),
         'tipo',hmv.tipo_movimiento,'motivo',COALESCE(hmm.nombre,hmv.motivo),
         'ubicacion_origen',huo.nombre,'ubicacion_destino',hud.nombre,
-        'grupo_origen',hgo.nombre,'grupo_destino',hgd.nombre
+        'grupo_origen',hgo.nombre,'grupo_destino',hgd.nombre,
+        'id_propiedad_origen',COALESCE(hmv.id_propiedad_origen,hgo.id_propiedad,huo.id_propiedad),
+        'id_propiedad_destino',COALESCE(hmv.id_propiedad_destino,hgd.id_propiedad,hud.id_propiedad),
+        'propiedad_origen',hpo.nombre,'propiedad_destino',hpd.nombre
       ) ORDER BY COALESCE(hmd.aplicado_en,hmv.aplicado_en,hmv.fecha_movimiento) DESC)
       FROM movimiento_animal_detalle hmd
       JOIN movimiento_animal hmv ON hmv.id_movimiento=hmd.id_movimiento AND hmv.deleted_at IS NULL
@@ -484,6 +565,8 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       LEFT JOIN ubicacion hud ON hud.id_ubicacion=COALESCE(hmd.id_ubicacion_destino,hmv.id_ubicacion_destino)
       LEFT JOIN grupo hgo ON hgo.id_grupo=COALESCE(hmd.id_grupo_anterior,hmv.id_grupo_origen)
       LEFT JOIN grupo hgd ON hgd.id_grupo=COALESCE(hmd.id_grupo_destino,hmv.id_grupo_destino)
+      LEFT JOIN propiedad_ganadera hpo ON hpo.id_propiedad=COALESCE(hmv.id_propiedad_origen,hgo.id_propiedad,huo.id_propiedad)
+      LEFT JOIN propiedad_ganadera hpd ON hpd.id_propiedad=COALESCE(hmv.id_propiedad_destino,hgd.id_propiedad,hud.id_propiedad)
       WHERE hmd.id_animal=a.id_animal AND hmd.seleccionado=TRUE AND hmd.estado='APLICADO'
         AND hmd.deleted_at IS NULL AND hmv.estado='COMPLETADO'),'[]'::jsonb) historial_movimientos,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
@@ -757,9 +840,14 @@ animalsRouter.post(
   }),
 );
 
-animalsRouter.post('/:id/condicion', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
+animalsRouter.post('/:id/condicion', requirePermission('ANIMAL_MODIFICAR'), conditionUpload.single('imagen'), asyncHandler(async (req, res) => {
   const id = routeParam(req.params.id, 'id');
-  const input = conditionActionSchema.parse(req.body);
+  const input = conditionActionPayload(req.body);
+  if(req.file&&input.accion!=='REGISTRAR_HALLAZGO')throw new ValidationError('La fotografía solo se admite al registrar la recuperación del animal.');
+  const eventId=randomUUID();
+  let cloud:Awaited<ReturnType<typeof uploadRecordImage>>|null=null;
+  if(req.file)cloud=await uploadRecordImage(req.file.buffer,'novedades',eventId);
+  try {
   const result = await transaction(async (client) => {
     const current = (await client.query(
       `SELECT id_animal,id_especie,estado,id_categoria_animal,id_grupo_actual,id_ubicacion_actual
@@ -820,6 +908,7 @@ animalsRouter.post('/:id/condicion', requirePermission('ANIMAL_MODIFICAR'), asyn
     )).rows[0];
 
     await client.query(buildInsert('animal_condicion_evento', {
+      id_evento: eventId,
       id_animal: id,
       tipo_evento: input.accion,
       estado_anterior: current.estado,
@@ -834,9 +923,26 @@ animalsRouter.post('/:id/condicion', requirePermission('ANIMAL_MODIFICAR'), asyn
       observaciones: input.observaciones ?? null,
       registrado_por: req.user!.id,
     }));
-    return updated;
+    let image=null;
+    if(cloud&&req.file){
+      image=(await client.query(buildInsert('animal_imagen',{
+        id_animal:id,id_evento_condicion:eventId,public_id:cloud.public_id,url:cloud.url,
+        secure_url:cloud.secure_url,formato:cloud.format,ancho:cloud.width,alto:cloud.height,
+        bytes:cloud.bytes,tipo_archivo:'IMAGEN',mime_type:req.file.mimetype,
+        nombre_original:req.file.originalname,es_perfil:false,fecha_toma:input.fecha_evento,
+        descripcion:'Fotografía registrada con la recuperación del animal.',registrado_por:req.user!.id,
+      }))).rows[0];
+      await client.query(buildInsert('animal_imagen_relacion',{
+        id_imagen:image.id_imagen,id_animal:id,registrado_por:req.user!.id,
+      }));
+    }
+    return {...updated,id_evento:eventId,imagen:image};
   }, req.user!.id);
   return ok(res, result);
+  } catch(error) {
+    if(cloud?.public_id)await deleteCloudinaryImage(cloud.public_id).catch(()=>undefined);
+    throw error;
+  }
 }));
 
 animalsRouter.get('/:id/ubicacion-historica', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {

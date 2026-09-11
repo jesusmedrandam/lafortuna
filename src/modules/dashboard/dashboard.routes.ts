@@ -45,7 +45,7 @@ dashboardRouter.patch('/preferencias', requirePermission('DASHBOARD_CONSULTAR'),
 
 dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, await cache.rememberComposite(
   ['animales', 'produccion', 'sanidad', 'grupos', 'ubicaciones', 'ventas', 'compras', 'reproduccion'],
-  'dashboard-resumen-v4',
+  'dashboard-resumen-v5',
   60,
   async () => {
     const row = (await pool.query(`WITH animales_principal AS MATERIALIZED (
@@ -69,7 +69,8 @@ dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncH
       (SELECT COUNT(*)::int FROM animales_principal WHERE clasificacion_codigo='VACONA') animales_principal_vaconas,
       (SELECT COUNT(*)::int FROM animales_principal WHERE clasificacion_codigo='TORO') animales_principal_toros,
       (SELECT COUNT(*)::int FROM animales_principal WHERE clasificacion_codigo='TORETE') animales_principal_toretes,
-      (SELECT COUNT(*)::int FROM animales_principal WHERE clasificacion_codigo IN ('TERNERA','TERNERO')) animales_principal_terneros,
+      (SELECT COUNT(*)::int FROM animales_principal WHERE clasificacion_codigo='TERNERA') animales_principal_terneras,
+      (SELECT COUNT(*)::int FROM animales_principal WHERE clasificacion_codigo='TERNERO') animales_principal_terneros,
 
       ((SELECT COALESCE(SUM(precio_total),0) FROM venta_animal WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('week',CURRENT_DATE))+
        (SELECT COALESCE(SUM(precio_total),0) FROM venta_producto WHERE deleted_at IS NULL AND estado='COMPLETADA' AND fecha_venta>=date_trunc('week',CURRENT_DATE)))::numeric ingresos_semana,
@@ -180,6 +181,7 @@ dashboardRouter.get('/resumen', requirePermission('DASHBOARD_CONSULTAR'), asyncH
         vaconas: row.animales_principal_vaconas,
         toros: row.animales_principal_toros,
         toretes: row.animales_principal_toretes,
+        terneras: row.animales_principal_terneras,
         terneros: row.animales_principal_terneros,
         hembras: row.animales_principal_hembras,
         machos: row.animales_principal_machos,

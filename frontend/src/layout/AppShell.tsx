@@ -31,7 +31,7 @@ const destinations: Destination[] = [
   { to: '/partos', label: 'Reproducción', icon: Baby, permissions: ['PARTO_CONSULTAR', 'ABORTO_CONSULTAR'], section: 'operaciones' },
   { to: '/produccion', label: 'Producción', icon: Milk, permissions: ['PRODUCCION_CONSULTAR', 'LACTANCIA_CONSULTAR'], section: 'operaciones' },
   { to: '/pesajes', label: 'Pesajes', icon: Weight, permissions: ['PESAJE_CONSULTAR'], section: 'operaciones' },
-  { to: '/muertes', label: 'Muertes y bajas', icon: HeartOff, permissions: ['MUERTE_CONSULTAR'], section: 'operaciones' },
+  { to: '/muertes', label: 'Novedades y bajas', icon: HeartOff, permissions: ['MUERTE_CONSULTAR'], section: 'operaciones' },
   { to: '/ventas', label: 'Ventas', icon: ShoppingCart, permissions: ['VENTA_CONSULTAR'], section: 'operaciones' },
   { to: '/compras', label: 'Compras y egresos', icon: PackagePlus, permissions: ['COMPRA_CONSULTAR'], section: 'operaciones' },
   { to: '/actividades', label: 'Otras actividades', icon: Activity, permissions: ['ACTIVIDAD_CONSULTAR'], section: 'operaciones' },
