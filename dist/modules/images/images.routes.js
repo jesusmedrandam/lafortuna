@@ -10,7 +10,7 @@ import { created, noContent, ok } from '../../core/http.js';
 import { NotFoundError, ValidationError } from '../../core/errors.js';
 import { paginationSchema, offset } from '../../core/pagination.js';
 import { requirePermission } from '../../middleware/permission.js';
-import { deleteCloudinaryMedia, uploadAnimalImage, uploadAnimalMedia } from '../../services/cloudinary.service.js';
+import { cloudinaryThumbnailUrl, deleteCloudinaryMedia, uploadAnimalImage, uploadAnimalMedia } from '../../services/cloudinary.service.js';
 import { buildInsert } from '../shared/sql.js';
 const mediaUpload = multer({
     storage: multer.memoryStorage(),
@@ -75,7 +75,7 @@ async function imageWithAnimals(client, imageId) {
     return (await client.query(`SELECT i.*,COALESCE((SELECT jsonb_agg(jsonb_build_object(
        'id_animal',a.id_animal,'nombre',a.nombre,'codigo_arete',a.codigo_arete,'sexo',a.sexo,
        'grupo',g.nombre,'ubicacion',u.nombre
-     ) ORDER BY a.nombre)
+     ) ORDER BY CASE WHEN a.id_animal=(SELECT id_madre FROM parto WHERE id_parto=i.id_parto AND deleted_at IS NULL) THEN 0 ELSE 1 END,a.nombre)
      FROM animal_imagen_relacion r
      JOIN animal a ON a.id_animal=r.id_animal AND a.deleted_at IS NULL
      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
@@ -93,7 +93,7 @@ animalImagesRouter.get('/', requirePermission('IMAGEN_CONSULTAR'), asyncHandler(
     const id = routeParam(req.params.id, 'id');
     const rows = (await pool.query(`SELECT i.*,COALESCE((SELECT jsonb_agg(jsonb_build_object(
        'id_animal',a.id_animal,'nombre',a.nombre,'codigo_arete',a.codigo_arete
-     ) ORDER BY a.nombre)
+     ) ORDER BY CASE WHEN a.id_animal=(SELECT id_madre FROM parto WHERE id_parto=i.id_parto AND deleted_at IS NULL) THEN 0 ELSE 1 END,a.nombre)
      FROM animal_imagen_relacion ar
      JOIN animal a ON a.id_animal=ar.id_animal AND a.deleted_at IS NULL
      WHERE ar.id_imagen=i.id_imagen AND ar.deleted_at IS NULL),'[]') animales,
@@ -223,7 +223,10 @@ imagesRouter.get('/multimedia', requirePermission('IMAGEN_CONSULTAR'), asyncHand
           JOIN etiqueta_multimedia ep ON ep.id_etiqueta=ip.id_etiqueta AND ep.deleted_at IS NULL
           WHERE ip.id_imagen=i.id_imagen AND ip.deleted_at IS NULL AND ep.codigo='PARTO')
           THEN CONCAT_WS(' · ',NULLIF(a.codigo_arete,''),g.nombre,u.nombre)
-          ELSE CONCAT_WS(' · ',CASE WHEN p.id_parto IS NOT NULL THEN 'Cría: '||a.nombre END,CASE WHEN p.fecha_parto IS NOT NULL THEN 'Fecha: '||TO_CHAR(p.fecha_parto,'DD/MM/YYYY') END) END subtitulo,
+          ELSE CASE WHEN p.id_parto IS NULL THEN NULL ELSE CONCAT_WS(E'\n',
+            CASE WHEN crias.total=1 THEN 'Cría: '||crias.nombres WHEN crias.total>1 THEN 'Crías: '||crias.nombres END,
+            'Fecha: '||TO_CHAR(p.fecha_parto,'DD/MM/YYYY'),
+            'Padre: '||COALESCE(padre.nombre,pr.padre_externo,'No registrado')) END END subtitulo,
         i.secure_url,i.public_id,i.nombre_original,i.descripcion,i.fecha_toma,i.created_at,
         COALESCE(i.tipo_archivo,'IMAGEN') tipo_archivo,i.es_perfil,
         ARRAY(SELECT DISTINCT r3.id_animal FROM animal_imagen_relacion r3
@@ -233,7 +236,7 @@ imagesRouter.get('/multimedia', requirePermission('IMAGEN_CONSULTAR'), asyncHand
         NULL::text lado,i.id_parto,
         COALESCE((SELECT jsonb_agg(jsonb_build_object(
           'id_animal',a3.id_animal,'nombre',a3.nombre,'codigo_arete',a3.codigo_arete,'sexo',a3.sexo
-        ) ORDER BY a3.nombre) FROM animal_imagen_relacion r3
+        ) ORDER BY CASE WHEN a3.id_animal=p.id_madre THEN 0 ELSE 1 END,a3.nombre) FROM animal_imagen_relacion r3
           JOIN animal a3 ON a3.id_animal=r3.id_animal AND a3.deleted_at IS NULL
           WHERE r3.id_imagen=i.id_imagen AND r3.deleted_at IS NULL),'[]'::jsonb) animales,
         COALESCE((SELECT jsonb_agg(jsonb_build_object(
@@ -246,8 +249,29 @@ imagesRouter.get('/multimedia', requirePermission('IMAGEN_CONSULTAR'), asyncHand
       LEFT JOIN animal a ON a.id_animal=i.id_animal
       LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual
       LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
-      LEFT JOIN parto p ON p.id_parto=i.id_parto
+      LEFT JOIN LATERAL (
+        SELECT bp.* FROM parto bp
+        WHERE bp.deleted_at IS NULL AND (
+          bp.id_parto=i.id_parto OR (
+            i.id_parto IS NULL
+            AND EXISTS(SELECT 1 FROM animal_imagen_relacion rm
+              WHERE rm.id_imagen=i.id_imagen AND rm.id_animal=bp.id_madre AND rm.deleted_at IS NULL)
+            AND EXISTS(SELECT 1 FROM parto_cria pc
+              JOIN animal_imagen_relacion rc ON rc.id_animal=pc.id_cria AND rc.id_imagen=i.id_imagen AND rc.deleted_at IS NULL
+              WHERE pc.id_parto=bp.id_parto AND pc.deleted_at IS NULL)
+          )
+        )
+        ORDER BY (bp.id_parto=i.id_parto) DESC,ABS(bp.fecha_parto-i.fecha_toma::date),bp.created_at DESC
+        LIMIT 1
+      ) p ON TRUE
       LEFT JOIN animal madre ON madre.id_animal=p.id_madre
+      LEFT JOIN animal padre ON padre.id_animal=p.id_padre
+      LEFT JOIN prenez pr ON pr.id_prenez=p.id_prenez
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int total,string_agg(hija.nombre,', ' ORDER BY hija.nombre) nombres
+        FROM parto_cria pc JOIN animal hija ON hija.id_animal=pc.id_cria AND hija.deleted_at IS NULL
+        WHERE pc.id_parto=p.id_parto AND pc.deleted_at IS NULL
+      ) crias ON TRUE
       WHERE i.deleted_at IS NULL
 
       UNION ALL
@@ -324,7 +348,13 @@ imagesRouter.get('/multimedia', requirePermission('IMAGEN_CONSULTAR'), asyncHand
     WHERE ${where.join(' AND ')}
     ORDER BY ${orderBy},m.id_multimedia
     LIMIT $${params.length - 1} OFFSET $${params.length}`, params)).rows;
-    return ok(res, rows, { page: filters.page, limit: filters.limit, total: rows[0]?.total ?? 0 });
+    const data = rows.map((row) => ({
+        ...row,
+        thumbnail_url: row.tipo_archivo === 'IMAGEN'
+            ? cloudinaryThumbnailUrl(String(row.public_id ?? ''), 'image')
+            : null,
+    }));
+    return ok(res, data, { page: filters.page, limit: filters.limit, total: rows[0]?.total ?? 0 });
 }));
 imagesRouter.get('/', requirePermission('IMAGEN_CONSULTAR'), asyncHandler(async (req, res) => {
     const filters = paginationSchema.extend({
@@ -376,7 +406,7 @@ imagesRouter.get('/', requirePermission('IMAGEN_CONSULTAR'), asyncHandler(async 
     const rows = (await pool.query(`SELECT i.*,COALESCE((SELECT jsonb_agg(jsonb_build_object(
        'id_animal',a.id_animal,'nombre',a.nombre,'codigo_arete',a.codigo_arete,'sexo',a.sexo,
        'id_grupo',a.id_grupo_actual,'grupo',g.nombre,'id_ubicacion',a.id_ubicacion_actual,'ubicacion',u.nombre
-     ) ORDER BY a.nombre)
+     ) ORDER BY CASE WHEN a.id_animal=(SELECT id_madre FROM parto WHERE id_parto=i.id_parto AND deleted_at IS NULL) THEN 0 ELSE 1 END,a.nombre)
      FROM animal_imagen_relacion r JOIN animal a ON a.id_animal=r.id_animal AND a.deleted_at IS NULL
      LEFT JOIN grupo g ON g.id_grupo=a.id_grupo_actual LEFT JOIN ubicacion u ON u.id_ubicacion=a.id_ubicacion_actual
      WHERE r.id_imagen=i.id_imagen AND r.deleted_at IS NULL),'[]') animales,

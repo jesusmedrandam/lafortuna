@@ -269,7 +269,12 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_imagen',i.id_imagen,'secure_url',i.secure_url,'url',i.url,'public_id',i.public_id,
         'es_perfil',i.es_perfil,'descripcion',i.descripcion,'orden',i.orden,'created_at',i.created_at,'fecha_toma',i.fecha_toma,
-        'tipo_archivo',i.tipo_archivo,'mime_type',i.mime_type,'nombre_original',i.nombre_original,
+        'tipo_archivo',i.tipo_archivo,'mime_type',i.mime_type,'nombre_original',i.nombre_original,'id_parto',i.id_parto,
+        'parto_madre',(SELECT pm.nombre FROM parto pp JOIN animal pm ON pm.id_animal=pp.id_madre WHERE pp.id_parto=i.id_parto AND pp.deleted_at IS NULL),
+        'parto_crias',(SELECT string_agg(pc_a.nombre,', ' ORDER BY pc.orden_nacimiento) FROM parto_cria pc JOIN animal pc_a ON pc_a.id_animal=pc.id_cria AND pc_a.deleted_at IS NULL WHERE pc.id_parto=i.id_parto AND pc.deleted_at IS NULL),
+        'parto_total_crias',(SELECT COUNT(*)::int FROM parto_cria pc WHERE pc.id_parto=i.id_parto AND pc.deleted_at IS NULL),
+        'parto_fecha',(SELECT pp.fecha_parto::text FROM parto pp WHERE pp.id_parto=i.id_parto AND pp.deleted_at IS NULL),
+        'parto_padre',(SELECT COALESCE(pf.nombre,ppr.padre_externo,'No registrado') FROM parto pp LEFT JOIN animal pf ON pf.id_animal=pp.id_padre LEFT JOIN prenez ppr ON ppr.id_prenez=pp.id_prenez WHERE pp.id_parto=i.id_parto AND pp.deleted_at IS NULL),
         'etiquetas',COALESCE((SELECT jsonb_agg(jsonb_build_object(
           'id_etiqueta',em.id_etiqueta,'codigo',em.codigo,'nombre',em.nombre
         ) ORDER BY em.nombre)
@@ -277,7 +282,7 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
         WHERE aie.id_imagen=i.id_imagen AND aie.deleted_at IS NULL),'[]'::jsonb),
         'animales',COALESCE((SELECT jsonb_agg(jsonb_build_object(
           'id_animal',ar_a.id_animal,'nombre',ar_a.nombre,'codigo_arete',ar_a.codigo_arete
-        ) ORDER BY ar_a.nombre)
+        ) ORDER BY CASE WHEN ar_a.id_animal=(SELECT id_madre FROM parto WHERE id_parto=i.id_parto AND deleted_at IS NULL) THEN 0 ELSE 1 END,ar_a.nombre)
         FROM animal_imagen_relacion ar JOIN animal ar_a ON ar_a.id_animal=ar.id_animal AND ar_a.deleted_at IS NULL
         WHERE ar.id_imagen=i.id_imagen AND ar.deleted_at IS NULL),'[]'::jsonb)
       ) ORDER BY i.es_perfil DESC,i.fecha_toma DESC,i.created_at DESC,i.orden DESC)

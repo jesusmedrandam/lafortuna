@@ -378,6 +378,13 @@ reproductionRouter.delete('/celos/:id', requirePermission('PARTO_ADMINISTRAR'), 
 async function assistedServiceData(client:PoolClient,input:z.infer<typeof assistedServiceSchema>){
   const operation:AnimalOperationCode=input.tipo==='INSEMINACION_ARTIFICIAL'?'INSEMINACION_ARTIFICIAL':'TRANSFERENCIA_EMBRIONES';
   const cow=await eligibleAnimal(client,input.id_vaca,'HEMBRA','La receptora',operation);
+  const activePregnancy=await client.query(
+    `SELECT 1 FROM prenez
+     WHERE id_vaca=$1 AND estado='CONFIRMADA' AND deleted_at IS NULL
+     LIMIT 1 FOR SHARE`,
+    [input.id_vaca],
+  );
+  if(activePregnancy.rowCount)throw new ValidationError('No se puede realizar una inseminación o transferencia de embriones porque la receptora ya tiene una preñez confirmada.');
   const rules=await assertFemaleReproductionRules(client,input.id_vaca,input.fecha,'PRENEZ',false);
   await assertMinimumAge(client,cow.fecha_nacimiento,input.fecha,rules.edad_minima_celo_meses,'La receptora');
   if(input.id_celo){
