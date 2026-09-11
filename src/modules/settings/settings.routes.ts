@@ -54,6 +54,26 @@ const reproductionConfigurationSchema=z.object({
 
 export const settingsRouter = Router();
 
+settingsRouter.get('/operaciones-visibles', asyncHandler(async (_req, res) => {
+  const [properties, configuration] = await Promise.all([
+    pool.query(`SELECT id_propiedad FROM propiedad_ganadera WHERE deleted_at IS NULL AND activa=TRUE`),
+    pool.query(`SELECT id_propiedad,codigo_operacion,permitido FROM operacion_propiedad_animal WHERE deleted_at IS NULL`),
+  ]);
+  const configured = new Map(
+    configuration.rows.map((item: { id_propiedad:string; codigo_operacion:string; permitido:boolean }) => [
+      `${item.id_propiedad}:${item.codigo_operacion}`,
+      item.permitido,
+    ]),
+  );
+  const operationVisibility = Object.fromEntries(animalOperationDefinitions.map((operation) => [
+    operation.codigo,
+    properties.rows.length === 0 || properties.rows.some((property: { id_propiedad:string }) => (
+      configured.get(`${property.id_propiedad}:${operation.codigo}`) ?? true
+    )),
+  ]));
+  return ok(res, { operaciones: operationVisibility });
+}));
+
 settingsRouter.get('/operaciones-animales', requirePermission('CATALOGO_CONSULTAR'), asyncHandler(async (_req, res) => {
   const [properties, configuration] = await Promise.all([
     pool.query(`SELECT id_propiedad,codigo,nombre,es_principal FROM propiedad_ganadera WHERE deleted_at IS NULL AND activa=TRUE ORDER BY es_principal DESC,nombre`),

@@ -246,6 +246,16 @@ reproductionRouter.get('/disponibilidad/:id', requirePermission('ANIMAL_CONSULTA
                 throw new ValidationError('Solo se puede registrar un aborto si existe una preñez confirmada.');
         }),
     ]) : unavailableActions;
+    const [movementLocation, movementGroup, movementProperty, health, weighing, sale, death] = await Promise.all([
+        actionAvailability(() => assertAnimalOperationAllowed(pool, animalId, 'MOVIMIENTO_UBICACION')),
+        actionAvailability(() => assertAnimalOperationAllowed(pool, animalId, 'MOVIMIENTO_GRUPO')),
+        actionAvailability(() => assertAnimalOperationAllowed(pool, animalId, 'MOVIMIENTO_PROPIEDAD')),
+        actionAvailability(() => assertAnimalOperationAllowed(pool, animalId, 'TRATAMIENTO')),
+        actionAvailability(() => assertAnimalOperationAllowed(pool, animalId, 'PESAJE')),
+        actionAvailability(() => assertAnimalOperationAllowed(pool, animalId, 'VENTA')),
+        actionAvailability(() => assertAnimalOperationAllowed(pool, animalId, 'MUERTE')),
+    ]);
+    const movementAllowed = movementLocation.permitido || movementGroup.permitido || movementProperty.permitido;
     return ok(res, {
         id_animal: animalId,
         fecha: date,
@@ -258,6 +268,11 @@ reproductionRouter.get('/disponibilidad/:id', requirePermission('ANIMAL_CONSULTA
         embrion: embryo,
         parto: birth,
         aborto: abortion,
+        movimiento: { permitido: movementAllowed, motivo: movementAllowed ? null : movementLocation.motivo ?? movementGroup.motivo ?? movementProperty.motivo },
+        sanidad: health,
+        pesaje: weighing,
+        venta: sale,
+        muerte: death,
     });
 }));
 reproductionRouter.get('/opciones', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => {

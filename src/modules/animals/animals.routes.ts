@@ -466,7 +466,7 @@ animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(as
       WHERE ht.id_animal=a.id_animal AND ht.deleted_at IS NULL),'[]'::jsonb) historial_tratamientos,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'id_pesaje',hp.id_pesaje,'fecha',hp.fecha_pesaje::text,
-        'peso_kg',hp.peso_kg,'metodo',hp.metodo
+        'peso_kg',hp.peso_kg,'metodo',hp.metodo,'observaciones',hp.observaciones
       ) ORDER BY hp.fecha_pesaje DESC,hp.created_at DESC)
       FROM pesaje hp WHERE hp.id_animal=a.id_animal AND hp.deleted_at IS NULL),'[]'::jsonb) historial_pesajes,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
