@@ -94,6 +94,22 @@ export function uploadRecordImage(buffer, moduleName, recordId) {
         use_filename: false,
     });
 }
+export function cloudinaryThumbnailUrl(publicId, resourceType = 'image') {
+    if (!enabled || !publicId || resourceType !== 'image')
+        return null;
+    return cloudinary.url(publicId, {
+        secure: true,
+        resource_type: resourceType,
+        type: 'upload',
+        transformation: [{
+                width: 480,
+                height: 480,
+                crop: 'limit',
+                fetch_format: 'auto',
+                quality: 'auto:eco',
+            }],
+    });
+}
 export async function deleteCloudinaryImage(publicId) {
     if (!enabled || !publicId)
         return;

@@ -120,6 +120,22 @@ export function uploadRecordImage(buffer: Buffer, moduleName: string, recordId: 
   });
 }
 
+export function cloudinaryThumbnailUrl(publicId: string, resourceType: 'image' | 'video' = 'image') {
+  if (!enabled || !publicId || resourceType !== 'image') return null;
+  return cloudinary.url(publicId, {
+    secure: true,
+    resource_type: resourceType,
+    type: 'upload',
+    transformation: [{
+      width: 480,
+      height: 480,
+      crop: 'limit',
+      fetch_format: 'auto',
+      quality: 'auto:eco',
+    }],
+  });
+}
+
 export async function deleteCloudinaryImage(publicId: string) {
   if (!enabled || !publicId) return;
   try {
