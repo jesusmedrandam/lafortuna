@@ -10,7 +10,7 @@ const envSchema = z.object({
     FRONTEND_URL: z.string().default('http://localhost:5173'),
     DATABASE_URL: z.string().min(1),
     DATABASE_SSL: boolString,
-    DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
+    DATABASE_POOL_MAX: z.coerce.number().int().positive().default(4),
     JWT_ACCESS_SECRET: z.string().min(32),
     JWT_REFRESH_SECRET: z.string().min(32),
     ACCESS_TOKEN_MINUTES: z.coerce.number().int().positive().default(15),
@@ -29,16 +29,7 @@ const envSchema = z.object({
     BOOTSTRAP_ADMIN_EMAIL: z.string().email().optional(),
     BOOTSTRAP_ADMIN_PASSWORD: z.string().min(8).optional(),
     BOOTSTRAP_ADMIN_NAMES: z.string().default('Administrador'),
-    BOOTSTRAP_ADMIN_LASTNAMES: z.string().default('M&M'),
-    FIREBASE_PROJECT_ID: z.string().trim().min(1).optional(),
-    PUSH_DISPATCH_INTERVAL_MS: z.coerce.number().int().min(3000).max(60000).default(10000),
-    CALCULATED_ALERT_INTERVAL_MS: z.coerce.number().int().min(300000).max(86400000).default(3600000),
-    APP_UPDATE_CHECK_INTERVAL_MS: z.coerce.number().int().min(300000).max(86400000).default(900000),
-    TICK_EARLIEST_HATCH_DAYS: z.coerce.number().int().min(10).max(40).default(21),
-    TICK_MINIMUM_REST_DAYS: z.coerce.number().int().min(30).max(70).default(45),
-    TICK_REDUCED_RISK_DAYS: z.coerce.number().int().min(61).max(180).default(100),
-    CLEANING_ALERT_DAYS: z.coerce.number().int().min(15).max(365).default(60),
-    PRODUCTION_VARIATION_ALERT_PERCENT: z.coerce.number().min(5).max(100).default(20)
+    BOOTSTRAP_ADMIN_LASTNAMES: z.string().default('M&M')
 });
 const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {

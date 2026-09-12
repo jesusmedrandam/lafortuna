@@ -188,11 +188,13 @@ async function anyActionAvailability(checks) {
 reproductionRouter.get('/disponibilidad/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
     const animalId = routeParam(req.params.id, 'id');
     const date = z.string().date().catch(new Date().toISOString().slice(0, 10)).parse(req.query.fecha);
-    const animal = (await pool.query(`SELECT id_animal,nombre,sexo,estado,fecha_nacimiento
+    const client = await pool.connect();
+    try {
+    const animal = (await client.query(`SELECT id_animal,nombre,sexo,estado,fecha_nacimiento
      FROM animal WHERE id_animal=$1 AND deleted_at IS NULL`, [animalId])).rows[0];
     if (!animal)
         throw new NotFoundError('Animal no encontrado.');
-    const activePregnancy = (await pool.query(`SELECT id_prenez FROM prenez
+    const activePregnancy = (await client.query(`SELECT id_prenez FROM prenez
      WHERE id_vaca=$1 AND estado='CONFIRMADA' AND deleted_at IS NULL
      ORDER BY fecha_confirmacion DESC LIMIT 1`, [animalId])).rows[0];
     const validFemale = animal.estado === 'ACTIVO' && animal.sexo === 'HEMBRA';
@@ -203,20 +205,20 @@ reproductionRouter.get('/disponibilidad/:id', requirePermission('ANIMAL_CONSULTA
     };
     const reproductiveCheck = async (operation, kind, falseHeat = false) => {
         femaleCheck();
-        await assertAnimalOperationAllowed(pool, animalId, operation);
-        const rules = await assertFemaleReproductionRules(pool, animalId, date, kind, falseHeat);
-        await assertMinimumAge(pool, animal.fecha_nacimiento, date, rules.edad_minima_celo_meses, 'La hembra');
+        await assertAnimalOperationAllowed(client, animalId, operation);
+        const rules = await assertFemaleReproductionRules(client, animalId, date, kind, falseHeat);
+        await assertMinimumAge(client, animal.fecha_nacimiento, date, rules.edad_minima_celo_meses, 'La hembra');
     };
-    const productionHistory = Number((await pool.query(`SELECT COUNT(*)::int total FROM produccion_leche
+    const productionHistory = Number((await client.query(`SELECT COUNT(*)::int total FROM produccion_leche
      WHERE id_vaca=$1 AND deleted_at IS NULL`, [animalId])).rows[0]?.total ?? 0);
     const production = await actionAvailability(async () => {
         femaleCheck();
-        await assertAnimalOperationAllowed(pool, animalId, 'PRODUCCION_LECHE');
-        const state = (await pool.query(`SELECT en_ordeno FROM animal WHERE id_animal=$1 AND deleted_at IS NULL`, [animalId])).rows[0];
+        await assertAnimalOperationAllowed(client, animalId, 'PRODUCCION_LECHE');
+        const state = (await client.query(`SELECT en_ordeno FROM animal WHERE id_animal=$1 AND deleted_at IS NULL`, [animalId])).rows[0];
         if (!state?.en_ordeno)
             throw new ValidationError('La hembra no está marcada como en ordeño.');
-        const rules = await reproductionRulesForAnimal(pool, animalId);
-        const recentBirth = (await pool.query(`SELECT 1 FROM parto
+        const rules = await reproductionRulesForAnimal(client, animalId);
+        const recentBirth = (await client.query(`SELECT 1 FROM parto
        WHERE id_madre=$1 AND deleted_at IS NULL AND fecha_parto::date<=$2::date
          AND fecha_parto+(INTERVAL '1 day'*$3::int)>=$2::date
        LIMIT 1`, [animalId, date, rules.dias_maximos_ordeno_posparto])).rowCount;
@@ -240,27 +242,27 @@ reproductionRouter.get('/disponibilidad/:id', requirePermission('ANIMAL_CONSULTA
         actionAvailability(() => reproductiveCheck('TRANSFERENCIA_EMBRIONES', 'PRENEZ')),
         actionAvailability(async () => {
             femaleCheck();
-            await assertAnimalOperationAllowed(pool, animalId, 'PARTO');
+            await assertAnimalOperationAllowed(client, animalId, 'PARTO');
             if (!activePregnancy)
                 throw new ValidationError('Primero debe existir una preñez confirmada.');
         }),
         actionAvailability(async () => {
             femaleCheck();
-            await assertAnimalOperationAllowed(pool, animalId, 'ABORTO');
+            await assertAnimalOperationAllowed(client, animalId, 'ABORTO');
             if (!activePregnancy)
                 throw new ValidationError('Solo se puede registrar un aborto si existe una preñez confirmada.');
         }),
     ]) : unavailableActions;
     const [movement, health, weighing, sale, death] = await Promise.all([
         anyActionAvailability([
-            () => assertAnimalOperationAllowed(pool, animalId, 'MOVIMIENTO_UBICACION'),
-            () => assertAnimalOperationAllowed(pool, animalId, 'MOVIMIENTO_GRUPO'),
-            () => assertAnimalOperationAllowed(pool, animalId, 'MOVIMIENTO_PROPIEDAD'),
+            () => assertAnimalOperationAllowed(client, animalId, 'MOVIMIENTO_UBICACION'),
+            () => assertAnimalOperationAllowed(client, animalId, 'MOVIMIENTO_GRUPO'),
+            () => assertAnimalOperationAllowed(client, animalId, 'MOVIMIENTO_PROPIEDAD'),
         ]),
-        actionAvailability(() => assertAnimalOperationAllowed(pool, animalId, 'TRATAMIENTO')),
-        actionAvailability(() => assertAnimalOperationAllowed(pool, animalId, 'PESAJE')),
-        actionAvailability(() => assertAnimalOperationAllowed(pool, animalId, 'VENTA')),
-        actionAvailability(() => assertAnimalOperationAllowed(pool, animalId, 'MUERTE')),
+        actionAvailability(() => assertAnimalOperationAllowed(client, animalId, 'TRATAMIENTO')),
+        actionAvailability(() => assertAnimalOperationAllowed(client, animalId, 'PESAJE')),
+        actionAvailability(() => assertAnimalOperationAllowed(client, animalId, 'VENTA')),
+        actionAvailability(() => assertAnimalOperationAllowed(client, animalId, 'MUERTE')),
     ]);
     return ok(res, {
         id_animal: animalId,
@@ -280,6 +282,10 @@ reproductionRouter.get('/disponibilidad/:id', requirePermission('ANIMAL_CONSULTA
         venta: sale,
         muerte: death,
     });
+    }
+    finally {
+        client.release();
+    }
 }));
 reproductionRouter.get('/opciones', requirePermission('PARTO_CONSULTAR'), asyncHandler(async (_req, res) => {
     const [females, males] = await Promise.all([
