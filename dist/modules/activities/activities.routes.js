@@ -10,7 +10,7 @@ import { requirePermission } from '../../middleware/permission.js';
 import { deleteCloudinaryImage } from '../../services/cloudinary.service.js';
 import { buildInsert } from '../shared/sql.js';
 import { deleteRecordImage, recordImageUpload, requestFiles, saveRecordImages } from '../shared/record-images.js';
-import { notifyActivity } from '../notifications/business-notifications.service.js';
+import { assertAnimalOperationAllowed } from '../../services/animal-operation-policy.js';
 const schema = z.object({
     id_tipo_actividad: z.string().uuid(),
     id_marquilla_aplicada: z.string().uuid().nullable().optional(),
@@ -41,6 +41,19 @@ async function resolveAppliedMark(client, typeId, markId) {
         throw new ValidationError('El fierro seleccionado no está disponible.');
     return markId;
 }
+async function activityOperation(client, typeId) {
+    const row = (await client.query('SELECT codigo FROM tipo_actividad WHERE id_tipo_actividad=$1 AND activo=TRUE AND deleted_at IS NULL', [typeId])).rows[0];
+    if (!row)
+        throw new ValidationError('El tipo de actividad no está disponible.');
+    return row.codigo === 'HERRAJE' || row.codigo === 'DESCORNE' ? row.codigo : null;
+}
+async function assertActivityAllowed(client, typeId, animalIds) {
+    const operation = await activityOperation(client, typeId);
+    if (!operation)
+        return;
+    for (const animalId of [...new Set(animalIds)])
+        await assertAnimalOperationAllowed(client, animalId, operation);
+}
 async function applyCurrentMark(client, ids, markId) {
     if (!markId)
         return;
@@ -61,6 +74,7 @@ activitiesRouter.get('/', requirePermission('ACTIVIDAD_CONSULTAR'), asyncHandler
 activitiesRouter.post('/', requirePermission('ACTIVIDAD_ADMINISTRAR'), asyncHandler(async (req, res) => {
     const input = schema.parse(req.body);
     const row = await transaction(async (client) => {
+        await assertActivityAllowed(client, input.id_tipo_actividad, input.id_animales);
         const markId = await resolveAppliedMark(client, input.id_tipo_actividad, input.id_marquilla_aplicada);
         const activity = (await client.query(buildInsert('actividad', {
             id_tipo_actividad: input.id_tipo_actividad, id_marquilla_aplicada: markId,
@@ -68,7 +82,6 @@ activitiesRouter.post('/', requirePermission('ACTIVIDAD_ADMINISTRAR'), asyncHand
         }))).rows[0];
         await replaceAnimals(client, activity.id_actividad, input.id_animales);
         await applyCurrentMark(client, input.id_animales, markId);
-        await notifyActivity(client, activity, [...new Set(input.id_animales)].length, req.user.id);
         return activity;
     }, req.user.id);
     return created(res, row);
@@ -77,6 +90,7 @@ activitiesRouter.patch('/:id', requirePermission('ACTIVIDAD_ADMINISTRAR'), async
     const id = routeParam(req.params.id, 'id');
     const input = schema.parse(req.body);
     const row = await transaction(async (client) => {
+        await assertActivityAllowed(client, input.id_tipo_actividad, input.id_animales);
         const markId = await resolveAppliedMark(client, input.id_tipo_actividad, input.id_marquilla_aplicada);
         const updated = (await client.query(`UPDATE actividad SET id_tipo_actividad=$2,id_marquilla_aplicada=$3,fecha=$4,descripcion=$5,updated_at=NOW()
        WHERE id_actividad=$1 AND deleted_at IS NULL RETURNING *`, [id, input.id_tipo_actividad, markId, input.fecha, input.descripcion ?? null])).rows[0];

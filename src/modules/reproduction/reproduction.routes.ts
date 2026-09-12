@@ -192,6 +192,12 @@ async function actionAvailability(check:()=>Promise<unknown>):Promise<Availabili
   }
 }
 
+async function anyActionAvailability(checks:Array<()=>Promise<unknown>>):Promise<Availability>{
+  const results=await Promise.all(checks.map(check=>actionAvailability(check)));
+  const allowed=results.find(result=>result.permitido);
+  return allowed??results[0]??{permitido:false,motivo:'Operación no disponible.'};
+}
+
 reproductionRouter.get('/disponibilidad/:id',requirePermission('ANIMAL_CONSULTAR'),asyncHandler(async(req,res)=>{
   const animalId=routeParam(req.params.id,'id');
   const date=z.string().date().catch(new Date().toISOString().slice(0,10)).parse(req.query.fecha);
@@ -262,16 +268,17 @@ reproductionRouter.get('/disponibilidad/:id',requirePermission('ANIMAL_CONSULTAR
       if(!activePregnancy)throw new ValidationError('Solo se puede registrar un aborto si existe una preñez confirmada.');
     }),
   ]):unavailableActions;
-  const [movementLocation,movementGroup,movementProperty,health,weighing,sale,death]=await Promise.all([
-    actionAvailability(()=>assertAnimalOperationAllowed(pool,animalId,'MOVIMIENTO_UBICACION')),
-    actionAvailability(()=>assertAnimalOperationAllowed(pool,animalId,'MOVIMIENTO_GRUPO')),
-    actionAvailability(()=>assertAnimalOperationAllowed(pool,animalId,'MOVIMIENTO_PROPIEDAD')),
+  const [movement,health,weighing,sale,death]=await Promise.all([
+    anyActionAvailability([
+      ()=>assertAnimalOperationAllowed(pool,animalId,'MOVIMIENTO_UBICACION'),
+      ()=>assertAnimalOperationAllowed(pool,animalId,'MOVIMIENTO_GRUPO'),
+      ()=>assertAnimalOperationAllowed(pool,animalId,'MOVIMIENTO_PROPIEDAD'),
+    ]),
     actionAvailability(()=>assertAnimalOperationAllowed(pool,animalId,'TRATAMIENTO')),
     actionAvailability(()=>assertAnimalOperationAllowed(pool,animalId,'PESAJE')),
     actionAvailability(()=>assertAnimalOperationAllowed(pool,animalId,'VENTA')),
     actionAvailability(()=>assertAnimalOperationAllowed(pool,animalId,'MUERTE')),
   ]);
-  const movementAllowed=movementLocation.permitido||movementGroup.permitido||movementProperty.permitido;
   return ok(res,{
     id_animal:animalId,
     fecha:date,
@@ -284,7 +291,7 @@ reproductionRouter.get('/disponibilidad/:id',requirePermission('ANIMAL_CONSULTAR
     embrion:embryo,
     parto:birth,
     aborto:abortion,
-    movimiento:{permitido:movementAllowed,motivo:movementAllowed?null:movementLocation.motivo??movementGroup.motivo??movementProperty.motivo},
+    movimiento:movement,
     sanidad:health,
     pesaje:weighing,
     venta:sale,
@@ -378,13 +385,6 @@ reproductionRouter.delete('/celos/:id', requirePermission('PARTO_ADMINISTRAR'), 
 async function assistedServiceData(client:PoolClient,input:z.infer<typeof assistedServiceSchema>){
   const operation:AnimalOperationCode=input.tipo==='INSEMINACION_ARTIFICIAL'?'INSEMINACION_ARTIFICIAL':'TRANSFERENCIA_EMBRIONES';
   const cow=await eligibleAnimal(client,input.id_vaca,'HEMBRA','La receptora',operation);
-  const activePregnancy=await client.query(
-    `SELECT 1 FROM prenez
-     WHERE id_vaca=$1 AND estado='CONFIRMADA' AND deleted_at IS NULL
-     LIMIT 1 FOR SHARE`,
-    [input.id_vaca],
-  );
-  if(activePregnancy.rowCount)throw new ValidationError('No se puede realizar una inseminación o transferencia de embriones porque la receptora ya tiene una preñez confirmada.');
   const rules=await assertFemaleReproductionRules(client,input.id_vaca,input.fecha,'PRENEZ',false);
   await assertMinimumAge(client,cow.fecha_nacimiento,input.fecha,rules.edad_minima_celo_meses,'La receptora');
   if(input.id_celo){

@@ -65,7 +65,7 @@ export const marksRouter = Router();
 
 marksRouter.get('/usuarios', requirePermission('CATALOGO_CONSULTAR', 'ANIMAL_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(
   `SELECT id_usuario,TRIM(CONCAT(nombres,' ',apellidos)) nombre,correo
-   FROM usuario WHERE deleted_at IS NULL AND activo=TRUE AND correo_verificado=TRUE ORDER BY nombres,apellidos`,
+   FROM usuario WHERE deleted_at IS NULL AND activo=TRUE ORDER BY nombres,apellidos`,
 )).rows)));
 
 marksRouter.get('/', requirePermission('CATALOGO_CONSULTAR', 'ANIMAL_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(

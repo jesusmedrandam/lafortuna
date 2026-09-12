@@ -10,12 +10,40 @@ export const animalOperationDefinitions = [
     { codigo: 'PARTO', nombre: 'Partos', grupo: 'Reproducción' },
     { codigo: 'ABORTO', nombre: 'Abortos', grupo: 'Reproducción' },
     { codigo: 'TRATAMIENTO', nombre: 'Tratamientos y sanidad', grupo: 'Sanidad' },
+    { codigo: 'LIMPIEZA_POTRERO', nombre: 'Limpieza de potreros', grupo: 'Mantenimiento' },
+    { codigo: 'COMPRA', nombre: 'Compras', grupo: 'Comercial' },
     { codigo: 'VENTA', nombre: 'Ventas', grupo: 'Comercial' },
     { codigo: 'PESAJE', nombre: 'Pesajes', grupo: 'Manejo' },
+    { codigo: 'HERRAJE', nombre: 'Herraje', grupo: 'Manejo' },
+    { codigo: 'DESCORNE', nombre: 'Descorne', grupo: 'Manejo' },
     { codigo: 'MUERTE', nombre: 'Registro de muerte', grupo: 'Manejo' },
     { codigo: 'LACTANCIA', nombre: 'Lactancias', grupo: 'Producción' },
     { codigo: 'PRODUCCION_LECHE', nombre: 'Ordeño y producción de leche', grupo: 'Producción' },
 ];
+export async function assertPropertyOperationAllowed(database, propertyId, operation) {
+    const row = (await database.query(`SELECT p.nombre,
+      COALESCE((SELECT opa.permitido
+        FROM operacion_propiedad_animal opa
+        WHERE opa.id_propiedad=p.id_propiedad
+          AND opa.codigo_operacion=$2
+          AND opa.deleted_at IS NULL
+        LIMIT 1),TRUE) permitido
+     FROM propiedad_ganadera p
+     WHERE p.id_propiedad=$1 AND p.deleted_at IS NULL`, [propertyId, operation])).rows[0];
+    if (!row)
+        throw new NotFoundError('Propiedad no encontrada.');
+    if (!row.permitido)
+        throw new ValidationError(`${operationLabel(operation)} no está disponible en ${row.nombre}.`);
+    return row;
+}
+export async function principalPropertyId(database) {
+    const row = (await database.query(`SELECT id_propiedad FROM propiedad_ganadera
+     WHERE deleted_at IS NULL AND activa=TRUE
+     ORDER BY es_principal DESC,nombre LIMIT 1`)).rows[0];
+    if (!row)
+        throw new NotFoundError('No hay una propiedad activa configurada.');
+    return row.id_propiedad;
+}
 export async function assertAnimalOperationAllowed(database, animalId, operation) {
     const row = (await database.query(`SELECT a.nombre,a.estado,ca.nombre categoria,
       property.id_propiedad,property.nombre propiedad,

@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Edit3, ImagePlus, Plus, Tag, Trash2, UserRound, X } from 'lucide-react';
+import { ArrowUpDown, CheckSquare2, Edit3, ImagePlus, Plus, Square, Tag, Trash2, UserRound, X } from 'lucide-react';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
-import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, IconButton, Input, LoadingState, Modal, PageHeader, Textarea } from '../../components/ui';
+import { Badge, Button, Card, CompactToolbar, ConfirmDialog, EmptyState, ErrorState, Field, FloatingActionDock, IconButton, Input, LoadingState, Modal, Textarea } from '../../components/ui';
 import type { Mark, OwnerOption } from '../../types/api';
 
 interface Form {
@@ -25,8 +25,17 @@ export function MarksPage() {
   const client = useQueryClient();
   const [form, setForm] = useState<Form | null>(null);
   const [deleteItem, setDeleteItem] = useState<Mark | null>(null);
+  const [search, setSearch] = useState('');
+  const [descending, setDescending] = useState(false);
   const marks = useQuery({ queryKey: ['marks'], queryFn: () => apiRequest<Mark[]>('/marquillas') });
   const users = useQuery({ queryKey: ['marks', 'users'], queryFn: () => apiRequest<OwnerOption[]>('/marquillas/usuarios') });
+  const visibleMarks = useMemo(() => {
+    const term = search.trim().toLocaleLowerCase('es');
+    return (marks.data ?? []).filter((mark) => !term || `${mark.nombre} ${mark.codigo} ${mark.usuario ?? ''}`.toLocaleLowerCase('es').includes(term)).sort((a, b) => {
+      const result = a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' });
+      return descending ? -result : result;
+    });
+  }, [descending, marks.data, search]);
   const save = useMutation({
     mutationFn: () => {
       if (!form?.id_usuarios.length || !form.codigo.trim() || !form.nombre.trim()) throw new Error('Completa usuarios, código y nombre.');
@@ -72,18 +81,13 @@ export function MarksPage() {
   }
 
   function toggleUser(id: string) {
-    if (!form) return;
-    setForm({ ...form, id_usuarios: form.id_usuarios.includes(id) ? form.id_usuarios.filter((item) => item !== id) : [...form.id_usuarios, id] });
+    setForm((current) => current ? { ...current, id_usuarios: current.id_usuarios.includes(id) ? current.id_usuarios.filter((item) => item !== id) : [...current.id_usuarios, id] } : current);
   }
 
-  return <div>
-    <PageHeader
-      title="Fierros"
-      description="Registra los fierros del ganado y relaciónalos con uno o varios usuarios."
-      action={hasPermission('CATALOGO_ADMINISTRAR') ? <IconButton label="Agregar fierro" onClick={() => setForm(emptyForm())}><Plus size={20} /></IconButton> : undefined}
-    />
-    {marks.isLoading ? <LoadingState /> : marks.isError ? <ErrorState message={(marks.error as Error).message} onRetry={() => void marks.refetch()} /> : marks.data?.length ? <div className="mark-list">
-      {marks.data.map((mark) => <Card className="mark-row" key={mark.id_marquilla}>
+  return <div className="module-no-header">
+    <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar fierro, código o propietario…" count={visibleMarks.length} actions={<IconButton label={descending ? 'Orden Z a A' : 'Orden A a Z'} onClick={() => setDescending((value) => !value)}><ArrowUpDown size={18}/></IconButton>}/>
+    {marks.isLoading ? <LoadingState /> : marks.isError ? <ErrorState message={(marks.error as Error).message} onRetry={() => void marks.refetch()} /> : visibleMarks.length ? <div className="mark-list">
+      {visibleMarks.map((mark) => <Card className="mark-row" key={mark.id_marquilla}>
         <div className="mark-photo mark-photo-43">{mark.secure_url ? <img src={mark.secure_url} alt={mark.nombre} /> : <Tag size={25} />}</div>
         <div><strong>{mark.nombre}</strong><small>Código {mark.codigo}</small></div>
         <div className="mark-owner"><UserRound size={16} /><span>{mark.usuario}<small>{mark.usuarios?.length ?? 0} usuario(s)</small></span></div>
@@ -96,13 +100,14 @@ export function MarksPage() {
       <div className="form-stack">
         <div className="form-grid"><Field label="Código" required><Input value={form.codigo} onChange={(event) => setForm({ ...form, codigo: event.target.value })} /></Field><Field label="Nombre" required><Input value={form.nombre} onChange={(event) => setForm({ ...form, nombre: event.target.value })} /></Field></div>
         <Field label="Usuarios relacionados" required hint="Un mismo fierro puede pertenecer a varias personas.">
-          <div className="choice-grid mark-user-grid">{users.data?.map((user) => <label className={`choice-card ${form.id_usuarios.includes(user.id_usuario) ? 'selected' : ''}`} key={user.id_usuario}><input type="checkbox" checked={form.id_usuarios.includes(user.id_usuario)} onChange={() => toggleUser(user.id_usuario)} /><span>{user.nombre}<small>{user.correo}</small></span></label>)}</div>
+          {users.isLoading ? <div className="mark-users-status">Cargando usuarios…</div> : users.isError ? <ErrorState message={(users.error as Error).message} onRetry={() => void users.refetch()} /> : users.data?.length ? <div className="choice-grid mark-user-grid">{users.data.map((user) => { const selected=form.id_usuarios.includes(user.id_usuario); return <button type="button" aria-pressed={selected} className={`choice-card ${selected ? 'selected' : ''}`} key={user.id_usuario} onClick={() => toggleUser(user.id_usuario)}>{selected?<CheckSquare2 size={19}/>:<Square size={19}/>}<span>{user.nombre}<small>{user.correo}</small></span></button>; })}</div> : <div className="mark-users-status">No hay usuarios activos disponibles.</div>}
         </Field>
         <Field label="Descripción"><Textarea value={form.descripcion} onChange={(event) => setForm({ ...form, descripcion: event.target.value })} /></Field>
         <Field label="Foto del fierro" hint="La imagen se recortará automáticamente a formato 4:3."><MarkPhotoPicker current={form.foto_actual} file={form.foto} onChange={(foto) => setForm({ ...form, foto })} /></Field>
         <label className="checkbox"><input type="checkbox" checked={form.activo} onChange={(event) => setForm({ ...form, activo: event.target.checked })} />Activo</label>
       </div>
     </Modal> : null}
+    {hasPermission('CATALOGO_ADMINISTRAR') ? <FloatingActionDock><IconButton label="Agregar fierro" onClick={() => setForm(emptyForm())}><Plus size={22}/></IconButton></FloatingActionDock> : null}
     {deleteItem ? <ConfirmDialog title="Desactivar fierro" message={`Se desactivará ${deleteItem.nombre}; los animales relacionados conservarán el dato.`} onClose={() => setDeleteItem(null)} onConfirm={() => remove.mutate()} loading={remove.isPending} /> : null}
   </div>;
 }

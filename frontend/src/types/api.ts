@@ -53,16 +53,16 @@ export interface DashboardSummary {
   };
   ingresos: {
     semana: string | number; mes: string | number; anio: string | number;
-    conceptos: Array<{ codigo: string; nombre: string; total: string | number }>;
+    conceptos: Array<{ codigo: string; nombre: string; semana: string | number; mes: string | number; anio: string | number; total?: string | number }>;
   };
   egresos: { semana: string | number; mes: string | number; anio: string | number };
-  ventas: { semana: number; mes: number; anio: number };
-  produccion: { hoy: string | number; semana: string | number; mes: string | number };
-  tratamientos: { hoy: number; semana: number; mes: number };
-  traslados: { semana: number; mes: number; anio: number };
+  ventas: { semana: number; mes: number; anio: number; ventas_animales_mes:number; animales_vendidos_mes:number; ventas_productos_mes:number };
+  produccion: { hoy: string | number; ayer:string|number; semana: string | number; mes: string | number; vacas_hoy:number; promedio_vaca_hoy:string|number; tanque_hoy:string|number };
+  tratamientos: { hoy: number; semana: number; mes: number; animales_mes:number; medicamentos_mes:number };
+  traslados: { semana: number; mes: number; anio: number; rotaciones_mes:number; cambios_grupo_mes:number; propiedades_mes:number; combinados_mes:number; grupos_completos_mes:number; selecciones_manuales_mes:number; animales_mes:number };
   potreros: { total: number; ocupados: number; descanso: number };
   grupos: { total: number; con_animales: number; animales_agrupados: number };
-  reproduccion: { celos_abiertos: number; preneces_confirmadas: number; proximos_partos: number; partos_mes: number };
+  reproduccion: { celos_abiertos: number; preneces_confirmadas: number; proximos_partos: number; partos_anio: number; partos_mes?: number };
   sexo: { hembras: number; machos: number };
 }
 
@@ -77,6 +77,7 @@ export interface CatalogItem {
 
 export interface Animal {
   id_animal: string;
+  created_at?: string;
   codigo_arete: string | null;
   nombre: string;
   descripcion: string | null;
@@ -106,6 +107,7 @@ export interface Animal {
   propiedad?: string | null;
   propiedad_es_principal?: boolean | null;
   estado: string;
+  en_ordeno?: boolean;
   condicion?: string;
   foto_perfil: string | null;
   propietario_principal?: string | null;
@@ -124,6 +126,7 @@ export interface Animal {
   } | null;
   ultimo_movimiento?: {
     id_movimiento: string;
+    tipo?:string;
     fecha: string;
     ubicacion_origen: string | null;
     ubicacion_destino: string | null;
@@ -132,23 +135,53 @@ export interface Animal {
     motivo: string | null;
   } | null;
   eventos_condicion?: AnimalConditionEvent[];
+  condiciones_salud_activas?:Array<{id_condicion_salud:string;descripcion:string;estado:string;fecha_deteccion:string;tipo:string|null}>;
   total_partos?: number;
   total_crias?: number;
   crias_registradas?: AnimalRegisteredChild[];
   historial_partos?: AnimalReproductiveBirth[];
   historial_celos?: AnimalReproductiveHeat[];
   historial_preneces?: AnimalReproductivePregnancy[];
+  historial_servicios_reproductivos?:Array<{id_servicio_reproductivo:string;fecha:string;tipo:string;rol:'RECEPTORA'|'PADRE'|'DONANTE';receptora:string;padre:string|null;donante:string|null;codigo_material:string|null;tecnico:string|null;observaciones:string|null}>;
   historial_abortos?: AnimalReproductiveAbortion[];
   historial_actividades?: AnimalActivityHistory[];
   historial_movimientos?: AnimalMovementHistory[];
   historial_tratamientos?: AnimalTreatmentHistory[];
-  historial_pesajes?: Array<{id_pesaje:string;fecha:string;peso_kg:string|number;metodo:string|null}>;
+  historial_pesajes?: Array<{id_pesaje:string;fecha:string;peso_kg:string|number;metodo:string|null;observaciones:string|null}>;
   historial_lactancias?: Array<{id_lactancia:string;fecha_inicio:string;fecha_fin:string|null;en_ordeno:boolean}>;
   historial_produccion?: AnimalProductionHistory[];
   imagenes?: AnimalImage[];
   colores?: { id_color: string; nombre: string; es_principal: boolean }[];
   razas?: { id_raza: string; nombre: string; porcentaje: number | null }[];
   total?: number;
+}
+
+export interface AnimalHistoricalLocation {
+  fecha: string;
+  encontrado: boolean;
+  propiedad: string | null;
+  id_propiedad: string | null;
+  ubicacion: string | null;
+  id_ubicacion: string | null;
+  tipo_ubicacion: 'POTRERO' | 'CORRAL' | 'OTRO' | null;
+  grupo: string | null;
+  id_grupo: string | null;
+  periodo_ubicacion: { desde: string; hasta: string | null } | null;
+  periodo_grupo: { desde: string; hasta: string | null } | null;
+  estado:string|null;
+  ultimo_pesaje:{peso_kg:number|string;fecha:string;metodo:string|null}|null;
+  ultimo_tratamiento:{fecha:string;tipo:string;medicamento:string;via:string;dosis:number|string;unidad:string|null}|null;
+  reproduccion:{
+    ultimo_celo:{fecha:string;fecha_fin:string|null;es_falso:boolean}|null;
+    prenez:{fecha_confirmacion:string;fecha_parto_tentativa:string|null;metodo_confirmacion:string;padre:string|null}|null;
+    ultimo_parto:{fecha:string;tipo:string;total_crias:number}|null;
+    ultimo_aborto:{fecha:string;causa:string|null}|null;
+    total_partos:number;
+  };
+  lactancia:{fecha_inicio:string;fecha_fin:string|null;activa:boolean;en_ordeno:boolean}|null;
+  produccion_dia:number;
+  registros_produccion:number;
+  total_tratamientos:number;
 }
 
 export interface PublicAnimal {
@@ -307,6 +340,12 @@ export interface AnimalFilterOptions {
 export interface AnimalImage {
   id_imagen: string;
   id_animal?: string;
+  id_parto?: string | null;
+  parto_madre?: string | null;
+  parto_crias?: string | null;
+  parto_total_crias?: number | null;
+  parto_fecha?: string | null;
+  parto_padre?: string | null;
   secure_url: string;
   url?: string;
   public_id?: string;
@@ -605,6 +644,7 @@ export interface SelectableAnimal {
   grupo: string | null;
   id_ubicacion_actual: string | null;
   ubicacion: string | null;
+  foto_perfil?: string | null;
   seleccionado: boolean;
   observaciones?: string | null;
   dosis_aplicada?: number | null;
@@ -651,6 +691,8 @@ export interface Movement {
   propiedad_destino: string | null;
   propiedad_origen_es_principal: boolean | null;
   propiedad_destino_es_principal: boolean | null;
+  origen_descripcion?: string | null;
+  destino_descripcion?: string | null;
   fecha_movimiento: string;
   motivo: string | null;
   motivo_catalogo: string | null;
@@ -800,20 +842,15 @@ export interface HealthCondition {
   descripcion: string;
   fecha_resolucion: string | null;
   total_tratamientos: number;
+  foto_perfil?: string | null;
 }
 
 export interface ActiveLactationCow {
   id_animal: string;
   nombre: string;
   codigo_arete: string | null;
-  id_lactancia: string | null;
-  fecha_inicio: string | null;
-  fecha_parto: string;
-}
-
-export interface MilkingCowOption extends ActiveLactationCow {
-  en_ordeno: boolean;
-  lactancia_activa: boolean | null;
+  id_lactancia: string;
+  fecha_inicio: string;
 }
 
 export interface LactationCowOption {
@@ -877,6 +914,7 @@ export interface Birth {
   id_padre: string | null;
   madre: string;
   madre_arete: string | null;
+  madre_foto_perfil?: string | null;
   categoria_codigo: string;
   categoria: string;
   padre: string | null;
@@ -910,6 +948,8 @@ export interface PregnancyRecord {
   id_vaca: string;
   id_celo: string | null;
   id_padre: string | null;
+  id_servicio_reproductivo?: string | null;
+  padre_externo?: string | null;
   vaca: string;
   codigo_arete: string | null;
   id_especie: string;
@@ -926,6 +966,31 @@ export interface PregnancyRecord {
   fecha_parto_tentativa: string | null;
   estado: 'CONFIRMADA' | 'FINALIZADA' | 'CANCELADA';
   observaciones: string | null;
+}
+
+export interface AssistedReproductionRecord {
+  id_servicio_reproductivo:string;
+  id_vaca:string;
+  tipo:'INSEMINACION_ARTIFICIAL'|'TRANSFERENCIA_EMBRIONES';
+  fecha:string;
+  id_celo:string|null;
+  id_padre:string|null;
+  padre_externo:string|null;
+  id_donante:string|null;
+  donante_externa:string|null;
+  codigo_material:string|null;
+  calidad:string|null;
+  tecnico:string|null;
+  proveedor:string|null;
+  observaciones:string|null;
+  vaca:string;
+  codigo_arete:string|null;
+  padre:string|null;
+  donante:string|null;
+  tiene_prenez:boolean;
+  id_categoria_animal:string;
+  categoria_codigo:string;
+  categoria:string;
 }
 
 export interface UpcomingBirth {

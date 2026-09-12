@@ -10,7 +10,7 @@ import { requirePermission } from '../../middleware/permission.js';
 import { buildInsert } from '../shared/sql.js';
 import { deleteCloudinaryImage } from '../../services/cloudinary.service.js';
 import { deleteRecordImage, recordImageUpload, requestFiles, saveRecordImages } from '../shared/record-images.js';
-import { notifyCleaning } from '../notifications/business-notifications.service.js';
+import { assertPropertyOperationAllowed } from '../../services/animal-operation-policy.js';
 
 const productSchema = z.object({
   id_producto: z.string().uuid(),
@@ -137,6 +137,14 @@ cleaningsRouter.get('/:id', requirePermission('LIMPIEZA_CONSULTAR'), asyncHandle
 cleaningsRouter.post('/', requirePermission('LIMPIEZA_ADMINISTRAR'), asyncHandler(async (req, res) => {
   const input = schema.parse(req.body);
   const result = await transaction(async (client) => {
+    const property=(await client.query(
+      `SELECT u.id_propiedad FROM potrero p
+       JOIN ubicacion u ON u.id_ubicacion=p.id_ubicacion
+       WHERE p.id_potrero=$1 AND p.deleted_at IS NULL AND u.deleted_at IS NULL`,
+      [input.id_potrero],
+    )).rows[0] as {id_propiedad:string}|undefined;
+    if(!property)throw new ValidationError('El potrero seleccionado no está disponible.');
+    await assertPropertyOperationAllowed(client,property.id_propiedad,'LIMPIEZA_POTRERO');
     const { productos: _products, operadores, id_tipos_limpieza:_types, id_tipo_limpieza:_legacyType, ...head } = input;
     const types=cleaningTypeIds(input);
     const cleaning = (await client.query(buildInsert('limpieza_potrero', {
@@ -153,7 +161,6 @@ cleaningsRouter.post('/', requirePermission('LIMPIEZA_ADMINISTRAR'), asyncHandle
     for (const operator of operadores) {
       await client.query(buildInsert('limpieza_potrero_operador', { ...operator, id_limpieza: cleaning.id_limpieza }));
     }
-    await notifyCleaning(client,cleaning,req.user!.id);
     return cleaning;
   }, req.user!.id);
   return created(res, result);

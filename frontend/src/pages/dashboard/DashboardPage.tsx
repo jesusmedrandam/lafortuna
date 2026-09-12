@@ -11,15 +11,13 @@ import {
   ShoppingCart,
   Sprout,
   Syringe,
-  Users,
-  Venus,
   type LucideIcon,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
-import { Button, Card, ErrorState, IconButton, LoadingState, Modal } from '../../components/ui';
+import { Button, Card, ErrorState, LoadingState, Modal } from '../../components/ui';
 import type { DashboardSummary } from '../../types/api';
 import { formatNumber } from '../../utils';
 
@@ -30,6 +28,7 @@ interface MetricDefinition {
   key: string;
   label: string;
   format?: 'money' | 'liters';
+  default?: boolean;
 }
 
 interface ModuleDefinition {
@@ -55,32 +54,30 @@ const modules: ModuleDefinition[] = [
   ] },
   { key: 'ventas', label: 'Ventas', description: 'Operaciones completadas', icon: ShoppingCart, route: '/ventas', permission: 'VENTA_CONSULTAR', tone: 'orange', metrics: [
     { key: 'semana', label: 'Esta semana' }, { key: 'mes', label: 'Este mes' }, { key: 'anio', label: 'Este año' },
+    { key: 'ventas_animales_mes', label: 'Ventas de animales este mes', default:false }, { key: 'animales_vendidos_mes', label: 'Animales vendidos este mes', default:false }, { key: 'ventas_productos_mes', label: 'Ventas de productos este mes', default:false },
   ] },
   { key: 'produccion', label: 'Producción', description: 'Leche registrada', icon: Droplets, route: '/produccion', permission: 'PRODUCCION_CONSULTAR', tone: 'cyan', metrics: [
     { key: 'hoy', label: 'Hoy', format: 'liters' }, { key: 'semana', label: 'Esta semana', format: 'liters' }, { key: 'mes', label: 'Este mes', format: 'liters' },
+    { key: 'ayer', label: 'Ayer', format:'liters', default:false }, { key: 'vacas_hoy', label: 'Vacas ordeñadas hoy', default:false }, { key: 'promedio_vaca_hoy', label: 'Promedio por vaca hoy', format:'liters', default:false }, { key: 'tanque_hoy', label: 'Tanque hoy', format:'liters', default:false },
   ] },
   { key: 'tratamientos', label: 'Tratamientos', description: 'Aplicaciones sanitarias', icon: Syringe, route: '/sanidad', permission: 'SANIDAD_CONSULTAR', tone: 'red', metrics: [
     { key: 'hoy', label: 'Hoy' }, { key: 'semana', label: 'Esta semana' }, { key: 'mes', label: 'Este mes' },
+    { key: 'animales_mes', label: 'Animales tratados este mes', default:false }, { key: 'medicamentos_mes', label: 'Medicamentos usados este mes', default:false },
   ] },
   { key: 'traslados', label: 'Traslados', description: 'Movimientos completados', icon: ArrowRightLeft, route: '/movimientos', permission: 'MOVIMIENTO_CONSULTAR', tone: 'blue', metrics: [
     { key: 'semana', label: 'Esta semana' }, { key: 'mes', label: 'Este mes' }, { key: 'anio', label: 'Este año' },
+    { key: 'rotaciones_mes', label: 'Rotaciones de potrero este mes', default:false }, { key: 'cambios_grupo_mes', label: 'Cambios de grupo este mes', default:false }, { key: 'propiedades_mes', label: 'Traslados de propiedad este mes', default:false }, { key: 'combinados_mes', label: 'Cambios combinados este mes', default:false }, { key: 'grupos_completos_mes', label: 'Grupos completos este mes', default:false }, { key: 'selecciones_manuales_mes', label: 'Selecciones de animales este mes', default:false }, { key: 'animales_mes', label: 'Animales trasladados este mes', default:false },
   ] },
   { key: 'potreros', label: 'Potreros', description: 'Uso de las áreas', icon: Sprout, route: '/potreros', permission: 'POTRERO_CONSULTAR', tone: 'green', metrics: [
     { key: 'total', label: 'Total' }, { key: 'ocupados', label: 'Ocupados' }, { key: 'descanso', label: 'En descanso' },
   ] },
-  { key: 'grupos', label: 'Grupos', description: 'Organización del hato', icon: Users, route: '/grupos', permission: 'GRUPO_CONSULTAR', tone: 'purple', metrics: [
-    { key: 'total', label: 'Total' }, { key: 'con_animales', label: 'Con animales' }, { key: 'animales_agrupados', label: 'Animales agrupados' },
-  ] },
   { key: 'reproduccion', label: 'Reproducción', description: 'Seguimiento reproductivo', icon: Baby, route: '/partos', permission: 'PARTO_CONSULTAR', tone: 'pink', metrics: [
-    { key: 'celos_abiertos', label: 'Celos abiertos' }, { key: 'preneces_confirmadas', label: 'Preñeces confirmadas' }, { key: 'proximos_partos', label: 'Próximos partos' }, { key: 'partos_mes', label: 'Partos este mes' },
-  ] },
-  { key: 'sexo', label: 'Sexo', description: 'Distribución de animales activos', icon: Venus, route: '/animales', permission: 'ANIMAL_CONSULTAR', tone: 'pink', metrics: [
-    { key: 'hembras', label: 'Hembras' }, { key: 'machos', label: 'Machos' },
+    { key: 'celos_abiertos', label: 'Celos abiertos' }, { key: 'preneces_confirmadas', label: 'Preñeces confirmadas' }, { key: 'proximos_partos', label: 'Próximos partos' }, { key: 'partos_anio', label: 'Partos este año' },
   ] },
 ];
 
 const defaultConfiguration: DashboardConfiguration = Object.fromEntries(
-  modules.map((module) => [module.key, module.metrics.map((metric) => metric.key)]),
+  modules.map((module) => [module.key, module.metrics.filter((metric)=>metric.default!==false).map((metric) => metric.key)]),
 ) as DashboardConfiguration;
 
 function money(value: unknown) {
@@ -109,6 +106,21 @@ function animalListRoute(filters: Record<string, string>) {
   return `/animales?${new URLSearchParams(filters).toString()}`;
 }
 
+function periodRoute(route: string, period: 'semana'|'mes'|'anio') {
+  return `${route}?periodo=${period}`;
+}
+
+function metricRoute(module: ModuleDefinition, metricKey: string) {
+  if (module.key === 'ventas' && (metricKey === 'semana' || metricKey === 'mes' || metricKey === 'anio')) return periodRoute(module.route, metricKey);
+  if (module.key === 'ventas' && metricKey.includes('productos')) return '/ventas?tipo=productos&periodo=mes';
+  if (module.key === 'ventas' && (metricKey.includes('animales') || metricKey === 'animales_vendidos_mes')) return '/ventas?tipo=animales&periodo=mes';
+  if (module.key === 'reproduccion') {
+    const tab = metricKey === 'celos_abiertos' ? 'heats' : metricKey === 'preneces_confirmadas' ? 'pregnancies' : 'births';
+    return `/partos?tab=${tab}`;
+  }
+  return module.route;
+}
+
 function AnimalsDashboardCard({ module, values, onOpen }: {
   module: ModuleDefinition;
   values: DashboardSummary['animales'];
@@ -120,7 +132,7 @@ function AnimalsDashboardCard({ module, values, onOpen }: {
     className={`dashboard-animal-metric${highlighted ? ' highlighted' : ''}`}
     onClick={() => onOpen(route)}
     title={`Mostrar ${label.toLocaleLowerCase('es')}`}
-  ><small>{label}</small><strong>{formatNumber(Number(value ?? 0))}</strong></button>;
+  ><strong>{formatNumber(Number(value ?? 0))}</strong><small>{label}</small></button>;
   return <Card className="dashboard-module-card dashboard-animals-card stat-green">
     <DashboardModuleHeading module={module} onClick={() => onOpen('/animales')} />
     <div className="dashboard-feature-summary">
@@ -160,19 +172,24 @@ function AnimalsDashboardCard({ module, values, onOpen }: {
 function IncomeDashboardCard({ module, values, onOpen }: {
   module: ModuleDefinition;
   values: DashboardSummary['ingresos'];
-  onOpen: () => void;
+  onOpen: (route?: string) => void;
 }) {
-  const concepts = (values?.conceptos ?? []).filter((concept) => Number(concept.total) > 0);
-  return <Card className="dashboard-module-card dashboard-income-card stat-lime" onClick={onOpen}>
-    <DashboardModuleHeading module={module} />
+  const concepts = (values?.conceptos ?? []).filter((concept) => Number(concept.semana) > 0 || Number(concept.mes) > 0 || Number(concept.anio ?? concept.total) > 0);
+  const conceptRoute = (code: string, period: 'semana'|'mes'|'anio') => {
+    const normalized = code.toLocaleUpperCase('es');
+    const type = normalized.includes('PRODUCT') || normalized.includes('LECHE') || normalized.includes('QUESO') ? 'productos' : 'animales';
+    return `/ventas?tipo=${type}&periodo=${period}`;
+  };
+  return <Card className="dashboard-module-card dashboard-income-card stat-lime" onClick={() => onOpen()}>
+    <DashboardModuleHeading module={module} onClick={() => onOpen()} />
     <div className="dashboard-income-periods">
-      <span><small>Esta semana</small><strong>{money(values?.semana)}</strong></span>
-      <span><small>Este mes</small><strong>{money(values?.mes)}</strong></span>
-      <span className="highlighted"><small>Este año</small><strong>{money(values?.anio)}</strong></span>
+      <button type="button" onClick={(event) => { event.stopPropagation(); onOpen(periodRoute(module.route, 'semana')); }}><strong>{money(values?.semana)}</strong><small>Esta semana</small></button>
+      <button type="button" onClick={(event) => { event.stopPropagation(); onOpen(periodRoute(module.route, 'mes')); }}><strong>{money(values?.mes)}</strong><small>Este mes</small></button>
+      <button type="button" className="highlighted" onClick={(event) => { event.stopPropagation(); onOpen(periodRoute(module.route, 'anio')); }}><strong>{money(values?.anio)}</strong><small>Este año</small></button>
     </div>
-    <h3 className="dashboard-income-caption">Este año por concepto</h3>
+    <h3 className="dashboard-income-caption">Por concepto</h3>
     <div className="dashboard-income-concepts">
-      {concepts.length ? concepts.map((concept) => <span key={concept.codigo}><small>{concept.nombre}</small><strong>{money(concept.total)}</strong></span>) : <small className="muted">Aún no hay ingresos registrados este año.</small>}
+      {concepts.length ? concepts.map((concept) => <section key={concept.codigo} className="dashboard-income-concept"><strong>{concept.nombre}</strong><div><button type="button" onClick={(event) => { event.stopPropagation(); onOpen(conceptRoute(concept.codigo, 'semana')); }}><small>Semana</small><span>{money(concept.semana)}</span></button><button type="button" onClick={(event) => { event.stopPropagation(); onOpen(conceptRoute(concept.codigo, 'mes')); }}><small>Mes</small><span>{money(concept.mes)}</span></button><button type="button" onClick={(event) => { event.stopPropagation(); onOpen(conceptRoute(concept.codigo, 'anio')); }}><small>Año</small><span>{money(concept.anio ?? concept.total)}</span></button></div></section>) : <small className="muted">Aún no hay ingresos registrados.</small>}
     </div>
   </Card>;
 }
@@ -180,14 +197,15 @@ function IncomeDashboardCard({ module, values, onOpen }: {
 function sanitizeConfiguration(value: DashboardConfiguration): DashboardConfiguration {
   return Object.fromEntries(modules.flatMap((module)=>{
     const allowed=new Set(module.metrics.map((metric)=>metric.key));
-    const selected=(value[module.key]??[]).filter((key)=>allowed.has(key));
+    const selected=(value[module.key]??[]).map((key)=>module.key==='reproduccion'&&key==='partos_mes'?'partos_anio':key).filter((key)=>allowed.has(key));
     return selected.length?[[module.key,[...new Set(selected)]]]:[];
   })) as DashboardConfiguration;
 }
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { hasPermission, user } = useAuth();
+  const { hasPermission } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToast();
   const client = useQueryClient();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -196,7 +214,7 @@ export function DashboardPage() {
   const preferences = useQuery({ queryKey: ['dashboard', 'preferences'], queryFn: () => apiRequest<{ configuracion: DashboardConfiguration | null }>('/dashboard/preferencias') });
   const allowedModules = useMemo(() => modules.filter((module) => hasPermission(module.permission)), [hasPermission]);
   const savedConfiguration = preferences.data?.configuracion;
-  const currentConfiguration = savedConfiguration ?? defaultConfiguration;
+  const currentConfiguration = useMemo(() => savedConfiguration ? sanitizeConfiguration(savedConfiguration) : defaultConfiguration, [savedConfiguration]);
   const visibleModules = allowedModules.filter((module) => (currentConfiguration[module.key]?.length ?? 0) > 0);
 
   useEffect(() => {
@@ -204,6 +222,14 @@ export function DashboardPage() {
   // currentConfiguration es derivada y solo se copia al abrir el modal.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsOpen]);
+
+  useEffect(() => {
+    if (searchParams.get('ajustes_panel') !== '1') return;
+    setSettingsOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('ajustes_panel');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const save = useMutation({
     mutationFn: () => apiRequest('/dashboard/preferencias', { method: 'PATCH', body: { configuracion: sanitizeConfiguration(draft) } }),
@@ -218,7 +244,7 @@ export function DashboardPage() {
   const toggleModule = (module: ModuleDefinition) => setDraft((current) => {
     const next = { ...current };
     if ((next[module.key]?.length ?? 0) > 0) delete next[module.key];
-    else next[module.key] = module.metrics.map((metric) => metric.key);
+    else next[module.key] = module.metrics.filter((metric)=>metric.default!==false).map((metric) => metric.key);
     return next;
   });
 
@@ -233,23 +259,17 @@ export function DashboardPage() {
   if (query.isLoading) return <LoadingState text="Preparando el resumen de la finca…" />;
   if (query.isError) return <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} />;
 
-  return <div>
-    <div className="dashboard-home-header">
-      <div><span className="eyebrow">Panel principal</span><h1>Hola, {user?.nombres ?? 'bienvenido'}</h1><p>Resumen operativo y financiero de la finca.</p></div>
-      <img src="/branding/logo-sgb-full.png" alt="Sistema de Gestión Bovina" />
-      <IconButton label="Personalizar panel" onClick={() => setSettingsOpen(true)}><Settings2 size={20} /></IconButton>
-    </div>
-
+  return <div className="module-no-header">
     {visibleModules.length ? <div className="dashboard-module-grid">
       {visibleModules.map((module) => {
         const values = query.data?.[module.key] as unknown as Record<string, unknown>;
         const selectedMetrics = module.metrics.filter((metric) => currentConfiguration[module.key]?.includes(metric.key));
         if (module.key === 'animales') return <AnimalsDashboardCard key={module.key} module={module} values={query.data!.animales} onOpen={(route) => navigate(route ?? module.route)} />;
-        if (module.key === 'ingresos') return <IncomeDashboardCard key={module.key} module={module} values={query.data!.ingresos} onOpen={() => navigate(module.route)} />;
+        if (module.key === 'ingresos') return <IncomeDashboardCard key={module.key} module={module} values={query.data!.ingresos} onOpen={(route) => navigate(route ?? module.route)} />;
         return <Card key={module.key} className={`dashboard-module-card stat-${module.tone}`} onClick={() => navigate(module.route)}>
-          <DashboardModuleHeading module={module} />
+          <DashboardModuleHeading module={module} onClick={() => navigate(module.route)} />
           <div className={`dashboard-module-metrics metrics-${Math.min(selectedMetrics.length, 4)}`}>
-            {selectedMetrics.map((metric) => <span key={metric.key}><strong>{renderValue(values?.[metric.key], metric.format)}</strong><small>{metric.label}</small></span>)}
+            {selectedMetrics.map((metric) => { const value=metric.key==='partos_anio'?(values?.partos_anio??values?.partos_mes):values?.[metric.key]; return <button type="button" key={metric.key} onClick={(event) => { event.stopPropagation(); navigate(metricRoute(module, metric.key)); }}><strong>{renderValue(value, metric.format)}</strong><small>{metric.label}</small></button>; })}
           </div>
         </Card>;
       })}

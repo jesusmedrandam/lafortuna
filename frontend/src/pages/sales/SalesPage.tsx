@@ -1,25 +1,19 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Ban, ChevronRight, Edit3, Package, Plus, ShoppingCart, Trash2, Users } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { ArrowUpDown, Ban, ChevronRight, Edit3, Package, Plus, ShoppingCart, Trash2, Users, X } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { AnimalSelectionBuilder, type AnimalSelectionValue } from '../../components/AnimalSelectionBuilder';
 import { useToast } from '../../components/ToastContext';
-import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, ListToolbar, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
+import { Badge, Button, Card, CompactToolbar, EmptyState, ErrorState, Field, FloatingActionDock, IconButton, Input, LoadingState, Modal, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
 import { useListControls } from '../../hooks/useListControls';
 import type { AnimalSale, CatalogItem, ProductSale } from '../../types/api';
-import { currentDateInput, dateInputValue, formatDate, numberOrNull, nullIfEmpty } from '../../utils';
+import { currentDateInput, dateInputValue, formatDate, formatNumber, numberOrNull, nullIfEmpty } from '../../utils';
 
 type SaleTab = 'ANIMALES' | 'PRODUCTOS';
 type ProductSaleFrequency = ProductSale['periodicidad'];
-
-const productSaleFrequencyLabel: Record<ProductSaleFrequency, string> = {
-  DIARIA: 'Diaria',
-  SEMANAL: 'Semanal',
-  OCASIONAL: 'Ocasional',
-};
 
 function money(value: number | string | null, currency: string) {
   if (value === null || value === '') return 'Sin precio registrado';
@@ -27,15 +21,25 @@ function money(value: number | string | null, currency: string) {
 }
 
 export function SalesPage() {
+  const [searchParams,setSearchParams]=useSearchParams();
+  const initialAnimalId=searchParams.get('animal')??'';
   const { hasPermission } = useAuth();
   const toast = useToast();
   const client = useQueryClient();
-  const [tab, setTab] = useState<SaleTab>('ANIMALES');
-  const [creating, setCreating] = useState(false);
+  const consumedDetail=useRef(false);
+  const [tab, setTab] = useState<SaleTab>(searchParams.get('tipo')==='productos'?'PRODUCTOS':'ANIMALES');
+  const [creating, setCreating] = useState(searchParams.get('nuevo')==='1'&&Boolean(initialAnimalId));
   const [detail, setDetail] = useState<AnimalSale | ProductSale | null>(null);
   const [editing, setEditing] = useState<AnimalSale | ProductSale | null>(null);
   const animalSales = useQuery({ queryKey: ['sales', 'animals'], queryFn: () => apiRequest<AnimalSale[]>('/ventas') });
   const productSales = useQuery({ queryKey: ['sales', 'products'], queryFn: () => apiRequest<ProductSale[]>('/ventas/productos') });
+  useEffect(()=>{
+    if(consumedDetail.current)return;
+    const animalId=searchParams.get('venta');
+    const productId=searchParams.get('venta_producto');
+    if(animalId&&animalSales.data){const match=animalSales.data.find(item=>item.id_venta===animalId);if(match){setTab('ANIMALES');setDetail(match);consumedDetail.current=true;}}
+    else if(productId&&productSales.data){const match=productSales.data.find(item=>item.id_venta_producto===productId);if(match){setTab('PRODUCTOS');setDetail(match);consumedDetail.current=true;}}
+  },[animalSales.data,productSales.data,searchParams]);
   const cancelSale = useMutation({
     mutationFn: ({ id, type }: { id: string; type: SaleTab }) => apiRequest(type === 'ANIMALES' ? `/ventas/${id}/anular` : `/ventas/productos/${id}/anular`, { method: 'PATCH' }),
     onSuccess: async (_data, variables) => {
@@ -50,32 +54,45 @@ export function SalesPage() {
   const animalList = useListControls({ items: animalSales.data ?? [], storageKey: 'sales-animals', searchText: (sale) => `${sale.comprador_nombre} ${sale.destino ?? ''} ${sale.animales.map((item) => `${item.animal} ${item.codigo_arete ?? ''}`).join(' ')}`, dateValue: (sale) => sale.fecha_venta, nameValue: (sale) => sale.comprador_nombre });
   const productList = useListControls({ items: productSales.data ?? [], storageKey: 'sales-products', searchText: (sale) => `${sale.comprador_nombre} ${sale.destino ?? ''} ${sale.productos.map((item) => item.producto).join(' ')}`, dateValue: (sale) => sale.fecha_venta, nameValue: (sale) => sale.comprador_nombre });
   const controls = tab === 'ANIMALES' ? animalList : productList;
+  const period = searchParams.get('periodo');
+  const periodStart = useMemo(() => {
+    if (period !== 'semana' && period !== 'mes' && period !== 'anio') return null;
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    if (period === 'semana') {
+      const weekday = date.getDay() || 7;
+      date.setDate(date.getDate() - weekday + 1);
+    } else if (period === 'mes') date.setDate(1);
+    else { date.setMonth(0); date.setDate(1); }
+    return date.getTime();
+  }, [period]);
+  const periodLabel = period === 'semana' ? 'Esta semana' : period === 'mes' ? 'Este mes' : period === 'anio' ? 'Este año' : null;
+  const filterPeriod = <T extends { fecha_venta: string }>(items: T[]) => periodStart === null ? items : items.filter((item) => new Date(item.fecha_venta).getTime() >= periodStart);
+  const visibleAnimalSales = filterPeriod(animalList.visible);
+  const visibleProductSales = filterPeriod(productList.visible);
+  const visibleCount = tab === 'ANIMALES' ? visibleAnimalSales.length : visibleProductSales.length;
+  const cycleOrder=()=>controls.setOrder(controls.order==='NEWEST'?'OLDEST':controls.order==='OLDEST'?'AZ':controls.order==='AZ'?'ZA':'NEWEST');
 
-  return <div>
-    <PageHeader
-      title="Ventas"
-      description="Registra ventas de animales, leche, queso y otros productos del catálogo."
-      action={hasPermission('VENTA_ADMINISTRAR') ? <Button onClick={() => setCreating(true)}><Plus size={18} />{tab === 'ANIMALES' ? 'Vender animales' : 'Vender productos'}</Button> : undefined}
-    />
-    <div className="page-tabs"><button className={tab === 'ANIMALES' ? 'active' : ''} onClick={() => { setTab('ANIMALES'); setCreating(false); }}><Users size={17} />Animales</button><button className={tab === 'PRODUCTOS' ? 'active' : ''} onClick={() => { setTab('PRODUCTOS'); setCreating(false); }}><Package size={17} />Leche, queso y productos</button></div>
-    <ListToolbar search={controls.search} onSearch={controls.setSearch} order={controls.order} onOrder={controls.setOrder} placeholder={tab === 'ANIMALES' ? 'Buscar comprador, animal o arete…' : 'Buscar comprador o producto…'} count={controls.visible.length} />
-    {current.isLoading ? <LoadingState /> : current.isError ? <ErrorState message={(current.error as Error).message} onRetry={() => void current.refetch()} /> : tab === 'ANIMALES' ? <AnimalSalesList sales={animalList.visible} canAdmin={hasPermission('VENTA_ADMINISTRAR')} onCreate={() => setCreating(true)} onOpen={setDetail} onEdit={setEditing} onCancel={(id) => cancelSale.mutate({ id, type: 'ANIMALES' })} cancelling={cancelSale.isPending} /> : <ProductSalesList sales={productList.visible} canAdmin={hasPermission('VENTA_ADMINISTRAR')} onCreate={() => setCreating(true)} onOpen={setDetail} onEdit={setEditing} onCancel={(id) => cancelSale.mutate({ id, type: 'PRODUCTOS' })} cancelling={cancelSale.isPending} />}
-    {creating && tab === 'ANIMALES' ? <AnimalSaleForm onClose={() => setCreating(false)} onSaved={() => setCreating(false)} /> : null}
+  return <div className="module-no-header">
+    <CompactToolbar search={controls.search} onSearch={controls.setSearch} placeholder={tab === 'ANIMALES' ? 'Buscar venta o animal…' : 'Buscar venta o producto…'} count={visibleCount} actions={<IconButton label="Cambiar orden" onClick={cycleOrder}><ArrowUpDown size={19}/></IconButton>} below={<><div className="compact-scroll-tabs"><button className={tab === 'ANIMALES' ? 'active' : ''} onClick={() => { setTab('ANIMALES'); setCreating(false); }}><Users size={17} />Animales</button><button className={tab === 'PRODUCTOS' ? 'active' : ''} onClick={() => { setTab('PRODUCTOS'); setCreating(false); }}><Package size={17} />Leche, queso y productos</button></div>{periodLabel?<span className="active-route-filter">{periodLabel}<button type="button" aria-label="Quitar filtro de período" onClick={()=>{const next=new URLSearchParams(searchParams);next.delete('periodo');setSearchParams(next,{replace:true});}}><X size={14}/></button></span>:null}</>}/>
+    {current.isLoading ? <LoadingState /> : current.isError ? <ErrorState message={(current.error as Error).message} onRetry={() => void current.refetch()} /> : tab === 'ANIMALES' ? <AnimalSalesList sales={visibleAnimalSales} canAdmin={hasPermission('VENTA_ADMINISTRAR')} onCreate={() => setCreating(true)} onOpen={setDetail} onEdit={setEditing} onCancel={(id) => cancelSale.mutate({ id, type: 'ANIMALES' })} cancelling={cancelSale.isPending} /> : <ProductSalesList sales={visibleProductSales} canAdmin={hasPermission('VENTA_ADMINISTRAR')} onCreate={() => setCreating(true)} onOpen={setDetail} onEdit={setEditing} onCancel={(id) => cancelSale.mutate({ id, type: 'PRODUCTOS' })} cancelling={cancelSale.isPending} />}
+    {creating && tab === 'ANIMALES' ? <AnimalSaleForm initialAnimalId={initialAnimalId} onClose={() => setCreating(false)} onSaved={() => setCreating(false)} /> : null}
     {creating && tab === 'PRODUCTOS' ? <ProductSaleForm onClose={() => setCreating(false)} onSaved={() => setCreating(false)} /> : null}
     {detail ? <SaleDetail sale={detail} onClose={() => setDetail(null)} onEdit={hasPermission('VENTA_ADMINISTRAR') && detail.estado === 'COMPLETADA' ? () => { setEditing(detail); setDetail(null); } : undefined} onCancel={hasPermission('VENTA_ADMINISTRAR') && detail.estado === 'COMPLETADA' ? () => cancelSale.mutate({ id: 'id_venta' in detail ? detail.id_venta : detail.id_venta_producto, type: 'id_venta' in detail ? 'ANIMALES' : 'PRODUCTOS' }) : undefined} cancelling={cancelSale.isPending} /> : null}
     {editing && 'id_venta' in editing ? <AnimalSaleEditForm sale={editing} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} /> : null}
     {editing && 'id_venta_producto' in editing ? <ProductSaleForm sale={editing} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} /> : null}
+    {hasPermission('VENTA_ADMINISTRAR')?<FloatingActionDock><IconButton label={tab==='ANIMALES'?'Vender animales':'Vender productos'} onClick={()=>setCreating(true)}><Plus size={23}/></IconButton></FloatingActionDock>:null}
   </div>;
 }
 
 function AnimalSalesList({ sales, canAdmin, onCreate, onOpen, onEdit }: { sales: AnimalSale[]; canAdmin: boolean; onCreate: () => void; onOpen: (sale: AnimalSale) => void; onEdit: (sale: AnimalSale) => void; onCancel: (id: string) => void; cancelling: boolean }) {
   if (!sales.length) return <EmptyState icon={ShoppingCart} title="No hay ventas de animales" description="Todavía no se han registrado ventas de animales." action={canAdmin ? <Button onClick={onCreate}><Plus size={18} />Registrar venta</Button> : undefined} />;
-  return <Card className="record-list sales-record-list"><div className="record-list-head"><span>Comprador</span><span>Fecha</span><span>Animales</span><span>Total</span><span>Estado</span><span /></div>{sales.map((sale) => <button type="button" className="record-list-row" key={sale.id_venta} onClick={() => onOpen(sale)}><span><strong>{sale.comprador_nombre}</strong><small>{sale.destino || 'Sin destino'}</small></span><span><strong>{formatDate(sale.fecha_venta)}</strong><small>{sale.registrado_por_nombre}</small></span><span><strong>{sale.animales.length} animal{sale.animales.length === 1 ? '' : 'es'}</strong><small>{sale.animales.slice(0, 2).map((item) => item.animal).join(', ')}</small></span><span><strong>{money(sale.precio_total, sale.moneda)}</strong></span><span><Badge tone={sale.estado === 'COMPLETADA' ? 'success' : 'danger'}>{sale.estado}</Badge></span><span className="record-row-actions">{canAdmin && sale.estado === 'COMPLETADA' ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); onEdit(sale); }}><Edit3 size={16} />Editar</Button> : null}<ChevronRight size={18} /></span></button>)}</Card>;
+  return <Card className="commerce-list">{sales.map((sale) => { const unit=sale.animales.length&&sale.precio_total!=null?Number(sale.precio_total)/sale.animales.length:null;return <button type="button" className="commerce-row" key={sale.id_venta} onClick={() => onOpen(sale)}><span className="commerce-main"><strong>{sale.animales.length} animal{sale.animales.length===1?'':'es'} · {sale.animales.slice(0,2).map((item)=>item.animal).join(', ')}{sale.animales.length>2?` y ${sale.animales.length-2} más`:''}</strong><small>{sale.comprador_nombre} · {formatDate(sale.fecha_venta)}</small><small>Unitario {money(unit,sale.moneda)} · Total {money(sale.precio_total,sale.moneda)}</small></span><span className="commerce-price"><strong>{money(sale.precio_total,sale.moneda)}</strong><Badge tone={sale.estado==='COMPLETADA'?'success':'danger'}>{sale.estado}</Badge></span><span className="record-row-actions">{canAdmin&&sale.estado==='COMPLETADA'?<IconButton label="Editar venta" onClick={(event)=>{event.stopPropagation();onEdit(sale);}}><Edit3 size={16}/></IconButton>:null}<ChevronRight size={18}/></span></button>;})}</Card>;
 }
 
 function ProductSalesList({ sales, canAdmin, onCreate, onOpen, onEdit }: { sales: ProductSale[]; canAdmin: boolean; onCreate: () => void; onOpen: (sale: ProductSale) => void; onEdit: (sale: ProductSale) => void; onCancel: (id: string) => void; cancelling: boolean }) {
   if (!sales.length) return <EmptyState icon={Package} title="No hay ventas de productos" description="Registra la primera venta de leche, queso u otro producto del catálogo." action={canAdmin ? <Button onClick={onCreate}><Plus size={18} />Registrar venta</Button> : undefined} />;
-  return <Card className="record-list sales-record-list"><div className="record-list-head"><span>Comprador</span><span>Fecha</span><span>Productos</span><span>Total</span><span>Estado</span><span /></div>{sales.map((sale) => <button type="button" className="record-list-row" key={sale.id_venta_producto} onClick={() => onOpen(sale)}><span><strong>{sale.comprador_nombre}</strong><small>{sale.destino || 'Sin destino'}</small></span><span><strong>{formatDate(sale.fecha_venta)}</strong><small>{productSaleFrequencyLabel[sale.periodicidad]}</small></span><span><strong>{sale.productos.length} producto{sale.productos.length === 1 ? '' : 's'}</strong><small>{sale.productos.slice(0, 2).map((item) => item.producto).join(', ')}</small></span><span><strong>{money(sale.precio_total, sale.moneda)}</strong></span><span><Badge tone={sale.estado === 'COMPLETADA' ? 'success' : 'danger'}>{sale.estado}</Badge></span><span className="record-row-actions">{canAdmin && sale.estado === 'COMPLETADA' ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); onEdit(sale); }}><Edit3 size={16} />Editar</Button> : null}<ChevronRight size={18} /></span></button>)}</Card>;
+  return <Card className="commerce-list">{sales.map((sale) => {const summary=sale.productos.map((item)=>`${formatNumber(item.cantidad)} ${item.unidad} ${item.producto}`).join(', ');const unit=sale.productos.length===1?sale.productos[0].precio_unitario:null;return <button type="button" className="commerce-row" key={sale.id_venta_producto} onClick={() => onOpen(sale)}><span className="commerce-main"><strong>{summary}</strong><small>{sale.comprador_nombre} · {formatDate(sale.fecha_venta)}</small><small>{unit!=null?`Unitario ${money(unit,sale.moneda)} · `:''}Total {money(sale.precio_total,sale.moneda)}</small></span><span className="commerce-price"><strong>{money(sale.precio_total,sale.moneda)}</strong><Badge tone={sale.estado==='COMPLETADA'?'success':'danger'}>{sale.estado}</Badge></span><span className="record-row-actions">{canAdmin&&sale.estado==='COMPLETADA'?<IconButton label="Editar venta" onClick={(event)=>{event.stopPropagation();onEdit(sale);}}><Edit3 size={16}/></IconButton>:null}<ChevronRight size={18}/></span></button>;})}</Card>;
 }
 
 function SaleDetail({ sale, onClose, onEdit, onCancel, cancelling }: { sale: AnimalSale | ProductSale; onClose: () => void; onEdit?: () => void; onCancel?: () => void; cancelling: boolean }) {
@@ -114,14 +131,14 @@ function complementaryProductUnit(product: CatalogItem | undefined, units: Catal
   return String(unit?.simbolo ?? unit?.nombre ?? '');
 }
 
-function AnimalSaleForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function AnimalSaleForm({ onClose, onSaved, initialAnimalId }: { onClose: () => void; onSaved: () => void; initialAnimalId?:string }) {
   const toast = useToast(); const client = useQueryClient(); const buyers = useCatalog('compradores');
   const [selection, setSelection] = useState<AnimalSelectionValue>({ mode: 'SELECCION_MANUAL', groupId: '', animals: [] });
   const [form, setForm] = useState({ fecha_venta: currentDateInput(), id_comprador: '', precio_total: '', observaciones: '' });
   const selectedBuyer = buyers.data?.find((item) => itemId(item) === form.id_comprador);
   const selectBuyer = (id: string) => setForm((current) => ({ ...current, id_comprador: id }));
   const mutation = useMutation({ mutationFn: () => { const selected = selection.animals.filter((animal) => animal.seleccionado); if (!form.id_comprador) throw new ApiError(400, 'NO_BUYER', 'Selecciona un comprador.'); if (!selected.length) throw new ApiError(400, 'NO_ANIMALS', 'Selecciona al menos un animal.'); return apiRequest('/ventas', { method: 'POST', body: { fecha_venta: form.fecha_venta, id_comprador: form.id_comprador, precio_total: numberOrNull(form.precio_total), moneda: 'USD', observaciones: nullIfEmpty(form.observaciones), animales: selected.map((animal) => ({ id_animal: animal.id_animal, precio_individual: null, observaciones: null })) } }); }, onSuccess: async () => { toast.show('Venta registrada correctamente.'); await client.invalidateQueries({ queryKey: ['sales'] }); await client.invalidateQueries({ queryKey: ['animals'] }); await client.invalidateQueries({ queryKey: ['dashboard'] }); onSaved(); }, onError: (error) => toast.show((error as ApiError).message, 'error') });
-  return <Modal title="Registrar venta de animales" onClose={onClose} wide footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" form="animal-sale-form" loading={mutation.isPending}><ShoppingCart size={18} />Guardar venta</Button></>}><form id="animal-sale-form" className="form-stack" onSubmit={(event: FormEvent) => { event.preventDefault(); mutation.mutate(); }}><div className="form-grid"><Field label="Fecha" required><Input type="date" required value={form.fecha_venta} onChange={(event) => setForm({ ...form, fecha_venta: event.target.value })} /></Field><Field label="Comprador" required><Select required value={form.id_comprador} onChange={(event) => selectBuyer(event.target.value)}><option value="">Selecciona un comprador</option>{buyers.data?.filter((item) => item.activo !== false).map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}{item.codigo ? ` · ${String(item.codigo)}` : ''}</option>)}</Select></Field><Field label="Precio total (USD)"><Input type="number" min="0" step="0.01" value={form.precio_total} onChange={(event) => setForm({ ...form, precio_total: event.target.value })} /></Field></div><BuyerPreview buyer={selectedBuyer} /><Field label="Observaciones"><Textarea rows={3} value={form.observaciones} onChange={(event) => setForm({ ...form, observaciones: event.target.value })} /></Field><div className="form-section"><h3>Animales vendidos</h3><AnimalSelectionBuilder value={selection} operationCode="VENTA" onChange={setSelection} /></div></form></Modal>;
+  return <Modal title="Registrar venta de animales" onClose={onClose} wide footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" form="animal-sale-form" loading={mutation.isPending}><ShoppingCart size={18} />Guardar venta</Button></>}><form id="animal-sale-form" className="form-stack" onSubmit={(event: FormEvent) => { event.preventDefault(); mutation.mutate(); }}><div className="form-grid"><Field label="Fecha" required><Input type="date" required value={form.fecha_venta} onChange={(event) => setForm({ ...form, fecha_venta: event.target.value })} /></Field><Field label="Comprador" required><Select required value={form.id_comprador} onChange={(event) => selectBuyer(event.target.value)}><option value="">Selecciona un comprador</option>{buyers.data?.filter((item) => item.activo !== false).map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}{item.codigo ? ` · ${String(item.codigo)}` : ''}</option>)}</Select></Field><Field label="Precio total (USD)"><Input type="number" min="0" step="0.01" value={form.precio_total} onChange={(event) => setForm({ ...form, precio_total: event.target.value })} /></Field></div><BuyerPreview buyer={selectedBuyer} /><Field label="Observaciones"><Textarea rows={3} value={form.observaciones} onChange={(event) => setForm({ ...form, observaciones: event.target.value })} /></Field><div className="form-section"><h3>Animales vendidos</h3><AnimalSelectionBuilder value={selection} operationCode="VENTA" initialAnimalId={initialAnimalId} onChange={setSelection} /></div></form></Modal>;
 }
 
 interface ProductLineForm { id_producto_venta: string; cantidad: string; cantidad_complementaria: string; precio_unitario: string; observaciones: string }

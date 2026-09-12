@@ -9,7 +9,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../../core/errors
 import { requirePermission } from '../../middleware/permission.js';
 import { buildInsert } from '../shared/sql.js';
 import { cache } from '../../services/cache.service.js';
-import { notifyPurchase } from '../notifications/business-notifications.service.js';
+import { assertPropertyOperationAllowed, principalPropertyId } from '../../services/animal-operation-policy.js';
 const purchasedAnimal = z.object({
     codigo_arete: z.string().trim().max(60).nullable().optional(),
     nombre: z.string().trim().min(1).max(120),
@@ -60,6 +60,19 @@ async function validateInitialLocation(client, animal) {
             throw new ValidationError('La ubicación no corresponde a la categoría del animal.');
     }
 }
+async function purchasePropertyId(client, animal) {
+    if (animal?.id_grupo_actual) {
+        const row = (await client.query('SELECT id_propiedad FROM grupo WHERE id_grupo=$1 AND deleted_at IS NULL', [animal.id_grupo_actual])).rows[0];
+        if (row)
+            return row.id_propiedad;
+    }
+    if (animal?.id_ubicacion_actual) {
+        const row = (await client.query('SELECT id_propiedad FROM ubicacion WHERE id_ubicacion=$1 AND deleted_at IS NULL', [animal.id_ubicacion_actual])).rows[0];
+        if (row)
+            return row.id_propiedad;
+    }
+    return principalPropertyId(client);
+}
 export const purchasesRouter = Router();
 purchasesRouter.get('/', requirePermission('COMPRA_CONSULTAR'), asyncHandler(async (_req, res) => ok(res, (await pool.query(`SELECT c.*,t.nombre tipo_producto,t.codigo tipo_producto_codigo,t.es_animal,
     a.nombre animal,a.codigo_arete,u.nombre unidad,u.simbolo,
@@ -81,6 +94,7 @@ purchasesRouter.post('/', requirePermission('COMPRA_ADMINISTRAR'), asyncHandler(
                 throw new ValidationError('Este tipo de compra no debe crear un animal.');
             if (!type.es_animal && !input.producto)
                 throw new ValidationError('Indica el producto comprado.');
+            await assertPropertyOperationAllowed(client, await purchasePropertyId(client, input.animal), 'COMPRA');
             let animalId = null;
             if (input.animal) {
                 await validateInitialLocation(client, input.animal);
@@ -101,9 +115,7 @@ purchasesRouter.post('/', requirePermission('COMPRA_ADMINISTRAR'), asyncHandler(
                 valor_unitario: input.valor_unitario, valor_total: total, moneda: input.moneda.toUpperCase(),
                 observaciones: input.observaciones ?? null, registrado_por: req.user.id,
             }))).rows[0];
-            const completed = { ...purchase, animal: input.animal?.nombre ?? null };
-            await notifyPurchase(client, completed, req.user.id);
-            return completed;
+            return { ...purchase, animal: input.animal?.nombre ?? null };
         }, req.user.id);
         cache.forgetModuleVersion('compras');
         cache.forgetModuleVersion('animales');
