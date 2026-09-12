@@ -1,21 +1,24 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Beef, CalendarClock, ChevronLeft, ChevronRight, MapPin, Paintbrush, Plus, SlidersHorizontal, UserRound, X } from 'lucide-react';
+import { Beef, CalendarClock, ClipboardCheck, CloudOff, MapPin, Mars, Paintbrush, Plus, SlidersHorizontal, UserRound, Venus, VenusAndMars, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { apiRequest, apiRequestWithMeta } from '../../api/client';
+import { apiRequest, apiRequestAllPages } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
-import { Badge, Button, EmptyState, ErrorState, Field, IconButton, Input, LoadingState, PageHeader, SearchBox, Select } from '../../components/ui';
+import { Badge, Button, EmptyState, ErrorState, Field, IconButton, Input, LoadingState, SearchBox, Select } from '../../components/ui';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import type { Animal, AnimalFilterOptions } from '../../types/api';
-import { formatAgeCompact, humanizeCode } from '../../utils';
+import { formatDate, humanizeCode } from '../../utils';
 import { AnimalFormModal } from './AnimalFormModal';
 
-const pageSize = 20;
+const pageSize = 100;
 const filterKeys = ['sexo', 'estado', 'categoria_codigo', 'id_categoria_animal', 'clasificacion', 'propiedad_principal', 'id_especie', 'id_grupo', 'id_ubicacion', 'id_propietario', 'id_raza', 'id_color', 'id_marquilla', 'nacimiento_desde', 'nacimiento_hasta'] as const;
-const advancedFilterKeys = ['estado', 'clasificacion', 'id_grupo', 'id_ubicacion', 'id_especie', 'id_raza', 'id_color', 'id_marquilla', 'nacimiento_desde', 'nacimiento_hasta'] as const;
 const classifications = [
-  { code: 'VACA', label: 'Vacas' }, { code: 'VACONA', label: 'Vaconas' }, { code: 'TERNERA', label: 'Terneras' },
-  { code: 'TORO', label: 'Toros' }, { code: 'TORETE', label: 'Toretes' }, { code: 'TERNERO', label: 'Terneros' },
+  { code: 'VACA', label: 'Vacas' },
+  { code: 'VACONA', label: 'Vaconas' },
+  { code: 'TERNERA', label: 'Terneras' },
+  { code: 'TORO', label: 'Toros' },
+  { code: 'TORETE', label: 'Toretes' },
+  { code: 'TERNERO', label: 'Terneros' },
 ] as const;
 
 export function AnimalsPage() {
@@ -23,8 +26,9 @@ export function AnimalsPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [creating, setCreating] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(() => advancedFilterKeys.some((key) => params.has(key)));
-  const page = Math.max(1, Number(params.get('page') ?? 1));
+  // Los enlaces del panel pueden traer filtros avanzados ya aplicados, pero la
+  // sección debe permanecer cerrada hasta que el usuario decida abrirla.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [search, setSearch] = useState(params.get('q') ?? '');
   const debounced = useDebouncedValue(search);
   const filters = Object.fromEntries(filterKeys.map((key) => [key, params.get(key) ?? (key === 'categoria_codigo' && !params.has('id_categoria_animal') ? 'EN_PROPIEDAD' : '')])) as Record<(typeof filterKeys)[number], string>;
@@ -38,24 +42,22 @@ export function AnimalsPage() {
     staleTime: 10 * 60_000,
   });
   const query = useQuery({
-    queryKey: ['animals', page, debounced, filters],
+    queryKey: ['animals', 'all', debounced, filters],
     queryFn: () => {
-      const queryParams = new URLSearchParams({ page: String(page), limit: String(pageSize) });
+      const queryParams = new URLSearchParams({ page: '1', limit: String(pageSize) });
       if (debounced) queryParams.set('q', debounced);
       filterKeys.forEach((key) => {
         if (filters[key] && !(key === 'categoria_codigo' && filters[key] === 'TODAS')) queryParams.set(key, filters[key]);
       });
-      return apiRequestWithMeta<Animal[]>(`/animales?${queryParams}`);
+      return apiRequestAllPages<Animal>(`/animales?${queryParams}`, pageSize);
     },
     placeholderData: (previous) => previous,
   });
-  const total = Number(query.data?.meta?.total ?? 0);
-  const pages = Math.max(1, Math.ceil(total / pageSize));
 
   const updateParam = (key: string, value: string) => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value); else next.delete(key);
-    if (key !== 'page') next.set('page', '1');
+    next.delete('page');
     setParams(next);
   };
   const updateCategory = (value: string) => {
@@ -63,13 +65,13 @@ export function AnimalsPage() {
     next.delete('id_categoria_animal');
     next.set('categoria_codigo', value || 'TODAS');
     next.delete('id_ubicacion');
-    next.set('page', '1');
+    next.delete('page');
     setParams(next);
   };
   const clearFilters = () => {
     const next = new URLSearchParams(params);
     filterKeys.forEach((key) => next.delete(key));
-    next.set('page', '1');
+    next.delete('page');
     setParams(next);
   };
   const updateSpecies = (value: string) => {
@@ -77,7 +79,7 @@ export function AnimalsPage() {
     if (value) next.set('id_especie', value); else next.delete('id_especie');
     const selectedRace = options.data?.razas.find((race) => race.id_raza === filters.id_raza);
     if (selectedRace && value && selectedRace.id_especie && selectedRace.id_especie !== value) next.delete('id_raza');
-    next.set('page', '1');
+    next.delete('page');
     setParams(next);
   };
   const visibleRaces = options.data?.razas.filter((item) => !filters.id_especie || !item.id_especie || item.id_especie === filters.id_especie) ?? [];
@@ -87,16 +89,20 @@ export function AnimalsPage() {
   const selectedCategoryId = filters.id_categoria_animal
     || options.data?.categorias.find((item) => item.codigo === selectedCategoryCode)?.id_categoria_animal
     || '';
+  const cycleSex = () => updateParam('sexo', filters.sexo === '' ? 'HEMBRA' : filters.sexo === 'HEMBRA' ? 'MACHO' : '');
+  const sexLabel = filters.sexo === 'HEMBRA' ? 'Solo hembras' : filters.sexo === 'MACHO' ? 'Solo machos' : 'Todos los sexos';
 
   return <div className="module-no-header animals-page">
-    <PageHeader title="Animales" description="Listado general. Selecciona una fila para abrir el resumen actual del animal." action={hasPermission('ANIMAL_CREAR') ? <IconButton label="Agregar animal" onClick={() => setCreating(true)}><Plus size={20} /></IconButton> : undefined} />
-    <div className="toolbar animal-search-toolbar">
-      <SearchBox value={search} onChange={(value) => { setSearch(value); updateParam('q', value); }} placeholder="Buscar animal, propietario, fierro, propiedad u origen…" />
-      <div className="toolbar-filters">
-        <Select aria-label="Filtrar por sexo" value={filters.sexo} onChange={(event) => updateParam('sexo', event.target.value)}><option value="">Todos los sexos</option><option value="HEMBRA">Hembras</option><option value="MACHO">Machos</option></Select>
-        <Select aria-label="Filtrar por propietario" value={filters.id_propietario} onChange={(event) => updateParam('id_propietario', event.target.value)}><option value="">Todos los propietarios</option>{options.data?.propietarios.map((item) => <option key={item.id_usuario} value={item.id_usuario}>{item.nombre}</option>)}</Select>
+    <div className="animal-controls-sticky">
+      <div className="animal-primary-controls">
+        <SearchBox value={search} onChange={(value) => { setSearch(value); updateParam('q', value); }} placeholder="Buscar animal, propietario, fierro…" />
+        <IconButton className={`quick-icon-filter ${filters.sexo ? 'active' : ''}`} label={`${sexLabel}. Pulsa para cambiar.`} onClick={cycleSex}>{filters.sexo === 'HEMBRA' ? <Venus size={20} /> : filters.sexo === 'MACHO' ? <Mars size={20} /> : <VenusAndMars size={20} />}</IconButton>
+        <IconButton className={`advanced-filter-trigger ${advancedOpen ? 'active' : ''}`} label="Filtros avanzados" onClick={() => setAdvancedOpen((current) => !current)} aria-expanded={advancedOpen}><SlidersHorizontal size={20} />{activeFilterCount ? <span className="filter-count">{activeFilterCount}</span> : null}</IconButton>
+        <span className="animal-visible-count" aria-label={`${query.data?.data.length ?? 0} animales visibles`}><Beef size={16} /><strong>{query.data?.data.length ?? 0}</strong></span>
+      </div>
+      <div className="animal-secondary-filters">
+        <Select aria-label="Filtrar por grupo" value={filters.id_grupo} onChange={(event) => updateParam('id_grupo', event.target.value)}><option value="">Todos los grupos</option>{options.data?.grupos.map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre}</option>)}</Select>
         <Select aria-label="Filtrar por situación de propiedad" value={selectedCategoryCode} onChange={(event) => updateCategory(event.target.value)}><option value="TODAS">Dentro y fuera de propiedad</option>{options.data?.categorias.map((item) => <option key={item.id_categoria_animal} value={item.codigo}>{item.nombre}</option>)}</Select>
-        <IconButton className="advanced-filter-trigger" label="Filtros avanzados" onClick={() => setAdvancedOpen((current) => !current)} aria-expanded={advancedOpen}><SlidersHorizontal size={20} />{activeFilterCount ? <span className="filter-count">{activeFilterCount}</span> : null}</IconButton>
       </div>
     </div>
 
@@ -106,7 +112,7 @@ export function AnimalsPage() {
       <div className="advanced-filters-grid">
         <Field label="Condición del animal"><Select value={filters.estado} onChange={(event) => updateParam('estado', event.target.value)}><option value="">Todas las condiciones</option>{options.data?.condiciones.map((item) => <option key={item.id_condicion_animal} value={item.codigo}>{item.nombre}{item.activo ? '' : ' · Inactiva'}</option>)}</Select></Field>
         <Field label="Clasificación"><Select value={filters.clasificacion} onChange={(event) => updateParam('clasificacion', event.target.value)}><option value="">Todas las clasificaciones</option>{classifications.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</Select></Field>
-        <Field label="Grupo"><Select value={filters.id_grupo} onChange={(event) => updateParam('id_grupo', event.target.value)}><option value="">Todos los grupos</option>{options.data?.grupos.map((item) => <option key={item.id_grupo} value={item.id_grupo}>{item.nombre}</option>)}</Select></Field>
+        <Field label="Propietario"><Select value={filters.id_propietario} onChange={(event) => updateParam('id_propietario', event.target.value)}><option value="">Todos los propietarios</option>{options.data?.propietarios.map((item) => <option key={item.id_usuario} value={item.id_usuario}>{item.nombre}</option>)}</Select></Field>
         <Field label="Ubicación"><Select value={filters.id_ubicacion} onChange={(event) => updateParam('id_ubicacion', event.target.value)}><option value="">Todas las ubicaciones</option>{options.data?.ubicaciones.filter((item) => !selectedCategoryId || item.id_categoria_animal === selectedCategoryId).map((item) => <option key={item.id_ubicacion} value={item.id_ubicacion}>{item.nombre} · {item.tipo === 'OTRO' ? 'Otra propiedad' : humanizeCode(item.tipo)}</option>)}</Select></Field>
         <Field label="Especie"><Select value={filters.id_especie} onChange={(event) => updateSpecies(event.target.value)}><option value="">Todas las especies</option>{options.data?.especies.map((item) => <option key={item.id_especie} value={item.id_especie}>{item.nombre}</option>)}</Select></Field>
         <Field label="Raza"><Select value={filters.id_raza} onChange={(event) => updateParam('id_raza', event.target.value)}><option value="">Todas las razas</option>{visibleRaces.map((item) => <option key={item.id_raza} value={item.id_raza}>{item.nombre}</option>)}</Select></Field>
@@ -119,19 +125,17 @@ export function AnimalsPage() {
     </section> : null}
 
     {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : query.data?.data.length === 0 ? <EmptyState icon={Beef} title="No hay animales" description="Registra el primer animal o modifica los filtros de búsqueda." action={hasPermission('ANIMAL_CREAR') ? <Button onClick={() => setCreating(true)}><Plus size={18} />Registrar animal</Button> : undefined} /> : <>
-      <div className="animal-list" role="table" aria-label="Listado de animales">
-        <div className="animal-list-head" role="row"><span>Animal</span><span>Propietario</span><span>Clasificación</span><span>Ubicación</span><span>Edad</span><span>Estado</span></div>
-        {query.data?.data.map((animal) => <button type="button" className="animal-list-row" role="row" key={animal.id_animal} onClick={() => navigate(`/animales/${animal.id_animal}`)}>
-          <span className="animal-list-identity"><span className="animal-list-photo">{animal.foto_perfil ? <img src={animal.foto_perfil} alt="" /> : <Beef size={24} />}</span><span><strong>{animal.nombre}</strong><small>{animal.codigo_arete ? `Arete ${animal.codigo_arete}` : 'Sin arete'}</small></span></span>
-          <span className="animal-list-cell"><UserRound size={16} /><span>{animal.propietario_principal || 'Sin propietario'}</span></span>
-          <span className="animal-list-cell"><span>{humanizeCode(animal.clasificacion_codigo ?? 'SIN_CLASIFICAR')}</span><small>{animal.sexo === 'HEMBRA' ? 'Hembra' : 'Macho'} · {animal.grupo || 'Sin grupo'}</small></span>
-          <span className="animal-list-cell"><MapPin size={16} /><span>{animal.ubicacion || 'Sin ubicación específica'}</span></span>
-          <span className="animal-list-cell animal-list-age"><CalendarClock size={16} /><span>{formatAgeCompact(animal.fecha_nacimiento)}</span></span>
-          <span><Badge tone={animal.estado === 'ACTIVO' ? 'success' : animal.estado === 'MUERTO' ? 'danger' : 'warning'}>{animal.condicion || humanizeCode(animal.estado)}</Badge></span>
-        </button>)}
+      <div className="animal-list animal-compact-list" role="list" aria-label="Listado de animales">
+        {query.data?.data.map((animal) => {const pending=Boolean((animal as Animal&{__offline?:boolean;__sync_state?:string}).__offline||(animal as Animal&{__sync_state?:string}).__sync_state==='PENDING');return <button type="button" className="animal-list-row" role="row" key={animal.id_animal} onClick={() => navigate(`/animales/${animal.id_animal}`)}>
+          <span className="animal-list-photo">{animal.foto_perfil ? <img src={animal.foto_perfil} alt="" /> : <Beef size={24} />}</span>
+          <span className="animal-compact-content"><span className="animal-compact-heading"><strong>{animal.nombre}</strong><span className="record-status-with-sync"><Badge tone={animal.estado === 'ACTIVO' ? 'success' : animal.estado === 'MUERTO' ? 'danger' : 'warning'}>{animal.condicion || humanizeCode(animal.estado)}</Badge>{pending?<span className="inline-sync-pending" title="Cambio pendiente de sincronizar"><CloudOff size={15}/></span>:null}</span></span>
+          <small className="animal-compact-description">{animal.descripcion || 'Sin descripción'}</small>
+          <span className="animal-compact-facts"><span>{humanizeCode(animal.clasificacion_codigo ?? 'SIN_CLASIFICAR')}</span><span>{animal.sexo === 'HEMBRA' ? 'Hembra' : 'Macho'} · {animal.grupo || 'Sin grupo'}</span><span><MapPin size={14} />{animal.ubicacion || 'Sin ubicación'}</span></span>
+          <span className="animal-compact-footer"><span><CalendarClock size={15} />{formatDate(animal.fecha_nacimiento)}</span><span><UserRound size={15} />{animal.propietario_principal || 'Sin propietario'}</span></span></span>
+        </button>;})}
       </div>
-      <div className="pagination"><span>{total} animales · página {page} de {pages}</span><div><Button variant="ghost" disabled={page <= 1} onClick={() => updateParam('page', String(page - 1))}><ChevronLeft size={18} />Anterior</Button><Button variant="ghost" disabled={page >= pages} onClick={() => updateParam('page', String(page + 1))}>Siguiente<ChevronRight size={18} /></Button></div></div>
     </>}
+    <div className="animal-floating-actions">{hasPermission('ANIMAL_CREAR') ? <IconButton label="Agregar animal" onClick={() => setCreating(true)}><Plus size={23} /></IconButton> : null}<IconButton label="Asistencia de animales" onClick={() => navigate('/animales/asistencia')}><ClipboardCheck size={22} /></IconButton></div>
     {creating ? <AnimalFormModal onClose={() => setCreating(false)} onSaved={(id) => { setCreating(false); if (id) navigate(`/animales/${id}`); }} /> : null}
   </div>;
 }

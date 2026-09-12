@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronRight, Edit3, Search, Shield, UserCog, UserRound } from 'lucide-react';
+import { ArrowUpDown, Check, ChevronRight, Edit3, Search, Shield, UserCog, UserRound } from 'lucide-react';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
-import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, ListToolbar, LoadingState, Modal, PageHeader } from '../../components/ui';
+import { Badge, Button, Card, CompactToolbar, EmptyState, ErrorState, Field, IconButton, Input, LoadingState, Modal } from '../../components/ui';
 import { useListControls } from '../../hooks/useListControls';
 import type { AdminUser, RoleItem } from '../../types/api';
 import { formatDateTime, nullIfEmpty } from '../../utils';
@@ -26,18 +26,15 @@ export function UsersPage() {
   const rolesQuery = useQuery({ queryKey: ['roles'], queryFn: () => apiRequest<RoleItem[]>('/roles') });
 
   const list = useListControls({ items: usersQuery.data ?? [], storageKey: 'users', searchText: (item) => `${item.nombres} ${item.apellidos} ${item.correo} ${item.telefono ?? ''} ${item.roles.map((role) => role.nombre).join(' ')}`, dateValue: (item) => item.created_at, nameValue: (item) => `${item.nombres} ${item.apellidos}` });
+  const cycleOrder = () => list.setOrder(list.order === 'NEWEST' ? 'OLDEST' : list.order === 'OLDEST' ? 'AZ' : list.order === 'AZ' ? 'ZA' : 'NEWEST');
 
   if (usersQuery.isLoading || rolesQuery.isLoading) return <LoadingState />;
   if (usersQuery.isError) return <ErrorState message={(usersQuery.error as Error).message} onRetry={() => void usersQuery.refetch()} />;
   if (rolesQuery.isError) return <ErrorState message={(rolesQuery.error as Error).message} onRetry={() => void rolesQuery.refetch()} />;
 
   return (
-    <div>
-      <PageHeader
-        title="Usuarios"
-        description="Las cuentas nuevas quedan sin rol y sin acceso a los datos hasta que un administrador las autorice."
-      />
-      <ListToolbar search={list.search} onSearch={list.setSearch} order={list.order} onOrder={list.setOrder} placeholder="Buscar nombre, correo, teléfono o rol…" count={list.visible.length} />
+    <div className="module-no-header">
+      <CompactToolbar search={list.search} onSearch={list.setSearch} placeholder="Buscar nombre, correo, teléfono o rol…" count={list.visible.length} actions={<IconButton label={`Orden: ${list.order}`} onClick={cycleOrder}><ArrowUpDown size={18}/></IconButton>} />
 
       {!list.visible.length ? (
         <Card><EmptyState icon={Search} title="No hay coincidencias" description="No encontramos usuarios con ese criterio." /></Card>

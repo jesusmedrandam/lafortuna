@@ -1,10 +1,10 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronRight, Edit3, Plus, Save, Search, ShieldCheck } from 'lucide-react';
+import { ArrowUpDown, Check, ChevronRight, Edit3, Plus, Save, Search, ShieldCheck } from 'lucide-react';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
-import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, ListToolbar, LoadingState, Modal, PageHeader, Textarea } from '../../components/ui';
+import { Badge, Button, Card, CompactToolbar, EmptyState, ErrorState, Field, FloatingActionDock, IconButton, Input, LoadingState, Modal, Textarea } from '../../components/ui';
 import { useListControls } from '../../hooks/useListControls';
 import type { PermissionItem, RoleItem } from '../../types/api';
 import { nullIfEmpty } from '../../utils';
@@ -20,23 +20,20 @@ export function RolesPage() {
   const rolesQuery = useQuery({ queryKey: ['roles'], queryFn: () => apiRequest<RoleItem[]>('/roles') });
   const permissionsQuery = useQuery({ queryKey: ['permissions'], queryFn: () => apiRequest<PermissionItem[]>('/roles/permisos') });
   const list = useListControls({ items: rolesQuery.data ?? [], storageKey: 'roles', searchText: (role) => `${role.nombre} ${role.codigo} ${role.descripcion ?? ''} ${role.permisos.map((permission) => `${permission.nombre} ${permission.codigo}`).join(' ')}`, nameValue: (role) => role.nombre, defaultOrder: 'AZ' });
+  const cycleOrder = () => list.setOrder(list.order === 'NEWEST' ? 'OLDEST' : list.order === 'OLDEST' ? 'AZ' : list.order === 'AZ' ? 'ZA' : 'NEWEST');
 
   if (rolesQuery.isLoading || permissionsQuery.isLoading) return <LoadingState />;
   if (rolesQuery.isError) return <ErrorState message={(rolesQuery.error as Error).message} onRetry={() => void rolesQuery.refetch()} />;
   if (permissionsQuery.isError) return <ErrorState message={(permissionsQuery.error as Error).message} onRetry={() => void permissionsQuery.refetch()} />;
 
   return (
-    <div>
-      <PageHeader
-        title="Roles y permisos"
-        description="Define exactamente qué módulos puede consultar o administrar cada rol."
-        action={canAdmin ? <Button onClick={() => setEditing('new')}><Plus size={18} />Nuevo rol</Button> : undefined}
-      />
-      <ListToolbar search={list.search} onSearch={list.setSearch} order={list.order} onOrder={list.setOrder} placeholder="Buscar rol, código o permiso…" count={list.visible.length} />
+    <div className="module-no-header">
+      <CompactToolbar search={list.search} onSearch={list.setSearch} placeholder="Buscar rol, código o permiso…" count={list.visible.length} actions={<IconButton label={`Orden: ${list.order}`} onClick={cycleOrder}><ArrowUpDown size={18}/></IconButton>} />
       {list.visible.length ? <Card className="record-list roles-record-list"><div className="record-list-head"><span>Rol</span><span>Descripción</span><span>Permisos</span><span>Protección</span><span>Estado</span><span /></div>{list.visible.map((role) => <button type="button" className="record-list-row" key={role.id_rol} onClick={() => setSelectedRole(role)}><span className="record-person"><span className="record-icon"><ShieldCheck size={20} /></span><span><strong>{role.nombre}</strong><small>{role.codigo}</small></span></span><span><strong>{role.descripcion || 'Sin descripción'}</strong></span><span><strong>{role.permisos.length} permisos</strong><small>{role.permisos.slice(0, 2).map((permission) => permission.nombre).join(', ')}</small></span><span><strong>{role.protegido ? 'Rol protegido' : 'Editable'}</strong></span><span><Badge tone={role.activo ? 'success' : 'danger'}>{role.activo ? 'Activo' : 'Inactivo'}</Badge></span><span className="record-row-actions">{canAdmin ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); setEditing(role); }}><Edit3 size={16} />Editar</Button> : null}<ChevronRight size={18} /></span></button>)}</Card> : <Card><EmptyState icon={Search} title="No hay coincidencias" description="No encontramos roles con ese criterio." /></Card>}
 
       {selectedRole ? <RoleDetail role={selectedRole} onClose={() => setSelectedRole(null)} onEdit={canAdmin ? () => { setEditing(selectedRole); setSelectedRole(null); } : undefined} /> : null}
 
+      {canAdmin ? <FloatingActionDock><IconButton label="Nuevo rol" onClick={() => setEditing('new')}><Plus size={22}/></IconButton></FloatingActionDock> : null}
       {editing ? (
         <RoleEditor
           role={editing === 'new' ? null : editing}

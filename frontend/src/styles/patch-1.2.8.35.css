@@ -1,0 +1,178 @@
+/* Ajustes móviles incrementales SGB 1.2.8.35. */
+
+/* El título puede ceder espacio a los controles sin sacar el perfil de pantalla. */
+.topbar { gap: 10px; }
+.topbar-left { flex: 1 1 auto; min-width: 0; }
+.topbar-left > div { min-width: 0; }
+.topbar h2 {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topbar-actions { flex: 0 0 auto; min-width: 0; }
+
+/* En Animales del panel, el texto queda arriba y el valor debajo. */
+.dashboard-animal-metric {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  align-items: start;
+  gap: 5px;
+}
+.dashboard-animal-metric small {
+  width: 100%;
+}
+
+/* Mismo selector superior compacto usado por Ventas y Multimedia. */
+.animal-news-filters {
+  gap: 7px;
+  padding: 1px 1px 12px;
+}
+.animal-news-filters .button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface);
+  box-shadow: none;
+  font-size: .78rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.animal-news-filters .button-primary {
+  color: #fff;
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+/* Las secciones de Configuración nunca pueden ensanchar la página. */
+.settings-page,
+.settings-page .page-header,
+.settings-page .notification-preference-list,
+.settings-page .notification-preference-card,
+.settings-page .appearance-settings-layout,
+.settings-page .appearance-settings-card,
+.settings-page .farm-settings-layout,
+.settings-page .operation-policy-layout,
+.settings-page .public-link-settings-list {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.settings-page { overflow-x: clip; }
+.settings-page .notification-mode-options {
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.settings-page .notification-mode-options button {
+  min-width: 0;
+  padding-inline: 4px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.settings-page .appearance-setting-group,
+.settings-page .appearance-color-row,
+.settings-page .appearance-color-row > *,
+.settings-page .farm-settings-form,
+.settings-page .operation-policy-groups,
+.settings-page .operation-policy-group,
+.settings-page .settings-switch-row,
+.settings-page .settings-switch-row > span:first-child,
+.settings-page .public-link-settings-list article,
+.settings-page .public-link-settings-list article > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.settings-page .settings-switch-row strong,
+.settings-page .settings-switch-row small,
+.settings-page .public-link-settings-list .button {
+  overflow-wrap: anywhere;
+}
+
+/* El visor ocupa también las barras nativas de Android con fondo oscuro. */
+:root.sgb-lightbox-open,
+:root.sgb-lightbox-open body {
+  overflow: hidden;
+  background: #050806 !important;
+}
+
+@media (max-width: 680px) {
+  .topbar { gap: 6px; }
+  .topbar-left { gap: 7px; }
+  .topbar-left h2 { font-size: 1rem; }
+  .topbar-actions { gap: 5px; }
+  .topbar-actions .profile-link {
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+  }
+  .settings-page .settings-header-actions,
+  .settings-page .settings-header-actions .button {
+    width: 100%;
+    min-width: 0;
+    white-space: normal;
+  }
+  .settings-page .public-link-settings-list article > div {
+    min-width: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Correctivo 1.2.8.37: una sola superficie visual por acción del perfil. */
+.animal-profile-action-strip .profile-action {
+  width: 70px;
+  height: auto;
+  min-height: 66px;
+  flex: 0 0 70px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  color: var(--muted);
+  background: transparent;
+  box-shadow: none;
+}
+.animal-profile-action-strip .profile-action:hover {
+  color: var(--primary-dark);
+  border-color: transparent;
+  background: transparent;
+}
+.animal-profile-action-strip .profile-action > span {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  display: grid;
+  place-items: center;
+  color: var(--primary);
+  background: var(--surface);
+  box-shadow: 0 4px 13px #10291a12;
+}
+.animal-profile-action-strip .profile-action:hover > span {
+  color: var(--primary-dark);
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  background: var(--primary-soft);
+}
+.animal-profile-action-strip .profile-action.danger,
+.animal-profile-action-strip .profile-action.danger > span {
+  color: var(--danger);
+}
+.animal-profile-action-strip .profile-action small {
+  width: 100%;
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .64rem;
+  font-weight: 750;
+}

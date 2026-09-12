@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from '
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ImagePlus, Plus, Save, Scale, Trash2 } from 'lucide-react';
 import { apiRequest, ApiError } from '../../api/client';
+import { AnimalSelect, animalOption, useAnimalDirectory } from '../../components/AnimalPicker';
 import { useToast } from '../../components/ToastContext';
 import { Button, Field, Input, Modal, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
@@ -75,6 +76,7 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
   const [form, setForm] = useState<FormState>(() => emptyForm());
   const [profileFile, setProfileFile] = useState<File | null>(null);
   const [profilePreview, setProfilePreview] = useState<string | null>(null);
+  const animalDirectory = useAnimalDirectory();
 
   const species = useCatalog('especies');
   const origins = useCatalog('origenes');
@@ -91,14 +93,6 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
   const owners = useQuery({
     queryKey: ['animal-owner-options'],
     queryFn: () => apiRequest<OwnerOption[]>('/animales/opciones/propietarios'),
-  });
-  const mothers = useQuery({
-    queryKey: ['animals', 'mothers'],
-    queryFn: () => apiRequest<Animal[]>('/animales?limit=100&sexo=HEMBRA'),
-  });
-  const fathers = useQuery({
-    queryKey: ['animals', 'fathers'],
-    queryFn: () => apiRequest<Animal[]>('/animales?limit=100&sexo=MACHO'),
   });
 
   useEffect(() => {
@@ -461,20 +455,10 @@ export function AnimalFormModal({ animal, onClose, onSaved }: AnimalFormModalPro
           <h3>Genealogía</h3>
           <div className="form-grid">
             <Field label="Madre">
-              <Select value={form.id_madre} onChange={(event) => setForm((current) => ({ ...current, id_madre: event.target.value }))}>
-                <option value="">Sin registrar</option>
-                {mothers.data?.filter((item) => item.id_animal !== animal?.id_animal).map((item) => (
-                  <option key={item.id_animal} value={item.id_animal}>{item.nombre}{item.codigo_arete ? ` · ${item.codigo_arete}` : ''}</option>
-                ))}
-              </Select>
+              <AnimalSelect value={form.id_madre} emptyLabel="Sin registrar" options={animalDirectory.animals.filter((item) => item.sexo === 'HEMBRA' && item.id_animal !== animal?.id_animal).map(animalOption)} onChange={(id) => setForm((current) => ({ ...current, id_madre: id }))}/>
             </Field>
             <Field label="Padre">
-              <Select value={form.id_padre} onChange={(event) => setForm((current) => ({ ...current, id_padre: event.target.value }))}>
-                <option value="">Sin registrar</option>
-                {fathers.data?.filter((item) => item.id_animal !== animal?.id_animal && isAtLeastOneYear(item.fecha_nacimiento)).map((item) => (
-                  <option key={item.id_animal} value={item.id_animal}>{item.nombre}{item.codigo_arete ? ` · ${item.codigo_arete}` : ''}</option>
-                ))}
-              </Select>
+              <AnimalSelect value={form.id_padre} emptyLabel="Sin registrar" options={animalDirectory.animals.filter((item) => item.sexo === 'MACHO' && item.id_animal !== animal?.id_animal && isAtLeastOneYear(item.fecha_nacimiento)).map(animalOption)} onChange={(id) => setForm((current) => ({ ...current, id_padre: id }))}/>
             </Field>
           </div>
         </div>

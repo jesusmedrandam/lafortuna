@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { apiRequest } from '../api/client';
+import { apiRequest, ApiError, wakeServer } from '../api/client';
 import { clearSession, loadSession, saveSession } from '../api/storage';
 import type { AuthTokens, AuthUser } from '../types/api';
+import { registerPushDevice, requestNativePushToken, unregisterPushDevice } from '../notifications/push';
 
 interface AuthContextValue {
   session: AuthTokens | null;
@@ -47,9 +48,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const next = { ...current, user: profile.auth };
       saveSession(next);
       setSession(next);
-    } catch {
-      clearSession();
-      setSession(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        clearSession();
+        setSession(null);
+      } else {
+        setSession(current);
+      }
     } finally {
       setReady(true);
     }
@@ -59,7 +64,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refreshUser();
   }, [refreshUser]);
 
+  useEffect(() => {
+    const userId = session?.user?.id;
+    if (!ready || !userId || !window.SGBAndroid) return;
+    const register = () => { void registerPushDevice(userId).catch(() => undefined); };
+    const tokenReady = () => register();
+    requestNativePushToken();
+    register();
+    window.addEventListener('sgb-push-token',tokenReady);
+    window.addEventListener('online',register);
+    const timer = window.setInterval(register,5 * 60_000);
+    return () => {
+      window.removeEventListener('sgb-push-token',tokenReady);
+      window.removeEventListener('online',register);
+      window.clearInterval(timer);
+    };
+  },[ready,session?.user?.id]);
+
   const login = useCallback(async (correo: string, password: string) => {
+    const reachable = await wakeServer(true);
+    if (!reachable) {
+      throw new ApiError(0, 'SERVER_STARTING', 'No se pudo activar el servidor de SGB. Comprueba la conexión y vuelve a intentarlo.');
+    }
     const tokens = await apiRequest<AuthTokens>('/auth/login', {
       method: 'POST',
       auth: false,
@@ -72,6 +98,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     const current = loadSession();
     try {
+      if (current?.user?.id && window.SGBAndroid) {
+        try {
+          await Promise.race([
+            unregisterPushDevice(current.user.id),
+            new Promise<void>((resolve)=>window.setTimeout(resolve,3000)),
+          ]);
+        } catch { /* El identificador inválido será depurado por el servidor. */ }
+      }
       if (current?.refreshToken) {
         await apiRequest('/auth/logout', {
           method: 'POST',

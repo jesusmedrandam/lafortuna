@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { LoadingState } from '../components/ui';
 import { VersionSync } from '../hooks/VersionSync';
@@ -11,6 +11,7 @@ import { RecoveryPage } from '../pages/auth/RecoveryPage';
 import { AuthLayout } from '../pages/auth/AuthLayout';
 import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import { AnimalsPage } from '../pages/animals/AnimalsPage';
+import { AnimalAttendancePage } from '../pages/animals/AnimalAttendancePage';
 import { AnimalDetailPage } from '../pages/animals/AnimalDetailPage';
 import { PublicAnimalPage } from '../pages/animals/PublicAnimalPage';
 import { GroupsPage } from '../pages/groups/GroupsPage';
@@ -29,6 +30,7 @@ import { SanitaryPage } from '../pages/operations/SanitaryPage';
 import { CleaningsPage } from '../pages/operations/CleaningsPage';
 import { BirthsPage } from '../pages/reproduction/BirthsPage';
 import { ProductionPage } from '../pages/production/ProductionPage';
+import { MilkMeterPage } from '../pages/production/MilkMeterPage';
 import { CatalogsPage } from '../pages/catalogs/CatalogsPage';
 import { AnimalRecordsPage } from '../pages/records/AnimalRecordsPage';
 import { SalesPage } from '../pages/sales/SalesPage';
@@ -37,6 +39,7 @@ import { MarksPage } from '../pages/marks/MarksPage';
 import { SettingsPage } from '../pages/admin/SettingsPage';
 import { PurchasesPage } from '../pages/purchases/PurchasesPage';
 import { ActivitiesPage } from '../pages/activities/ActivitiesPage';
+import { DownloadsPage } from '../pages/offline/DownloadsPage';
 
 function ProtectedRoot() {
   const { user, ready } = useAuth();
@@ -59,7 +62,8 @@ function PermissionRoute({ permissions, children }: { permissions: string[]; chi
 }
 
 export function AppRouter() {
-  return <BrowserRouter>
+  const Router = window.SGBAndroid ? HashRouter : BrowserRouter;
+  return <Router>
     <Routes>
       <Route path="/animal-publico/:token" element={<PublicAnimalPage />} />
       <Route element={<AuthLayout />}>
@@ -72,6 +76,7 @@ export function AppRouter() {
         <Route element={<AppShell />}>
           <Route index element={<HomePage />} />
           <Route path="animales" element={<PermissionRoute permissions={['ANIMAL_CONSULTAR']}><AnimalsPage /></PermissionRoute>} />
+          <Route path="animales/asistencia" element={<PermissionRoute permissions={['ANIMAL_CONSULTAR']}><AnimalAttendancePage /></PermissionRoute>} />
           <Route path="animales/:id" element={<PermissionRoute permissions={['ANIMAL_CONSULTAR']}><AnimalDetailPage /></PermissionRoute>} />
           <Route path="multimedia" element={<PermissionRoute permissions={['IMAGEN_CONSULTAR']}><MultimediaPage /></PermissionRoute>} />
           <Route path="grupos" element={<PermissionRoute permissions={['GRUPO_CONSULTAR']}><GroupsPage /></PermissionRoute>} />
@@ -79,18 +84,20 @@ export function AppRouter() {
           <Route path="corrales" element={<PermissionRoute permissions={['CORRAL_CONSULTAR']}><CorralsPage /></PermissionRoute>} />
           <Route path="ubicaciones" element={<PermissionRoute permissions={['UBICACION_CONSULTAR']}><LocationsPage /></PermissionRoute>} />
           <Route path="perfil" element={<ProfilePage />} />
+          <Route path="descargas" element={<DownloadsPage />} />
           <Route path="movimientos" element={<PermissionRoute permissions={['MOVIMIENTO_CONSULTAR']}><MovementsPage /></PermissionRoute>} />
           <Route path="sanidad" element={<PermissionRoute permissions={['SANIDAD_CONSULTAR']}><SanitaryPage /></PermissionRoute>} />
           <Route path="limpiezas" element={<PermissionRoute permissions={['LIMPIEZA_CONSULTAR']}><CleaningsPage /></PermissionRoute>} />
           <Route path="partos" element={<PermissionRoute permissions={['PARTO_CONSULTAR', 'ABORTO_CONSULTAR']}><BirthsPage /></PermissionRoute>} />
           <Route path="produccion" element={<PermissionRoute permissions={['PRODUCCION_CONSULTAR', 'LACTANCIA_CONSULTAR']}><ProductionPage /></PermissionRoute>} />
+          <Route path="produccion/medidor" element={<PermissionRoute permissions={['PRODUCCION_CONSULTAR']}><MilkMeterPage /></PermissionRoute>} />
           <Route path="pesajes" element={<PermissionRoute permissions={['PESAJE_CONSULTAR']}><AnimalRecordsPage mode="pesajes" /></PermissionRoute>} />
           <Route path="muertes" element={<PermissionRoute permissions={['MUERTE_CONSULTAR']}><AnimalRecordsPage mode="muertes" /></PermissionRoute>} />
           <Route path="ventas" element={<PermissionRoute permissions={['VENTA_CONSULTAR']}><SalesPage /></PermissionRoute>} />
           <Route path="compras" element={<PermissionRoute permissions={['COMPRA_CONSULTAR']}><PurchasesPage /></PermissionRoute>} />
           <Route path="actividades" element={<PermissionRoute permissions={['ACTIVIDAD_CONSULTAR']}><ActivitiesPage /></PermissionRoute>} />
           <Route path="catalogos" element={<PermissionRoute permissions={['CATALOGO_CONSULTAR']}><CatalogsPage /></PermissionRoute>} />
-          <Route path="configuracion" element={<PermissionRoute permissions={['CATALOGO_CONSULTAR']}><SettingsPage /></PermissionRoute>} />
+          <Route path="configuracion" element={<SettingsPage />} />
           <Route path="marquillas" element={<PermissionRoute permissions={['CATALOGO_CONSULTAR']}><MarksPage /></PermissionRoute>} />
           <Route path="usuarios" element={<PermissionRoute permissions={['USUARIO_CONSULTAR']}><UsersPage /></PermissionRoute>} />
           <Route path="roles" element={<PermissionRoute permissions={['ROL_CONSULTAR']}><RolesPage /></PermissionRoute>} />
@@ -99,5 +106,5 @@ export function AppRouter() {
         </Route>
       </Route>
     </Routes>
-  </BrowserRouter>;
+  </Router>;
 }

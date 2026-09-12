@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
   CalendarDays,
@@ -22,26 +22,22 @@ import {
   Badge,
   Button,
   Card,
+  CompactToolbar,
   EmptyState,
   ErrorState,
   Field,
+  FloatingActionDock,
   IconButton,
   Input,
-  ListToolbar,
   LoadingState,
   Modal,
-  PageHeader,
   Select,
   Textarea,
 } from "../../components/ui";
 import { itemId, itemLabel, useCatalog } from "../../hooks/useCatalog";
 import { useListControls } from "../../hooks/useListControls";
-import type {
-  Location,
-  Pasture,
-  PastureDetail,
-  PastureOccupationPeriod,
-} from "../../types/api";
+import { AnimalIdentity } from "../../components/AnimalPicker";
+import type { Location, Pasture, PastureDetail, PastureOccupationPeriod } from "../../types/api";
 import {
   formatDate,
   formatNumber,
@@ -318,16 +314,6 @@ function PastureModal({
                 ))}
               </Select>
             </Field>
-            <Field label="Capacidad estimada">
-              <Input
-                type="number"
-                min="0"
-                value={form.capacidad_estimada}
-                onChange={(e) =>
-                  setForm((x) => ({ ...x, capacidad_estimada: e.target.value }))
-                }
-              />
-            </Field>
             <Field label="Último descanso">
               <Input
                 type="date"
@@ -534,6 +520,8 @@ export function PasturesPage() {
     queryKey: ["pastures"],
     queryFn: () => apiRequest<Pasture[]>("/potreros"),
   });
+  const summaryQueries=useQueries({queries:(query.data??[]).map((pasture)=>({queryKey:["pastures",pasture.id_potrero,"summary"],queryFn:()=>apiRequest<PastureDetail>(`/potreros/${pasture.id_potrero}/resumen`),staleTime:60_000}))});
+  const summaries=new Map((query.data??[]).map((pasture,index)=>[pasture.id_potrero,summaryQueries[index]?.data]));
   const list = useListControls({
     items: query.data ?? [],
     storageKey: "pastures",
@@ -547,26 +535,26 @@ export function PasturesPage() {
       return false;
     if (
       filters.ocupacion_min &&
-      (pasture.dias_ocupacion == null ||
-        pasture.dias_ocupacion < Number(filters.ocupacion_min))
+      (calculatedOccupationDays(pasture,summaries.get(pasture.id_potrero)) == null ||
+        calculatedOccupationDays(pasture,summaries.get(pasture.id_potrero))! < Number(filters.ocupacion_min))
     )
       return false;
     if (
       filters.ocupacion_max &&
-      (pasture.dias_ocupacion == null ||
-        pasture.dias_ocupacion > Number(filters.ocupacion_max))
+      (calculatedOccupationDays(pasture,summaries.get(pasture.id_potrero)) == null ||
+        calculatedOccupationDays(pasture,summaries.get(pasture.id_potrero))! > Number(filters.ocupacion_max))
     )
       return false;
     if (
       filters.descanso_min &&
-      (pasture.dias_descanso == null ||
-        pasture.dias_descanso < Number(filters.descanso_min))
+      (calculatedRestDays(pasture,summaries.get(pasture.id_potrero)) == null ||
+        calculatedRestDays(pasture,summaries.get(pasture.id_potrero))! < Number(filters.descanso_min))
     )
       return false;
     if (
       filters.descanso_max &&
-      (pasture.dias_descanso == null ||
-        pasture.dias_descanso > Number(filters.descanso_max))
+      (calculatedRestDays(pasture,summaries.get(pasture.id_potrero)) == null ||
+        calculatedRestDays(pasture,summaries.get(pasture.id_potrero))! > Number(filters.descanso_max))
     )
       return false;
     return true;
@@ -590,28 +578,8 @@ export function PasturesPage() {
     setEditing(pasture);
   };
   return (
-    <div>
-      <PageHeader
-        title="Potreros"
-        description="Consulta ocupación, descanso, pastos e historial de cada potrero."
-        action={
-          hasPermission("POTRERO_ADMINISTRAR") ? (
-            <Button onClick={() => setEditing(null)}>
-              <Plus size={18} />
-              Nuevo potrero
-            </Button>
-          ) : undefined
-        }
-      />
-      <div className="pasture-list-controls">
-        <ListToolbar
-          search={list.search}
-          onSearch={list.setSearch}
-          order={list.order}
-          onOrder={list.setOrder}
-          placeholder="Buscar potrero, código, uso o pasto…"
-          count={filtered.length}
-        />
+    <div className="module-no-header">
+      <CompactToolbar search={list.search} onSearch={list.setSearch} placeholder="Buscar potrero…" count={filtered.length} actions={<>
         <IconButton
           className={activeFilters ? "active-filter-button" : ""}
           label="Filtrar ocupación y descanso"
@@ -622,7 +590,7 @@ export function PasturesPage() {
             <span className="filter-count">{activeFilters}</span>
           ) : null}
         </IconButton>
-      </div>
+      </>}/>
       {filtersOpen ? (
         <section className="advanced-filters pasture-advanced-filters">
           <div className="advanced-filters-heading">
@@ -754,7 +722,9 @@ export function PasturesPage() {
             <span>Estado y tiempo</span>
             <span />
           </div>
-          {filtered.map((pasture) => (
+          {filtered.map((pasture) => {
+            const summary=summaries.get(pasture.id_potrero);
+            return (
             <button
               type="button"
               className="pasture-list-row"
@@ -779,11 +749,6 @@ export function PasturesPage() {
                     ? `${formatNumber(pasture.area)}${pasture.unidad_area ? ` ${pasture.unidad_area}` : ""}`
                     : "Sin registrar"}
                 </strong>
-                <small>
-                  {pasture.capacidad_estimada != null
-                    ? `Capacidad: ${pasture.capacidad_estimada}`
-                    : "Sin capacidad"}
-                </small>
               </span>
               <span className="pasture-grass-summary">
                 <strong>
@@ -813,8 +778,8 @@ export function PasturesPage() {
                 </Badge>
                 <small>
                   {pasture.estado_ocupacion === "OCUPADO"
-                    ? `${pasture.dias_ocupacion ?? "—"} días ocupado · ${Number(pasture.total_animales)} animales`
-                    : `${pasture.dias_descanso ?? "—"} días en descanso`}
+                    ? `${calculatedOccupationDays(pasture,summary) ?? "—"} días ocupado · ${Number(pasture.total_animales)} animales`
+                    : `${calculatedRestDays(pasture,summary) ?? "—"} días en descanso · ocupación anterior ${summary?.ocupacion.dias_ocupacion_anterior ?? "—"} días · ${summary?.ocupacion.carga_anterior ?? 0} animales`}
                 </small>
               </span>
               <span className="pasture-row-actions">
@@ -833,7 +798,7 @@ export function PasturesPage() {
                 <ChevronRight size={19} />
               </span>
             </button>
-          ))}
+          );})}
         </Card>
       )}
       {detailId ? (
@@ -865,6 +830,7 @@ export function PasturesPage() {
       {editing !== undefined ? (
         <PastureModal pasture={editing} onClose={() => setEditing(undefined)} />
       ) : null}
+      {hasPermission("POTRERO_ADMINISTRAR")?<FloatingActionDock><IconButton label="Nuevo potrero" onClick={()=>setEditing(null)}><Plus size={23}/></IconButton></FloatingActionDock>:null}
     </div>
   );
 }
@@ -872,8 +838,9 @@ export function PasturesPage() {
 function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
   const navigate = useNavigate();
   const status = pasture.ocupacion.estado;
-  const [selectedOccupation, setSelectedOccupation] =
-    useState<PastureOccupationPeriod | null>(null);
+  const [selectedOccupation,setSelectedOccupation]=useState<PastureOccupationPeriod|null>(null);
+  const currentOccupationDays=elapsedCalendarDays(pasture.ocupacion.fecha_ocupacion_actual)??pasture.ocupacion.dias_ocupacion_actual;
+  const currentRestDays=status==='DESCANSO'?(elapsedCalendarDays(pasture.ocupacion.fecha_ultimo_descanso)??pasture.ocupacion.dias_descanso):pasture.ocupacion.dias_descanso;
   return (
     <div className="pasture-detail">
       <div className="pasture-detail-heading">
@@ -932,11 +899,7 @@ function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
           <Users size={19} />
           <span>
             <small>Carga anterior</small>
-            <strong>
-              {pasture.ocupacion.carga_anterior != null
-                ? `${pasture.ocupacion.carga_anterior} animales`
-                : "—"}
-            </strong>
+            <strong>{pasture.ocupacion.carga_anterior != null ? `${pasture.ocupacion.carga_anterior} animales` : "—"}</strong>
           </span>
         </div>
         <div>
@@ -956,7 +919,7 @@ function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
                 ? "Días en descanso"
                 : "Duración del último descanso"}
             </small>
-            <strong>{pasture.ocupacion.dias_descanso ?? "—"}</strong>
+            <strong>{currentRestDays ?? "—"}</strong>
           </span>
         </div>
         <div>
@@ -966,13 +929,6 @@ function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
             <strong>
               {pasture.disponibilidad_agua ? "Disponible" : "No disponible"}
             </strong>
-          </span>
-        </div>
-        <div>
-          <Users size={19} />
-          <span>
-            <small>Capacidad estimada</small>
-            <strong>{pasture.capacidad_estimada ?? "—"}</strong>
           </span>
         </div>
       </div>
@@ -1055,7 +1011,7 @@ function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
                 type="button"
                 className="pasture-history-row"
                 key={`${period.inicio}-${index}`}
-                onClick={() => setSelectedOccupation(period)}
+                onClick={()=>setSelectedOccupation(period)}
               >
                 <span>
                   <strong>{formatDate(period.inicio)}</strong>
@@ -1065,7 +1021,7 @@ function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
                   </small>
                 </span>
                 <span>
-                  <strong>{period.dias_ocupacion} días</strong>
+                  <strong>{period.fin?period.dias_ocupacion:(currentOccupationDays??period.dias_ocupacion)} días</strong>
                 </span>
                 <span>
                   <strong>{period.total_animales}</strong>
@@ -1082,7 +1038,7 @@ function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
                       : ""}
                   </small>
                 </span>
-                <ChevronRight size={18} />
+                <ChevronRight size={18}/>
               </button>
             ))}
           </div>
@@ -1094,73 +1050,37 @@ function PastureDetailContent({ pasture }: { pasture: PastureDetail }) {
           />
         )}
       </section>
-      {selectedOccupation ? (
-        <Modal
-          title="Detalle de la ocupación"
-          onClose={() => setSelectedOccupation(null)}
-          wide
-          footer={
-            <Button variant="ghost" onClick={() => setSelectedOccupation(null)}>
-              Cerrar
-            </Button>
-          }
-        >
-          <div className="occupation-detail">
-            <div className="detail-grid">
-              <div>
-                <small>Inicio</small>
-                <strong>{formatDate(selectedOccupation.inicio)}</strong>
-              </div>
-              <div>
-                <small>Fin</small>
-                <strong>
-                  {selectedOccupation.fin
-                    ? formatDate(selectedOccupation.fin)
-                    : "Actualmente ocupado"}
-                </strong>
-              </div>
-              <div>
-                <small>Duración</small>
-                <strong>{selectedOccupation.dias_ocupacion} días</strong>
-              </div>
-              <div>
-                <small>Carga registrada</small>
-                <strong>{selectedOccupation.total_animales} animales</strong>
-              </div>
-            </div>
-            <section>
-              <h3>Animales que estuvieron en esta ocupación</h3>
-              {selectedOccupation.animales.length ? (
-                <div className="occupation-animal-list">
-                  {selectedOccupation.animales.map((animal) => (
-                    <div key={animal.id_animal}>
-                      {animal.foto_perfil ? (
-                        <img src={animal.foto_perfil} alt="" />
-                      ) : (
-                        <span className="occupation-animal-placeholder">
-                          <Users size={18} />
-                        </span>
-                      )}
-                      <span>
-                        <strong>{animal.nombre}</strong>
-                        <small>
-                          {animal.codigo_arete
-                            ? `Arete ${animal.codigo_arete}`
-                            : "Sin arete"}
-                        </small>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="muted">
-                  No se encontraron animales vinculados a este período.
-                </p>
-              )}
-            </section>
+      {selectedOccupation?<Modal title="Detalle de la ocupación" onClose={()=>setSelectedOccupation(null)} wide footer={<Button variant="ghost" onClick={()=>setSelectedOccupation(null)}>Cerrar</Button>}>
+        <div className="occupation-detail">
+          <div className="detail-grid">
+            <div><small>Inicio</small><strong>{formatDate(selectedOccupation.inicio)}</strong></div>
+            <div><small>Fin</small><strong>{selectedOccupation.fin?formatDate(selectedOccupation.fin):"Actualmente ocupado"}</strong></div>
+            <div><small>Duración</small><strong>{selectedOccupation.fin?selectedOccupation.dias_ocupacion:(elapsedCalendarDays(selectedOccupation.inicio)??selectedOccupation.dias_ocupacion)} días</strong></div>
+            <div><small>Carga registrada</small><strong>{selectedOccupation.total_animales} animales</strong></div>
           </div>
-        </Modal>
-      ) : null}
+          <section><h3>Animales que estuvieron en esta ocupación</h3>{selectedOccupation.animales.length?<div className="occupation-animal-list">{selectedOccupation.animales.map((animal)=><div key={animal.id_animal}><AnimalIdentity option={{id:animal.id_animal,name:animal.nombre,photoUrl:animal.foto_perfil,subtitle:animal.codigo_arete?`Arete ${animal.codigo_arete}`:null}}/></div>)}</div>:<p className="muted">No se encontraron animales vinculados a este período.</p>}</section>
+        </div>
+      </Modal>:null}
     </div>
   );
+}
+
+function elapsedCalendarDays(value:string|null|undefined){
+  if(!value)return null;
+  const datePart=value.slice(0,10);
+  const start=new Date(`${datePart}T00:00:00`);
+  const now=new Date();
+  const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  if(Number.isNaN(start.getTime()))return null;
+  return Math.max(0,Math.floor((today.getTime()-start.getTime())/86_400_000));
+}
+
+function calculatedOccupationDays(pasture:Pasture,summary?:PastureDetail){
+  if(pasture.estado_ocupacion!=='OCUPADO')return pasture.dias_ocupacion;
+  return elapsedCalendarDays(summary?.ocupacion.fecha_ocupacion_actual)??summary?.ocupacion.dias_ocupacion_actual??pasture.dias_ocupacion;
+}
+
+function calculatedRestDays(pasture:Pasture,summary?:PastureDetail){
+  if(pasture.estado_ocupacion!=='DESCANSO')return pasture.dias_descanso;
+  return elapsedCalendarDays(summary?.ocupacion.fecha_ultimo_descanso??pasture.fecha_ultimo_descanso)??summary?.ocupacion.dias_descanso??pasture.dias_descanso;
 }

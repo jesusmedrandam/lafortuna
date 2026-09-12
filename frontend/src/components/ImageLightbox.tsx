@@ -38,7 +38,10 @@ function attachmentUrl(item:LightboxMedia) {
 
 async function downloadMedia(item:LightboxMedia) {
   const filename=safeFilename(item);
+  const mimeType=item.type==='VIDEO'?'video/mp4':'image/jpeg';
   const downloadUrl=optimizedCloudinaryMediaUrl(item.url,item.type??'IMAGEN','download');
+  if(window.SGBAndroid?.saveOptimizedMedia?.(item.url,downloadUrl,filename,mimeType))return;
+  if(window.SGBAndroid?.saveMedia?.(downloadUrl,filename,mimeType))return;
   try {
     const response=await fetch(downloadUrl);
     if(!response.ok)throw new Error('No se pudo descargar el archivo.');
@@ -63,7 +66,7 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
   const pinchStart=useRef<{distance:number;midX:number;midY:number;view:{scale:number;x:number;y:number}}|null>(null);
   const dragStart=useRef<{pointerId:number;x:number;y:number;view:{scale:number;x:number;y:number}}|null>(null);
   const current=items[index];
-  const displayUrl=current?optimizedCloudinaryMediaUrl(current.url,current.type??'IMAGEN','display'):'';
+  const displayUrl=current?(window.SGBAndroid?current.url:optimizedCloudinaryMediaUrl(current.url,current.type??'IMAGEN','display')):'';
   const previous=()=>setIndex((value)=>(value-1+items.length)%items.length);
   const next=()=>setIndex((value)=>(value+1)%items.length);
 
@@ -80,14 +83,29 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
     const stage=stageRef.current;
     if(!stage)return constrained({...currentView,scale:nextScale});
     const rect=stage.getBoundingClientRect();
-    const pointX=clientX-(rect.left+rect.width/2);const pointY=clientY-(rect.top+rect.height/2);
+    const pointX=clientX-(rect.left+rect.width/2);
+    const pointY=clientY-(rect.top+rect.height/2);
     const scale=Math.min(5,Math.max(1,nextScale));
-    return constrained({scale,x:pointX-(pointX-currentView.x)*scale/currentView.scale,y:pointY-(pointY-currentView.y)*scale/currentView.scale});
+    return constrained({
+      scale,
+      x:pointX-(pointX-currentView.x)*scale/currentView.scale,
+      y:pointY-(pointY-currentView.y)*scale/currentView.scale,
+    });
   });
 
   useEffect(()=>setIndex(Math.min(Math.max(initialIndex,0),Math.max(items.length-1,0))),[initialIndex,items.length]);
   useEffect(()=>setView({scale:1,x:0,y:0}),[index]);
   useEffect(()=>{onCloseRef.current=onClose;},[onClose]);
+  useEffect(()=>{
+    const root=document.documentElement;
+    const normalBackground=getComputedStyle(root).getPropertyValue('--page-bg').trim()||'#f4f7f5';
+    root.classList.add('sgb-lightbox-open');
+    try { window.SGBAndroid?.setSystemBarColors?.('#050806','#050806'); } catch { /* Solo Android. */ }
+    return()=>{
+      root.classList.remove('sgb-lightbox-open');
+      try { window.SGBAndroid?.setSystemBarColors?.(normalBackground,normalBackground); } catch { /* Solo Android. */ }
+    };
+  },[]);
   useEffect(()=>{
     const marker=historyMarker.current;
     window.history.pushState({...window.history.state,sgbLightbox:marker},'',window.location.href);
@@ -126,25 +144,48 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
       if(current.type==='VIDEO')return;
       if(event.touches.length===2){
         const [first,second]=[event.touches[0],event.touches[1]];
-        pinchStart.current={distance:Math.hypot(second.clientX-first.clientX,second.clientY-first.clientY),midX:(first.clientX+second.clientX)/2,midY:(first.clientY+second.clientY)/2,view};
+        pinchStart.current={
+          distance:Math.hypot(second.clientX-first.clientX,second.clientY-first.clientY),
+          midX:(first.clientX+second.clientX)/2,
+          midY:(first.clientY+second.clientY)/2,
+          view,
+        };
         touchStart.current=null;
       }else if(event.touches[0])touchStart.current={x:event.touches[0].clientX,y:event.touches[0].clientY,view};
     }}
     onTouchMove={(event)=>{
       if(current.type==='VIDEO')return;
       if(event.touches.length===2&&pinchStart.current){
-        event.preventDefault();const [first,second]=[event.touches[0],event.touches[1]];const start=pinchStart.current;
-        const distance=Math.hypot(second.clientX-first.clientX,second.clientY-first.clientY);const scale=Math.min(5,Math.max(1,start.view.scale*distance/start.distance));
-        const midX=(first.clientX+second.clientX)/2;const midY=(first.clientY+second.clientY)/2;const rect=stageRef.current?.getBoundingClientRect();
-        const centerX=rect?rect.left+rect.width/2:0;const centerY=rect?rect.top+rect.height/2:0;
-        setView(constrained({scale,x:midX-centerX-(start.midX-centerX-start.view.x)*scale/start.view.scale,y:midY-centerY-(start.midY-centerY-start.view.y)*scale/start.view.scale}));
+        event.preventDefault();
+        const [first,second]=[event.touches[0],event.touches[1]];
+        const start=pinchStart.current;
+        const distance=Math.hypot(second.clientX-first.clientX,second.clientY-first.clientY);
+        const scale=Math.min(5,Math.max(1,start.view.scale*distance/start.distance));
+        const midX=(first.clientX+second.clientX)/2;
+        const midY=(first.clientY+second.clientY)/2;
+        const rect=stageRef.current?.getBoundingClientRect();
+        const centerX=rect?rect.left+rect.width/2:0;
+        const centerY=rect?rect.top+rect.height/2:0;
+        const startPointX=start.midX-centerX;const startPointY=start.midY-centerY;
+        const currentPointX=midX-centerX;const currentPointY=midY-centerY;
+        setView(constrained({
+          scale,
+          x:currentPointX-(startPointX-start.view.x)*scale/start.view.scale,
+          y:currentPointY-(startPointY-start.view.y)*scale/start.view.scale,
+        }));
       }else if(event.touches.length===1&&touchStart.current&&view.scale>1){
-        event.preventDefault();const touch=event.touches[0];const start=touchStart.current;
+        event.preventDefault();
+        const touch=event.touches[0];
+        const start=touchStart.current;
         setView(constrained({...start.view,x:start.view.x+touch.clientX-start.x,y:start.view.y+touch.clientY-start.y}));
       }
     }}
     onTouchEnd={(event)=>{
-      if(pinchStart.current){if(event.touches.length<2)pinchStart.current=null;if(event.touches.length===1)touchStart.current={x:event.touches[0].clientX,y:event.touches[0].clientY,view};return;}
+      if(pinchStart.current){
+        if(event.touches.length<2)pinchStart.current=null;
+        if(event.touches.length===1)touchStart.current={x:event.touches[0].clientX,y:event.touches[0].clientY,view};
+        return;
+      }
       if(!touchStart.current)return;
       const delta=(event.changedTouches[0]?.clientX??touchStart.current.x)-touchStart.current.x;
       if(view.scale===1&&items.length>1&&delta>45)previous();
@@ -156,13 +197,16 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
     {!minimalControls?<IconButton className="lightbox-close" label="Cerrar visor" onClick={onClose}><X size={28}/></IconButton>:null}
     {!minimalControls&&items.length>1&&view.scale===1?<><IconButton className="lightbox-arrow lightbox-arrow-left" label="Archivo anterior" onClick={previous}><ChevronLeft size={34}/></IconButton><IconButton className="lightbox-arrow lightbox-arrow-right" label="Archivo siguiente" onClick={next}><ChevronRight size={34}/></IconButton></>:null}
     <div className="image-lightbox-content">
-      <div ref={stageRef} className={`lightbox-media-stage ${view.scale>1?'zoomed':''} ${dragStart.current?'dragging':''}`}
+      <div
+        ref={stageRef}
+        className={`lightbox-media-stage ${view.scale>1?'zoomed':''} ${dragStart.current?'dragging':''}`}
         onDoubleClick={(event)=>{if(current.type==='VIDEO')return;if(view.scale>1)setView({scale:1,x:0,y:0});else zoomAt(2.5,event.clientX,event.clientY);}}
         onWheel={(event)=>{if(current.type==='VIDEO')return;event.preventDefault();zoomAt(view.scale+(event.deltaY<0?.3:-.3),event.clientX,event.clientY);}}
         onPointerDown={(event)=>{if(current.type==='VIDEO'||event.pointerType!=='mouse'||view.scale<=1)return;event.currentTarget.setPointerCapture(event.pointerId);dragStart.current={pointerId:event.pointerId,x:event.clientX,y:event.clientY,view};}}
         onPointerMove={(event)=>{const start=dragStart.current;if(!start||start.pointerId!==event.pointerId)return;setView(constrained({...start.view,x:start.view.x+event.clientX-start.x,y:start.view.y+event.clientY-start.y}));}}
         onPointerUp={(event)=>{if(dragStart.current?.pointerId===event.pointerId){dragStart.current=null;event.currentTarget.releasePointerCapture(event.pointerId);}}}
-        onPointerCancel={()=>{dragStart.current=null;}}>
+        onPointerCancel={()=>{dragStart.current=null;}}
+      >
         {current.type==='VIDEO'?<video src={displayUrl} controls autoPlay/>:<img draggable={false} src={displayUrl} alt={current.title} style={{transform:`translate3d(${view.x}px,${view.y}px,0) scale(${view.scale})`}}/>}
         {minimalControls?<IconButton className="lightbox-download-overlay" label="Descargar archivo" onClick={(event)=>{event.stopPropagation();void downloadMedia(current);}}><Download size={22}/></IconButton>:null}
       </div>

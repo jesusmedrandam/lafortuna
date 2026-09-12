@@ -8,13 +8,15 @@ import {
   Badge,
   Button,
   Card,
+  CompactToolbar,
   EmptyState,
   ErrorState,
   Field,
+  FloatingActionDock,
+  IconButton,
   Input,
   LoadingState,
   Modal,
-  PageHeader,
   Select,
   Textarea,
 } from "../../components/ui";
@@ -322,24 +324,16 @@ function CorralModal({
 export function CorralsPage() {
   const { hasPermission } = useAuth();
   const [editing, setEditing] = useState<Corral | null | undefined>(undefined);
+  const [search,setSearch]=useState('');
   const query = useQuery({
     queryKey: ["corrals"],
     queryFn: () => apiRequest<Corral[]>("/corrales"),
   });
+  const term=search.trim().toLocaleLowerCase();
+  const visible=(query.data??[]).filter((corral)=>!term||`${corral.nombre} ${corral.codigo??''} ${corral.tipo_corral} ${corral.propiedad??''}`.toLocaleLowerCase().includes(term));
   return (
-    <div>
-      <PageHeader
-        title="Corrales"
-        description="Registra corrales de ordeño, manejo, maternidad, engorde o aislamiento."
-        action={
-          hasPermission("CORRAL_ADMINISTRAR") ? (
-            <Button onClick={() => setEditing(null)}>
-              <Plus size={18} />
-              Nuevo corral
-            </Button>
-          ) : undefined
-        }
-      />
+    <div className="module-no-header">
+      <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar corral…" count={visible.length}/>
       {query.isLoading ? (
         <LoadingState />
       ) : query.isError ? (
@@ -347,7 +341,7 @@ export function CorralsPage() {
           message={(query.error as Error).message}
           onRetry={() => void query.refetch()}
         />
-      ) : query.data?.length === 0 ? (
+      ) : visible.length === 0 ? (
         <EmptyState
           icon={Warehouse}
           title="Sin corrales"
@@ -355,7 +349,7 @@ export function CorralsPage() {
         />
       ) : (
         <div className="record-grid">
-          {query.data?.map((corral) => (
+          {visible.map((corral) => (
             <Card key={corral.id_corral} className="record-card">
               <div className="record-card-header">
                 <div className="record-icon">
@@ -419,6 +413,7 @@ export function CorralsPage() {
       {editing !== undefined ? (
         <CorralModal corral={editing} onClose={() => setEditing(undefined)} />
       ) : null}
+      {hasPermission("CORRAL_ADMINISTRAR")?<FloatingActionDock><IconButton label="Nuevo corral" onClick={()=>setEditing(null)}><Plus size={23}/></IconButton></FloatingActionDock>:null}
     </div>
   );
 }

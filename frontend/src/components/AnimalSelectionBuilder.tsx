@@ -5,6 +5,7 @@ import { apiRequest, ApiError } from '../api/client';
 import { useToast } from './ToastContext';
 import { Badge, Button, Card, Field, Input, LoadingState, Select } from './ui';
 import type { Group, SelectableAnimal, SelectionMode } from '../types/api';
+import { AnimalThumb, useAnimalDirectory } from './AnimalPicker';
 
 export interface AnimalSelectionValue {
   mode: SelectionMode;
@@ -24,6 +25,7 @@ interface Props {
   lockAnimalSelection?: boolean;
   autoLoadGroup?: boolean;
   propertyScope?: string;
+  initialAnimalId?: string;
 }
 
 const selectionModes = [
@@ -32,10 +34,12 @@ const selectionModes = [
   ['SELECCION_MANUAL', 'Selección manual', ListChecks],
 ] as const;
 
-export function AnimalSelectionBuilder({ value, onChange, allowDose = false, doseUnitId, operationCode, excludeLocationId, ownershipScope, allowedModes, lockAnimalSelection = false, autoLoadGroup = false, propertyScope }: Props) {
+export function AnimalSelectionBuilder({ value, onChange, allowDose = false, doseUnitId, operationCode, excludeLocationId, ownershipScope, allowedModes, lockAnimalSelection = false, autoLoadGroup = false, propertyScope, initialAnimalId }: Props) {
   const toast = useToast();
   const [search, setSearch] = useState('');
+  const directory = useAnimalDirectory();
   const lastAutoLoadedGroup = useRef('');
+  const initialAnimalLoaded = useRef(false);
   const groups = useQuery({
     queryKey: ['groups', 'selection'],
     queryFn: () => apiRequest<Group[]>('/grupos?limit=100'),
@@ -58,7 +62,7 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
       });
       return response.map((animal) => ({
         ...animal,
-        seleccionado: value.mode === 'SELECCION_MANUAL' ? false : true,
+        seleccionado: initialAnimalId ? animal.id_animal === initialAnimalId : value.mode === 'SELECCION_MANUAL' ? false : true,
         dosis_aplicada: null,
         id_unidad_dosis: doseUnitId || null,
         observaciones: null,
@@ -77,6 +81,8 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
     lastAutoLoadedGroup.current = value.groupId;
     preview.mutate();
   }, [autoLoadGroup, value.groupId, value.mode]);
+
+  useEffect(()=>{if(!initialAnimalId||initialAnimalLoaded.current||value.animals.length||preview.isPending)return;initialAnimalLoaded.current=true;preview.mutate();},[initialAnimalId,value.animals.length,preview.isPending]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -153,7 +159,7 @@ export function AnimalSelectionBuilder({ value, onChange, allowDose = false, dos
           <thead><tr><th>Incluir</th><th>Animal</th><th>Sexo</th><th>Grupo</th><th>Ubicación</th>{allowDose ? <th>Dosis individual</th> : null}</tr></thead>
           <tbody>{filtered.map((animal) => <tr key={animal.id_animal} className={animal.seleccionado ? 'selected-row' : ''}>
             <td><input type="checkbox" checked={animal.seleccionado} disabled={lockAnimalSelection} onChange={(event) => updateAnimal(animal.id_animal, { seleccionado: event.target.checked })} /></td>
-            <td><strong>{animal.nombre}</strong><small>{animal.codigo_arete ? `Arete ${animal.codigo_arete}` : 'Sin arete'}</small></td>
+            <td><span className="animal-identity-inline"><AnimalThumb photoUrl={animal.foto_perfil ?? directory.byId.get(animal.id_animal)?.foto_perfil} name={animal.nombre} size="small"/><span><strong>{animal.nombre}</strong><small>{animal.codigo_arete ? `Arete ${animal.codigo_arete}` : 'Sin arete'}</small></span></span></td>
             <td>{animal.sexo === 'HEMBRA' ? 'Hembra' : 'Macho'}</td>
             <td>{animal.grupo || 'Sin grupo'}</td>
             <td>{animal.ubicacion || 'Sin ubicación'}</td>

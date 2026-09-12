@@ -6,6 +6,11 @@ export function useCatalog(name: string, enabled = true) {
   return useQuery({
     queryKey: ['catalog', name],
     queryFn: () => cachedCatalogRequest<CatalogItem[]>(name),
+    select: (value) => Array.isArray(value)
+      ? value
+      : value && typeof value === 'object' && Array.isArray((value as { data?: unknown }).data)
+        ? (value as { data: CatalogItem[] }).data
+        : [],
     staleTime: 10 * 60_000,
     gcTime: 24 * 60 * 60_000,
     enabled,
@@ -13,7 +18,8 @@ export function useCatalog(name: string, enabled = true) {
 }
 
 export function itemId(item: CatalogItem): string {
-  const key = Object.keys(item).find((name) => name.startsWith('id_'));
+  const keys = Object.keys(item).filter((name) => name.startsWith('id_'));
+  const key = keys.find((name) => String(item[name] ?? '').startsWith('offline-')) ?? keys[0];
   return key ? String(item[key]) : '';
 }
 

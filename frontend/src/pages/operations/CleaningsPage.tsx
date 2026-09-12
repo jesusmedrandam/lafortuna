@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, ChevronRight, Droplets, Edit3, Gauge, ImagePlus, MapPin, Plus, Sprout, Trash2, UserRound, UsersRound } from 'lucide-react';
+import { ArrowUpDown, ChevronRight, Edit3, Gauge, ImagePlus, MapPin, Plus, SlidersHorizontal, Sprout, Trash2, UserRound, UsersRound, X } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
 import { ImageLightbox } from '../../components/ImageLightbox';
-import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, Input, ListToolbar, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
+import { Badge, Button, Card, CompactToolbar, ConfirmDialog, EmptyState, ErrorState, Field, FloatingActionDock, IconButton, Input, LoadingState, Modal, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
 import { useListControls } from '../../hooks/useListControls';
 import type { Operator, Pasture, PastureCleaning, RecordImage } from '../../types/api';
 import { currentDateInput, dateInputValue, formatDate, formatNumber, humanizeCode, nullIfEmpty, numberOrNull } from '../../utils';
-import { useSearchParams } from 'react-router-dom';
 
 interface ProductLine { id_producto: string; id_unidad: string; cantidad_por_tanque: string; observaciones: string; }
 interface OperatorLine { id_operador: string; funcion: string; observaciones: string; }
@@ -25,8 +25,8 @@ interface OperatorForm { id_operador?: string; nombres: string; apellidos: strin
 const emptyOperator = (): OperatorForm => ({ nombres: '', apellidos: '', telefono: '', especialidad: '', activo: true });
 
 export function CleaningsPage() {
-  const [searchParams] = useSearchParams();
-  const consumedDetail = useRef(false);
+  const [searchParams]=useSearchParams();
+  const consumedDetail=useRef(false);
   const { hasPermission } = useAuth();
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -38,6 +38,8 @@ export function CleaningsPage() {
   const [operatorForm, setOperatorForm] = useState<OperatorForm>(emptyOperator);
   const [deleteOperator, setDeleteOperator] = useState<string | null>(null);
   const [photoFiles,setPhotoFiles]=useState<File[]>([]);
+  const [filtersOpen,setFiltersOpen]=useState(false);
+  const [filters,setFilters]=useState({id_potrero:'',id_tipo_limpieza:'',fecha_desde:'',fecha_hasta:''});
 
   const cleanings = useQuery({ queryKey: ['cleanings'], queryFn: () => apiRequest<PastureCleaning[]>('/limpiezas-potrero') });
   const pastures = useQuery({ queryKey: ['pastures', 'cleanings'], queryFn: () => apiRequest<Pasture[]>('/potreros') });
@@ -45,21 +47,15 @@ export function CleaningsPage() {
   const types = useCatalog('tipos-limpieza');
   const products = useCatalog('agroquimicos');
   const units = useCatalog('unidades');
-
-  useEffect(() => {
-    if (consumedDetail.current || !cleanings.data) return;
-    const cleaningId = searchParams.get('limpieza');
-    const pastureId = searchParams.get('potrero');
-    const match = cleaningId
-      ? cleanings.data.find((item) => item.id_limpieza === cleaningId)
-      : pastureId
-        ? cleanings.data.find((item) => item.id_potrero === pastureId)
-        : undefined;
-    if (match) {
-      setSelected(match);
-      consumedDetail.current = true;
-    }
-  }, [cleanings.data, searchParams]);
+  useEffect(()=>{
+    if(consumedDetail.current||!cleanings.data)return;
+    const cleaningId=searchParams.get('limpieza');
+    const pastureId=searchParams.get('potrero');
+    const match=cleaningId
+      ? cleanings.data.find(item=>item.id_limpieza===cleaningId)
+      : pastureId ? cleanings.data.find(item=>item.id_potrero===pastureId) : undefined;
+    if(match){setSelected(match);consumedDetail.current=true;}
+  },[cleanings.data,searchParams]);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -110,19 +106,29 @@ export function CleaningsPage() {
 
   const addProduct = () => setForm((current) => ({ ...current, productos: [...current.productos, { id_producto: '', id_unidad: '', cantidad_por_tanque: '', observaciones: '' }] }));
   const addOperator = () => setForm((current) => ({ ...current, operadores: [...current.operadores, { id_operador: '', funcion: '', observaciones: '' }] }));
-  const list = useListControls({ items: cleanings.data ?? [], storageKey: 'cleanings', searchText: (item) => `${item.tipo_limpieza} ${item.potrero} ${item.estado} ${item.productos.map((product) => product.producto).join(' ')} ${item.operadores.map((operator) => operator.nombre).join(' ')}`, dateValue: (item) => item.fecha_inicio, nameValue: (item) => `${item.potrero} ${item.tipo_limpieza}` });
+  const list = useListControls({ items: cleanings.data ?? [], storageKey: 'cleanings', searchText: (item) => `${item.tipo_limpieza ?? ''} ${item.potrero ?? ''} ${item.estado ?? ''} ${(item.productos ?? []).map((product) => product.producto ?? '').join(' ')} ${(item.operadores ?? []).map((operator) => operator.nombre ?? '').join(' ')}`, dateValue: (item) => item.fecha_inicio ?? '', nameValue: (item) => `${item.potrero ?? ''} ${item.tipo_limpieza ?? ''}` });
+  const visible=list.visible.filter((item)=>{
+    if(filters.id_potrero&&item.id_potrero!==filters.id_potrero)return false;
+    if(filters.id_tipo_limpieza&&!item.tipos_limpieza?.some((type)=>type.id_tipo_limpieza===filters.id_tipo_limpieza)&&item.id_tipo_limpieza!==filters.id_tipo_limpieza)return false;
+    const date=dateInputValue(item.fecha_inicio);
+    if(filters.fecha_desde&&date<filters.fecha_desde)return false;
+    if(filters.fecha_hasta&&date>filters.fecha_hasta)return false;
+    return true;
+  });
+  const activeFilters=Object.values(filters).filter(Boolean).length;
+  const cycleOrder=()=>list.setOrder(list.order==='NEWEST'?'OLDEST':list.order==='OLDEST'?'AZ':list.order==='AZ'?'ZA':'NEWEST');
   const editCleaning = (item: PastureCleaning) => {
     const applications = Number(item.cantidad_tanques ?? 0);
-    setForm({ id_potrero: item.id_potrero, id_tipos_limpieza: item.tipos_limpieza?.map((type)=>type.id_tipo_limpieza)??[item.id_tipo_limpieza], fecha_inicio: dateInputValue(item.fecha_inicio), fecha_finalizacion: dateInputValue(item.fecha_finalizacion), unidad_aplicacion: item.unidad_aplicacion ?? 'TANQUES', cantidad_tanques: item.cantidad_tanques == null ? '' : String(item.cantidad_tanques), capacidad_tanque_litros: item.capacidad_tanque_litros == null ? '' : String(item.capacidad_tanque_litros), tipo_area_intervenida: item.tipo_area_intervenida ?? (item.area_intervenida == null ? 'TOTAL' : 'PARCIAL'), estado: item.estado, observaciones: item.observaciones ?? '', productos: item.productos.map((product) => ({ id_producto: product.id_producto, id_unidad: product.id_unidad, cantidad_por_tanque: product.cantidad_por_tanque == null && applications > 0 ? String(Number(product.cantidad_total) / applications) : String(product.cantidad_por_tanque ?? ''), observaciones: product.observaciones ?? '' })), operadores: item.operadores.map((operator) => ({ id_operador: operator.id_operador, funcion: operator.funcion ?? '', observaciones: operator.observaciones ?? '' })) });
+    setForm({ id_potrero: item.id_potrero, id_tipos_limpieza: item.tipos_limpieza?.map((type)=>type.id_tipo_limpieza)??(item.id_tipo_limpieza?[item.id_tipo_limpieza]:[]), fecha_inicio: dateInputValue(item.fecha_inicio), fecha_finalizacion: dateInputValue(item.fecha_finalizacion), unidad_aplicacion: item.unidad_aplicacion ?? 'TANQUES', cantidad_tanques: item.cantidad_tanques == null ? '' : String(item.cantidad_tanques), capacidad_tanque_litros: item.capacidad_tanque_litros == null ? '' : String(item.capacidad_tanque_litros), tipo_area_intervenida: item.tipo_area_intervenida ?? (item.area_intervenida == null ? 'TOTAL' : 'PARCIAL'), estado: item.estado ?? 'COMPLETADO', observaciones: item.observaciones ?? '', productos: (item.productos ?? []).map((product) => ({ id_producto: product.id_producto, id_unidad: product.id_unidad, cantidad_por_tanque: product.cantidad_por_tanque == null && applications > 0 ? String(Number(product.cantidad_total) / applications) : String(product.cantidad_por_tanque ?? ''), observaciones: product.observaciones ?? '' })), operadores: (item.operadores ?? []).map((operator) => ({ id_operador: operator.id_operador, funcion: operator.funcion ?? '', observaciones: operator.observaciones ?? '' })) });
     setPhotoFiles([]);setEditing(item); setSelected(null); setCreating(true);
   };
 
   const deletePhoto=useMutation({mutationFn:(image:RecordImage)=>apiRequest(`/limpiezas-potrero/imagenes/${image.id_limpieza_imagen}`,{method:'DELETE'}),onSuccess:(_,image)=>{setEditing((current)=>current?{...current,imagenes:current.imagenes.filter((item)=>item.id_limpieza_imagen!==image.id_limpieza_imagen)}:current);toast.show('Fotografía eliminada.');void queryClient.invalidateQueries({queryKey:['cleanings']});void queryClient.invalidateQueries({queryKey:['cleaning-detail']});},onError:(error)=>toast.show((error as ApiError).message,'error')});
 
-  return <div>
-    <PageHeader title="Limpieza de potreros" description="Registra fumigaciones, tala de maleza, productos, tanques o bombadas y responsables." action={hasPermission('LIMPIEZA_ADMINISTRAR') ? <div className="header-actions"><Button variant="secondary" onClick={() => setOperatorsOpen(true)}><UsersRound size={18} />Operadores</Button><Button onClick={() => { setForm(emptyCleaning());setPhotoFiles([]); setCreating(true); }}><Plus size={18} />Nueva limpieza</Button></div> : undefined} />
-    <ListToolbar search={list.search} onSearch={list.setSearch} order={list.order} onOrder={list.setOrder} placeholder="Buscar actividad, potrero, producto u operador…" count={list.visible.length} />
-    {cleanings.isLoading ? <LoadingState /> : cleanings.isError ? <ErrorState message={(cleanings.error as Error).message} onRetry={() => void cleanings.refetch()} /> : list.visible.length ? <div className="cleaning-list"><div className="cleaning-list-head"><span>Potrero</span><span>Actividad</span><span>Fecha</span><span>Aplicación</span><span>Estado</span><span /></div>{list.visible.map((item) => <button type="button" className="cleaning-list-row" key={item.id_limpieza} onClick={() => setSelected(item)}><span className="cleaning-identity"><span><MapPin size={19} /></span><span><strong>{item.potrero}</strong><small>{item.productos.length} productos · {item.operadores.length} operadores</small></span></span><span><Droplets size={15} />{item.tipo_limpieza}</span><span><CalendarDays size={15} />{formatDate(item.fecha_inicio)}</span><span><Gauge size={15} />{item.cantidad_tanques == null ? 'Sin cantidad' : `${formatNumber(item.cantidad_tanques)} ${item.unidad_aplicacion === 'BOMBADAS' ? 'bombadas' : 'tanques'}`}</span><span><Badge tone={item.estado === 'COMPLETADO' ? 'success' : item.estado === 'CANCELADO' ? 'danger' : 'warning'}>{humanizeCode(item.estado)}</Badge></span><span className="record-row-actions">{hasPermission('LIMPIEZA_ADMINISTRAR') ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); editCleaning(item); }}><Edit3 size={16} />Editar</Button> : null}<ChevronRight size={18}/></span></button>)}</div> : <EmptyState icon={Sprout} title="Sin limpiezas registradas" description="Registra trabajos de fumigación, tala manual o mantenimiento mecanizado." action={hasPermission('LIMPIEZA_ADMINISTRAR') ? <Button onClick={() => setCreating(true)}><Plus size={18} />Registrar limpieza</Button> : undefined} />}
+  return <div className="module-no-header">
+    <CompactToolbar search={list.search} onSearch={list.setSearch} placeholder="Buscar limpieza…" count={visible.length} actions={<><IconButton label="Cambiar orden" onClick={cycleOrder}><ArrowUpDown size={19}/></IconButton><IconButton className={filtersOpen||activeFilters?'active':''} label="Filtros avanzados" onClick={()=>setFiltersOpen((current)=>!current)}><SlidersHorizontal size={19}/>{activeFilters?<span className="filter-count">{activeFilters}</span>:null}</IconButton></>}/>
+    {filtersOpen?<section className="advanced-filters"><div className="advanced-filters-heading"><div><h2>Filtros</h2><p>Potrero, fecha o tipo de limpieza.</p></div><div className="advanced-filter-actions"><IconButton label="Limpiar filtros" onClick={()=>setFilters({id_potrero:'',id_tipo_limpieza:'',fecha_desde:'',fecha_hasta:''})}><Trash2 size={16}/></IconButton><IconButton label="Cerrar" onClick={()=>setFiltersOpen(false)}><X size={18}/></IconButton></div></div><div className="advanced-filters-grid"><Field label="Potrero"><Select value={filters.id_potrero} onChange={(event)=>setFilters((current)=>({...current,id_potrero:event.target.value}))}><option value="">Todos los potreros</option>{pastures.data?.map((item)=><option key={item.id_potrero} value={item.id_potrero}>{item.nombre}</option>)}</Select></Field><Field label="Tipo de limpieza"><Select value={filters.id_tipo_limpieza} onChange={(event)=>setFilters((current)=>({...current,id_tipo_limpieza:event.target.value}))}><option value="">Todos los tipos</option>{types.data?.filter((item)=>item.activo!==false).map((item)=><option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></Field><Field label="Desde"><Input type="date" value={filters.fecha_desde} onChange={(event)=>setFilters((current)=>({...current,fecha_desde:event.target.value}))}/></Field><Field label="Hasta"><Input type="date" value={filters.fecha_hasta} onChange={(event)=>setFilters((current)=>({...current,fecha_hasta:event.target.value}))}/></Field></div></section>:null}
+    {cleanings.isLoading ? <LoadingState /> : cleanings.isError ? <ErrorState message={(cleanings.error as Error).message} onRetry={() => void cleanings.refetch()} /> : visible.length ? <div className="cleaning-summary-list">{visible.map((item) => {const itemProducts=item.productos??[];const itemOperators=item.operadores??[];const typesText=item.tipos_limpieza?.map((type)=>type.nombre).filter(Boolean).join(', ')||item.tipo_limpieza||'Limpieza pendiente';const unit=item.unidad_aplicacion==='BOMBADAS'?'bombadas':'tanques';const fumigation=typesText.toLocaleLowerCase('es').includes('fumig');return <button type="button" className="cleaning-summary-row" key={item.id_limpieza} onClick={() => setSelected(item)}><span className="cleaning-summary-icon"><MapPin size={19}/></span><span className="cleaning-summary-main"><strong>{item.potrero||'Potrero pendiente'} · {typesText}</strong><small>{formatDate(item.fecha_inicio)}</small><small>{itemOperators.length?itemOperators.map((operator)=>`${operator.nombre}${operator.funcion?` · ${operator.funcion}`:''}`).join(' | '):'Sin operador registrado'}</small>{itemProducts.length?<small className="cleaning-products">{itemProducts.map((product)=>product.producto).join(', ')}</small>:null}{fumigation&&item.cantidad_tanques!=null?<small className="cleaning-dose"><Gauge size={13}/>{formatNumber(item.cantidad_tanques)} {unit}{itemProducts.map((product)=>` · ${product.producto}: ${formatNumber(product.cantidad_por_tanque,4)} ${product.unidad} por unidad · ${formatNumber(product.cantidad_total,4)} ${product.unidad} total`).join('')}</small>:null}</span><Badge tone={item.estado==='COMPLETADO'?'success':item.estado==='CANCELADO'?'danger':'warning'}>{humanizeCode(item.estado||'PENDIENTE')}</Badge><span className="record-row-actions">{hasPermission('LIMPIEZA_ADMINISTRAR')?<IconButton label="Editar limpieza" onClick={(event)=>{event.stopPropagation();editCleaning(item);}}><Edit3 size={16}/></IconButton>:null}<ChevronRight size={18}/></span></button>;})}</div> : <EmptyState icon={Sprout} title="Sin limpiezas registradas" description="Registra trabajos o modifica los filtros." />}
 
     {selected ? <CleaningDetail item={selected} onClose={() => setSelected(null)} onEdit={hasPermission('LIMPIEZA_ADMINISTRAR') ? editCleaning : undefined} /> : null}
 
@@ -157,6 +163,7 @@ export function CleaningsPage() {
 
     {operatorsOpen ? <Modal title="Operadores" wide onClose={() => setOperatorsOpen(false)} footer={<Button variant="ghost" onClick={() => setOperatorsOpen(false)}>Cerrar</Button>}><div className="operator-manager"><div className="form-section"><h3>{operatorForm.id_operador ? 'Editar operador' : 'Nuevo operador'}</h3><div className="form-grid"><Field label="Nombres" required><Input value={operatorForm.nombres} onChange={(event) => setOperatorForm((current) => ({ ...current, nombres: event.target.value }))} /></Field><Field label="Apellidos"><Input value={operatorForm.apellidos} onChange={(event) => setOperatorForm((current) => ({ ...current, apellidos: event.target.value }))} /></Field><Field label="Teléfono"><Input value={operatorForm.telefono} onChange={(event) => setOperatorForm((current) => ({ ...current, telefono: event.target.value }))} /></Field><Field label="Especialidad"><Input value={operatorForm.especialidad} onChange={(event) => setOperatorForm((current) => ({ ...current, especialidad: event.target.value }))} /></Field></div><label className="checkbox"><input type="checkbox" checked={operatorForm.activo} onChange={(event) => setOperatorForm((current) => ({ ...current, activo: event.target.checked }))} />Activo</label><div className="card-actions"><Button variant="ghost" onClick={() => setOperatorForm(emptyOperator())}>Limpiar</Button><Button onClick={() => saveOperator.mutate()} loading={saveOperator.isPending}>Guardar operador</Button></div></div><div className="operator-list">{operators.data?.map((item) => <Card key={item.id_operador} className="operator-card"><div className="operation-card-header"><div className="operation-icon"><UserRound size={21} /></div><div><h3>{item.nombres} {item.apellidos}</h3><span>{item.especialidad || 'Sin especialidad'} · {item.telefono || 'Sin teléfono'}</span></div><Badge tone={item.activo ? 'success' : 'neutral'}>{item.activo ? 'Activo' : 'Inactivo'}</Badge></div><div className="card-actions"><Button variant="ghost" onClick={() => setOperatorForm({ id_operador: item.id_operador, nombres: item.nombres, apellidos: item.apellidos ?? '', telefono: item.telefono ?? '', especialidad: item.especialidad ?? '', activo: item.activo })}><Edit3 size={16} />Editar</Button><Button variant="ghost" onClick={() => setDeleteOperator(item.id_operador)}><Trash2 size={16} />Eliminar</Button></div></Card>)}</div></div></Modal> : null}
     {deleteOperator ? <ConfirmDialog title="Eliminar operador" message="El operador quedará inactivo y se conservará su historial." onClose={() => setDeleteOperator(null)} onConfirm={() => removeOperator.mutate(deleteOperator)} loading={removeOperator.isPending} /> : null}
+    {hasPermission('LIMPIEZA_ADMINISTRAR')?<FloatingActionDock><IconButton label="Nueva limpieza" onClick={()=>{setForm(emptyCleaning());setPhotoFiles([]);setCreating(true);}}><Plus size={23}/></IconButton><IconButton className="secondary-fab" label="Operadores" onClick={()=>setOperatorsOpen(true)}><UsersRound size={22}/></IconButton></FloatingActionDock>:null}
   </div>;
 }
 
@@ -177,11 +184,11 @@ function CleaningDetail({item,onClose,onEdit}:{item:PastureCleaning;onClose:()=>
         <div><small>Capacidad por {singular}</small><strong>{current.capacidad_tanque_litros==null?'—':`${formatNumber(current.capacidad_tanque_litros)} L`}</strong></div>
         <div><small>Área intervenida</small><strong>{current.tipo_area_intervenida === 'PARCIAL' ? 'Parcial' : 'Total'}</strong></div>
       </div>
-      <section><h3>Productos aplicados</h3>{current.productos.length?<div className="cleaning-detail-lines">{current.productos.map((product,index)=><div key={`${current.id_limpieza}-product-${index}`}><strong>{product.producto}</strong><span>{formatNumber(product.cantidad_por_tanque,4)} {product.unidad} por {singular}</span><span><strong>Total utilizado: {formatNumber(product.cantidad_total,4)} {product.unidad}</strong></span>{product.observaciones?<small>{product.observaciones}</small>:null}</div>)}</div>:<p className="muted">No se registraron productos.</p>}</section>
-      <section><h3>Operadores responsables</h3>{current.operadores.length?<div className="cleaning-detail-lines">{current.operadores.map((operator)=><div key={`${current.id_limpieza}-${operator.id_operador}`}><strong>{operator.nombre}</strong><span>{operator.funcion || 'Sin función registrada'}</span>{operator.observaciones?<small>{operator.observaciones}</small>:null}</div>)}</div>:<p className="muted">No se registraron operadores.</p>}</section>
+      <section><h3>Productos aplicados</h3>{(current.productos??[]).length?<div className="cleaning-detail-lines">{(current.productos??[]).map((product,index)=><div key={`${current.id_limpieza}-product-${index}`}><strong>{product.producto}</strong><span>{formatNumber(product.cantidad_por_tanque,4)} {product.unidad} por {singular}</span><span><strong>Total utilizado: {formatNumber(product.cantidad_total,4)} {product.unidad}</strong></span>{product.observaciones?<small>{product.observaciones}</small>:null}</div>)}</div>:<p className="muted">No se registraron productos.</p>}</section>
+      <section><h3>Operadores responsables</h3>{(current.operadores??[]).length?<div className="cleaning-detail-lines">{(current.operadores??[]).map((operator)=><div key={`${current.id_limpieza}-${operator.id_operador}`}><strong>{operator.nombre}</strong><span>{operator.funcion || 'Sin función registrada'}</span>{operator.observaciones?<small>{operator.observaciones}</small>:null}</div>)}</div>:<p className="muted">No se registraron operadores.</p>}</section>
       <section><h3>Fotografías del estado del potrero</h3>{current.imagenes?.length?<div className="record-photo-grid record-photo-gallery">{current.imagenes.map((image,index)=><button className="record-photo-view" type="button" key={image.id_limpieza_imagen} onClick={()=>setViewer(index)} aria-label={`Abrir fotografía ${index+1} del potrero ${current.potrero}`}><img src={image.secure_url} alt={`Estado de ${current.potrero}`}/><span>Fotografía {index+1}</span></button>)}</div>:<p className="muted">No hay fotografías registradas en esta limpieza.</p>}</section>
       <section><h3>Observaciones generales</h3><p>{current.observaciones||'Sin observaciones.'}</p></section>
-    </div>{viewer!==null?<ImageLightbox minimalControls items={current.imagenes.map((image,index)=>({key:image.id_limpieza_imagen??String(index),url:image.secure_url,title:`Limpieza de ${current.potrero}`,subtitle:current.tipo_limpieza,date:current.fecha_inicio,filename:image.nombre_original}))} initialIndex={viewer} onClose={()=>setViewer(null)}/>:null}
+    </div>{viewer!==null?<ImageLightbox minimalControls items={(current.imagenes??[]).map((image,index)=>({key:image.id_limpieza_imagen??String(index),url:image.secure_url,title:`Limpieza de ${current.potrero||'potrero'}`,subtitle:current.tipo_limpieza||'Limpieza',date:current.fecha_inicio,filename:image.nombre_original}))} initialIndex={viewer} onClose={()=>setViewer(null)}/>:null}
   </Modal>;
 }
 

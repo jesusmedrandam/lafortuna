@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, Camera, Mail, Phone, Save, ShieldCheck, Upload, UserRound } from 'lucide-react';
+import { CalendarDays, Camera, KeyRound, Mail, Phone, Save, ShieldCheck, Upload, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { clearSession } from '../../api/storage';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
-import { Badge, Button, Card, ErrorState, Field, Input, LoadingState, PageHeader } from '../../components/ui';
+import { Badge, Button, Card, ErrorState, Field, Input, LoadingState, PageHeader, PasswordInput } from '../../components/ui';
 import type { Profile } from '../../types/api';
 import { formatDateTime, nullIfEmpty } from '../../utils';
 
@@ -24,6 +24,7 @@ export function ProfilePage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const query = useQuery({ queryKey: ['profile'], queryFn: () => apiRequest<Profile>('/auth/me') });
   const [form, setForm] = useState({ nombres: '', apellidos: '', correo: '', telefono: '', fecha_nacimiento: '' });
+  const [passwordForm,setPasswordForm]=useState({ actual:'', nueva:'', confirmar:'' });
 
   useEffect(() => {
     if (query.data) {
@@ -74,6 +75,22 @@ export function ProfilePage() {
       await refreshUser();
     },
     onError: (error) => toast.show((error as ApiError).message, 'error'),
+  });
+
+  const passwordMutation=useMutation({
+    mutationFn:()=>{
+      if(passwordForm.nueva!==passwordForm.confirmar)throw new Error('Las contraseñas nuevas no coinciden.');
+      return apiRequest<{message:string}>('/auth/me/password',{
+        method:'PUT',body:{password_actual:passwordForm.actual,password_nueva:passwordForm.nueva},
+      });
+    },
+    onSuccess:(result)=>{
+      clearSession();
+      window.dispatchEvent(new CustomEvent('mm-session-expired'));
+      toast.show(result.message);
+      navigate('/login',{replace:true});
+    },
+    onError:(error)=>toast.show((error as Error).message,'error'),
   });
 
   if (query.isLoading) return <LoadingState />;
@@ -142,6 +159,22 @@ export function ProfilePage() {
               <Field label="Fecha de nacimiento"><Input type="date" value={form.fecha_nacimiento} onChange={(e) => setForm((x) => ({ ...x, fecha_nacimiento: e.target.value }))} /></Field>
             </div>
             <div className="form-actions"><Button type="submit" loading={mutation.isPending}><Save size={18} />Guardar cambios</Button></div>
+          </form>
+          <div className="profile-security-divider" />
+          <form className="form-stack" onSubmit={(event)=>{event.preventDefault();passwordMutation.mutate();}}>
+            <div className="section-heading">
+              <KeyRound size={20}/>
+              <div><h2>Cambiar contraseña</h2><p>Escribe la contraseña actual y confirma dos veces la nueva.</p></div>
+            </div>
+            <Field label="Contraseña actual" required><PasswordInput autoComplete="current-password" value={passwordForm.actual} onChange={(event)=>setPasswordForm(current=>({...current,actual:event.target.value}))} required/></Field>
+            <div className="form-grid">
+              <Field label="Nueva contraseña" hint="Mínimo 8 caracteres, una letra y un número." required><PasswordInput autoComplete="new-password" minLength={8} value={passwordForm.nueva} onChange={(event)=>setPasswordForm(current=>({...current,nueva:event.target.value}))} required/></Field>
+              <Field label="Confirmar nueva contraseña" required><PasswordInput autoComplete="new-password" minLength={8} value={passwordForm.confirmar} onChange={(event)=>setPasswordForm(current=>({...current,confirmar:event.target.value}))} required/></Field>
+            </div>
+            <div className="form-actions profile-password-actions">
+              <Button type="button" variant="ghost" onClick={()=>navigate(`/recuperar?correo=${encodeURIComponent(profile.correo)}`)}>Olvidé mi contraseña</Button>
+              <Button type="submit" loading={passwordMutation.isPending}><KeyRound size={18}/>Actualizar contraseña</Button>
+            </div>
           </form>
         </Card>
       </div>

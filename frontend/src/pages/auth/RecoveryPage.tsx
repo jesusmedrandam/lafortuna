@@ -1,13 +1,14 @@
 import { useState, type FormEvent } from 'react';
 import { KeyRound } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { Button, Field, Input } from '../../components/ui';
 
 export function RecoveryPage() {
   const navigate = useNavigate();
+  const [searchParams]=useSearchParams();
   const [step, setStep] = useState<'email' | 'reset'>('email');
-  const [form, setForm] = useState({ correo: '', codigo: '', password: '', confirm: '' });
+  const [form, setForm] = useState({ correo: searchParams.get('correo') ?? '', codigo: '', password: '', confirm: '' });
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Edit3, Plus, Trash2 } from 'lucide-react';
+import { ArrowUpDown, BookOpen, Edit3, MapPinned, Plus, Trash2 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, Field, Input, LoadingState, Modal, PageHeader, Select, Textarea } from '../../components/ui';
+import { Badge, Button, CompactToolbar, ConfirmDialog, EmptyState, ErrorState, Field, FloatingActionDock, IconButton, Input, LoadingState, Modal, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
 import type { CatalogItem } from '../../types/api';
 
@@ -41,9 +41,18 @@ export function CatalogsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CatalogForm>(emptyForm);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [descending, setDescending] = useState(false);
 
   useEffect(() => { setOpen(false); setEditingId(null); setForm(emptyForm()); }, [catalog]);
   const title = catalogDefinitions.find(([name]) => name === catalog)?.[1] ?? 'Catálogo';
+  const visibleItems = useMemo(() => {
+    const term = search.trim().toLocaleLowerCase('es');
+    return (query.data ?? []).filter((item) => !term || `${itemLabel(item)} ${String(item.codigo ?? '')} ${String(item.descripcion ?? '')}`.toLocaleLowerCase('es').includes(term)).sort((a, b) => {
+      const result = itemLabel(a).localeCompare(itemLabel(b), 'es', { sensitivity: 'base' });
+      return descending ? -result : result;
+    });
+  }, [descending, query.data, search]);
 
   const fields = useMemo(() => {
     if (catalog === 'unidades') return ['codigo','nombre','simbolo','magnitud'];
@@ -72,9 +81,9 @@ export function CatalogsPage() {
       if (catalog === 'medicamentos') body.id_vias_administracion = form.id_vias_administracion;
       return apiRequest(`/catalogos/${catalog}${editingId ? `/${editingId}` : ''}`, { method: editingId ? 'PATCH' : 'POST', body });
     },
-    onSuccess: () => {
-      localStorage.removeItem(`mm.catalog.${catalog}`);
-      toast.show(editingId ? 'Elemento actualizado.' : 'Elemento creado.');
+    onSuccess: (data) => {
+      const pending = Boolean(data && typeof data === 'object' && (data as Record<string, unknown>).__offline);
+      toast.show(pending ? 'Elemento guardado en este dispositivo; se sincronizará al recuperar conexión.' : editingId ? 'Elemento actualizado.' : 'Elemento creado.');
       setOpen(false); setEditingId(null); setForm(emptyForm());
       void client.invalidateQueries({ queryKey: ['catalog', catalog] });
       void query.refetch();
@@ -83,7 +92,7 @@ export function CatalogsPage() {
   });
   const remove = useMutation({
     mutationFn: (id: string) => apiRequest(`/catalogos/${catalog}/${id}`, { method: 'DELETE' }),
-    onSuccess: () => { localStorage.removeItem(`mm.catalog.${catalog}`); toast.show('Elemento desactivado.'); setDeleteId(null); void client.invalidateQueries({ queryKey: ['catalog', catalog] }); void query.refetch(); },
+    onSuccess: () => { toast.show('Elemento desactivado.'); setDeleteId(null); void client.invalidateQueries({ queryKey: ['catalog', catalog] }); void query.refetch(); },
     onError: (error) => toast.show((error as ApiError).message, 'error'),
   });
 
@@ -106,15 +115,11 @@ export function CatalogsPage() {
     return String(item[field] ?? '—');
   };
 
-  return <div>
-    <PageHeader title="Catálogos" description="Administra las opciones utilizadas en formularios, potreros, sanidad, animales y ventas." action={hasPermission('CATALOGO_ADMINISTRAR') ? <Button onClick={() => { setEditingId(null); setForm(emptyForm()); setOpen(true); }}><Plus size={18} />Nuevo elemento</Button> : undefined} />
-    <div className="catalog-layout">
-      <aside className="catalog-menu">{catalogDefinitions.map(([name, label]) => <button key={name} className={catalog === name ? 'active' : ''} onClick={() => selectCatalog(name)}><BookOpen size={17} /><span>{label}</span></button>)}</aside>
-      <section className="catalog-content">
-        <div className="section-heading-inline catalog-heading"><div><h2>{title}</h2><p className="muted">{query.data?.length ?? 0} elementos registrados</p></div><div className="inline-actions">{catalog === 'categorias-animales' && hasPermission('UBICACION_CONSULTAR') ? <Button variant="ghost" onClick={() => navigate('/ubicaciones')}>Otras propiedades</Button> : null}{hasPermission('CATALOGO_ADMINISTRAR') ? <Button onClick={() => { setEditingId(null); setForm(emptyForm()); setOpen(true); }}><Plus size={17} />Agregar</Button> : null}</div></div>
-        {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : query.data?.length ? <div className="table-card"><div className="table-responsive"><table className="data-table"><thead><tr><th>Nombre</th>{fields.filter((field) => !['nombre','nombre_comercial','descripcion','instrucciones'].includes(field)).slice(0, 3).map((field) => <th key={field}>{field.replace(/^id_/, '').replaceAll('_', ' ')}</th>)}<th>Estado</th>{hasPermission('CATALOGO_ADMINISTRAR') ? <th>Acciones</th> : null}</tr></thead><tbody>{query.data.map((item) => <tr key={itemId(item)}><td><strong>{itemLabel(item)}</strong><small>{String(item.descripcion ?? item.instrucciones ?? item.principio_activo ?? '')}</small></td>{fields.filter((field) => !['nombre','nombre_comercial','descripcion','instrucciones'].includes(field)).slice(0, 3).map((field) => <td key={field}>{displayValue(item, field)}</td>)}<td><Badge tone={item.activo !== false ? 'success' : 'neutral'}>{item.activo !== false ? 'Activo' : 'Inactivo'}</Badge></td>{hasPermission('CATALOGO_ADMINISTRAR') ? <td><div className="inline-actions"><Button variant="ghost" onClick={() => openEdit(item)}><Edit3 size={16} /></Button>{catalog !== 'condiciones-animales' || !item.es_sistema ? <Button variant="ghost" onClick={() => setDeleteId(itemId(item))}><Trash2 size={16} /></Button> : null}</div></td> : null}</tr>)}</tbody></table></div></div> : <EmptyState icon={BookOpen} title={`Sin elementos en ${title.toLowerCase()}`} description="Agrega el primer elemento para utilizarlo en los demás módulos." />}
-      </section>
-    </div>
+  return <div className="module-no-header">
+    <CompactToolbar search={search} onSearch={setSearch} placeholder={`Buscar en ${title.toLowerCase()}…`} count={visibleItems.length} actions={<>{catalog === 'categorias-animales' && hasPermission('UBICACION_CONSULTAR') ? <IconButton label="Otras propiedades" onClick={() => navigate('/ubicaciones')}><MapPinned size={18}/></IconButton> : null}<IconButton label={descending ? 'Orden Z a A' : 'Orden A a Z'} onClick={() => setDescending((value) => !value)}><ArrowUpDown size={18}/></IconButton></>} below={<Select aria-label="Catálogo visible" value={catalog} onChange={(event) => selectCatalog(event.target.value as CatalogName)}>{catalogDefinitions.map(([name, label]) => <option value={name} key={name}>{label}</option>)}</Select>}/>
+    <section className="catalog-content compact-catalog-content">
+      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : visibleItems.length ? <div className="table-card"><div className="table-responsive"><table className="data-table"><thead><tr><th>Nombre</th>{fields.filter((field) => !['nombre','nombre_comercial','descripcion','instrucciones'].includes(field)).slice(0, 3).map((field) => <th key={field}>{field.replace(/^id_/, '').replaceAll('_', ' ')}</th>)}<th>Estado</th>{hasPermission('CATALOGO_ADMINISTRAR') ? <th>Acciones</th> : null}</tr></thead><tbody>{visibleItems.map((item) => <tr key={itemId(item)}><td><strong>{itemLabel(item)}</strong><small>{String(item.descripcion ?? item.instrucciones ?? item.principio_activo ?? '')}</small></td>{fields.filter((field) => !['nombre','nombre_comercial','descripcion','instrucciones'].includes(field)).slice(0, 3).map((field) => <td key={field}>{displayValue(item, field)}</td>)}<td><Badge tone={item.activo !== false ? 'success' : 'neutral'}>{item.activo !== false ? 'Activo' : 'Inactivo'}</Badge></td>{hasPermission('CATALOGO_ADMINISTRAR') ? <td><div className="inline-actions"><Button variant="ghost" onClick={() => openEdit(item)}><Edit3 size={16} /></Button>{catalog !== 'condiciones-animales' || !item.es_sistema ? <Button variant="ghost" onClick={() => setDeleteId(itemId(item))}><Trash2 size={16} /></Button> : null}</div></td> : null}</tr>)}</tbody></table></div></div> : <EmptyState icon={BookOpen} title={`Sin elementos en ${title.toLowerCase()}`} description="Agrega el primer elemento para utilizarlo en los demás módulos." />}
+    </section>
 
     {open ? <Modal title={editingId ? `Editar ${title}` : `Nuevo elemento · ${title}`} onClose={() => setOpen(false)} footer={<><Button variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button><Button onClick={() => save.mutate()} loading={save.isPending}>Guardar</Button></>}><div className="form-stack">{catalog==='medicamentos'?<Field label="Vías de administración" required hint="Puedes seleccionar más de una."><div className="medication-route-selector">{administrationRoutes.data?.filter((item)=>item.activo!==false).map((item)=>{const id=itemId(item);const selected=Array.isArray(form.id_vias_administracion)&&form.id_vias_administracion.includes(id);return <label className={selected?'selected':''} key={id}><input type="checkbox" checked={selected} onChange={()=>setForm((current)=>{const values=Array.isArray(current.id_vias_administracion)?current.id_vias_administracion:[];return {...current,id_vias_administracion:selected?values.filter((value)=>value!==id):[...values,id]};})}/><span>{itemLabel(item)}</span></label>;})}</div></Field>:null}{fields.map((field) => {
       const label = field.replace(/^id_/, '').replaceAll('_', ' ');
@@ -127,6 +132,7 @@ export function CatalogsPage() {
       if (field === 'descripcion' || field === 'instrucciones' || field === 'dosis_sugerida' || field === 'indicaciones') return <Field key={field} label={field==='dosis_sugerida'?'Dosis sugerida':label}><Textarea value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))} /></Field>;
       return <Field key={field} label={label} required={['codigo','nombre','nombre_comercial'].includes(field)}><Input disabled={catalog === 'condiciones-animales' && Boolean(form.es_sistema) && field === 'codigo'} type={field.startsWith('dias_') ? 'number' : 'text'} min={field.startsWith('dias_') ? 0 : undefined} value={String(form[field] ?? '')} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))} /></Field>;
     })}<label className="checkbox"><input type="checkbox" disabled={catalog === 'condiciones-animales' && Boolean(form.es_sistema)} checked={form.activo} onChange={(event) => setForm((current) => ({ ...current, activo: event.target.checked }))} />Activo</label></div></Modal> : null}
+    {hasPermission('CATALOGO_ADMINISTRAR') ? <FloatingActionDock><IconButton label="Nuevo elemento" onClick={() => { setEditingId(null); setForm(emptyForm()); setOpen(true); }}><Plus size={22}/></IconButton></FloatingActionDock> : null}
     {deleteId ? <ConfirmDialog title="Desactivar elemento" message="El elemento quedará inactivo y se conservarán las relaciones históricas." onClose={() => setDeleteId(null)} onConfirm={() => remove.mutate(deleteId)} loading={remove.isPending} /> : null}
   </div>;
 }

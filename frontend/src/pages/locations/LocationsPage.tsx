@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Edit3, MapPinned, Plus, Trash2 } from 'lucide-react';
+import { Edit3, MapPinned, Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
-import { Badge, Card, ConfirmDialog, EmptyState, ErrorState, Field, IconButton, Input, LoadingState, Modal, PageHeader, Select, Textarea, Button } from '../../components/ui';
+import { Badge, Button, Card, CompactToolbar, ConfirmDialog, EmptyState, ErrorState, Field, FloatingActionDock, IconButton, Input, LoadingState, Modal, Select, Textarea } from '../../components/ui';
 import { itemId, itemLabel, useCatalog } from '../../hooks/useCatalog';
 import type { Location } from '../../types/api';
 import { nullIfEmpty, numberOrNull } from '../../utils';
@@ -84,6 +84,8 @@ export function LocationsPage() {
   const [editing, setEditing] = useState<Location | null | undefined>(undefined);
   const [deleting, setDeleting] = useState<Location | null>(null);
   const [category, setCategory] = useState('');
+  const [search,setSearch]=useState('');
+  const [filtersOpen,setFiltersOpen]=useState(false);
   const outsideCategory = String(categories.data?.find((item) => item.codigo === 'FUERA_PROPIEDAD')?.id_categoria_animal ?? categories.data?.find((item) => item.activo !== false)?.id_categoria_animal ?? '');
   const query = useQuery({
     queryKey: ['locations', 'other-properties', category],
@@ -94,14 +96,16 @@ export function LocationsPage() {
     onSuccess: async () => { toast.show('Ubicación desactivada.'); setDeleting(null); await client.invalidateQueries({ queryKey: ['locations'] }); },
     onError: (error) => toast.show((error as ApiError).message, 'error'),
   });
+  const term=search.trim().toLocaleLowerCase();
+  const visible=(query.data??[]).filter((location)=>!term||`${location.nombre} ${location.codigo??''} ${location.descripcion??''} ${location.categoria??''}`.toLocaleLowerCase().includes(term));
 
-  return <div>
-    <PageHeader title="Otras propiedades" description="Registra fincas, terrenos o lugares que no son potreros ni corrales de esta propiedad." action={hasPermission('UBICACION_ADMINISTRAR') ? <IconButton label="Agregar otra propiedad" onClick={() => setEditing(null)}><Plus size={20} /></IconButton> : undefined} />
-    <div className="toolbar"><Select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Todas las categorías</option>{categories.data?.filter((item) => item.activo !== false).map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select></div>
-    {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : query.data?.length === 0 ? <EmptyState icon={MapPinned} title="Sin otras propiedades" description="Registra una finca, terreno o ubicación externa para asignar allí los animales." /> : <div className="record-grid">
-      {query.data?.map((location) => <Card key={location.id_ubicacion} className="record-card"><div className="record-card-header"><div className="record-icon"><MapPinned size={22} /></div><div><h3>{location.nombre}</h3><span>{location.codigo || 'Sin código'}</span></div><Badge tone={location.categoria_codigo === 'FUERA_PROPIEDAD' ? 'warning' : 'info'}>{location.categoria}</Badge></div><div className="record-details"><span><small>Animales actuales</small><strong>{location.total_animales}</strong></span><span><small>Coordenadas</small><strong>{location.latitud != null && location.longitud != null ? `${location.latitud}, ${location.longitud}` : 'Sin registrar'}</strong></span></div><p>{location.descripcion || 'Sin descripción.'}</p>{hasPermission('UBICACION_ADMINISTRAR') ? <div className="record-actions"><IconButton label="Editar ubicación" onClick={() => setEditing(location)}><Edit3 size={17} /></IconButton><IconButton label="Eliminar ubicación" onClick={() => setDeleting(location)}><Trash2 size={17} /></IconButton></div> : null}</Card>)}
+  return <div className="module-no-header">
+    <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar propiedad…" count={visible.length} actions={<IconButton className={category?'active':''} label="Filtrar por categoría" onClick={()=>setFiltersOpen((current)=>!current)}><SlidersHorizontal size={19}/>{category?<span className="filter-count">1</span>:null}</IconButton>} below={filtersOpen?<Select aria-label="Categoría de la propiedad" value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Todas las categorías</option>{categories.data?.filter((item) => item.activo !== false).map((item) => <option key={itemId(item)} value={itemId(item)}>{itemLabel(item)}</option>)}</Select>:undefined}/>
+    {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : visible.length === 0 ? <EmptyState icon={MapPinned} title="Sin otras propiedades" description="Registra una finca o modifica los filtros." /> : <div className="record-grid">
+      {visible.map((location) => <Card key={location.id_ubicacion} className="record-card"><div className="record-card-header"><div className="record-icon"><MapPinned size={22} /></div><div><h3>{location.nombre}</h3><span>{location.codigo || 'Sin código'}</span></div><Badge tone={location.categoria_codigo === 'FUERA_PROPIEDAD' ? 'warning' : 'info'}>{location.categoria}</Badge></div><div className="record-details"><span><small>Animales actuales</small><strong>{location.total_animales}</strong></span><span><small>Coordenadas</small><strong>{location.latitud != null && location.longitud != null ? `${location.latitud}, ${location.longitud}` : 'Sin registrar'}</strong></span></div><p>{location.descripcion || 'Sin descripción.'}</p>{hasPermission('UBICACION_ADMINISTRAR') ? <div className="record-actions"><IconButton label="Editar ubicación" onClick={() => setEditing(location)}><Edit3 size={17} /></IconButton><IconButton label="Eliminar ubicación" onClick={() => setDeleting(location)}><Trash2 size={17} /></IconButton></div> : null}</Card>)}
     </div>}
     {editing !== undefined ? <LocationModal location={editing} defaultCategory={outsideCategory} onClose={() => setEditing(undefined)} /> : null}
     {deleting ? <ConfirmDialog title="Desactivar otra propiedad" message={`Se desactivará ${deleting.nombre} únicamente si ya no contiene potreros, corrales, grupos ni animales activos.`} onClose={() => setDeleting(null)} onConfirm={() => remove.mutate(deleting.id_ubicacion)} loading={remove.isPending} /> : null}
+    {hasPermission('UBICACION_ADMINISTRAR')?<FloatingActionDock><IconButton label="Agregar otra propiedad" onClick={()=>setEditing(null)}><Plus size={23}/></IconButton></FloatingActionDock>:null}
   </div>;
 }
