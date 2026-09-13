@@ -1314,17 +1314,101 @@ async function offlineFallback<T>(path: string): Promise<T> {
   }
   const availabilityMatch=pathWithoutQuery(path).match(/^\/reproduccion\/disponibilidad\/([^/]+)$/);
   if(availabilityMatch){
-    const prefix=`/reproduccion/disponibilidad/${availabilityMatch[1]}?fecha=`;
-    const latest=(await listOfflineCacheEntries(session.user.id))
-      .filter((entry)=>entry.path.startsWith(prefix))
-      .sort((left,right)=>right.savedAt-left.savedAt)[0];
-    if(latest)return await prepareOfflinePayload(path,latest.payload) as T;
+    const local=await getLocalAnimalOperationAvailability<T>(availabilityMatch[1],new URLSearchParams(path.split('?')[1]??'').get('fecha')??new Date().toISOString().slice(0,10));
+    if(local)return local;
   }
   const derived = await derivedOfflineResponse(session.user.id, path);
   if (derived !== null) return derived as T;
   const collection = await offlineCollection(session.user.id, path);
   if (collection) return collection.data as T;
   throw new ApiError(0, 'OFFLINE_NOT_DOWNLOADED', 'Este contenido no está descargado. Conéctate o descárgalo previamente desde Descargas.');
+}
+
+type LocalAvailabilityEntry={permitido:boolean;motivo:string|null};
+type LocalOperationPolicy={propiedades?:Array<{id_propiedad:string;nombre:string;es_principal?:boolean}>;configuracion?:Array<{id_propiedad:string;codigo_operacion:string;permitido:boolean}>};
+type LocalFarmConfiguration={propiedades?:Array<Record<string,unknown>>};
+
+function localAvailability(permitido:boolean,motivo:string):LocalAvailabilityEntry{
+  return{permitido,motivo:permitido?null:motivo};
+}
+
+function elapsedDays(from:string|undefined|null,to:string){
+  if(!from)return Number.POSITIVE_INFINITY;
+  const start=Date.parse(`${from.slice(0,10)}T12:00:00`);const end=Date.parse(`${to.slice(0,10)}T12:00:00`);
+  return Number.isFinite(start)&&Number.isFinite(end)?Math.floor((end-start)/86_400_000):Number.POSITIVE_INFINITY;
+}
+
+function completedMonths(from:string|undefined|null,to:string){
+  if(!from)return Number.POSITIVE_INFINITY;
+  const [startYear,startMonth,startDay]=from.slice(0,10).split('-').map(Number);const [endYear,endMonth,endDay]=to.slice(0,10).split('-').map(Number);
+  if(!startYear||!startMonth||!startDay||!endYear||!endMonth||!endDay)return Number.POSITIVE_INFINITY;
+  return Math.max(0,(endYear-startYear)*12+endMonth-startMonth-(endDay<startDay?1:0));
+}
+
+async function deriveLocalAnimalOperationAvailability(userId:string,animalId:string,date:string):Promise<unknown|null>{
+  const exactAnimal=await getOfflineCache<unknown>(userId,`/animales/${animalId}`);
+  const animal=(exactAnimal&&typeof exactAnimal==='object'&&!Array.isArray(exactAnimal)?unwrapApiData(exactAnimal):null) as Animal|null
+    ??(await loadOfflineAnimals(userId))?.find(item=>item.id_animal===animalId)??null;
+  if(!animal)return null;
+  const [rawPolicy,rawFarm]=await Promise.all([
+    getOfflineCache<unknown>(userId,'/configuracion/operaciones-animales'),
+    getOfflineCache<unknown>(userId,'/configuracion/finca'),
+  ]);
+  const policy=(unwrapApiData(rawPolicy)??{}) as LocalOperationPolicy;
+  const farm=(unwrapApiData(rawFarm)??{}) as LocalFarmConfiguration;
+  const property=policy.propiedades?.find(item=>item.nombre===animal.propiedad)
+    ??policy.propiedades?.find(item=>Boolean(item.es_principal)===Boolean(animal.propiedad_es_principal));
+  const propertyId=property?.id_propiedad;
+  const operationAllowed=(code:string)=>policy.configuracion?.find(item=>item.id_propiedad===propertyId&&item.codigo_operacion===code)?.permitido??true;
+  const farmRules=farm.propiedades?.find(item=>String(item.nombre??'')===String(animal.propiedad??''))
+    ??farm.propiedades?.find(item=>Boolean(item.es_principal)===Boolean(animal.propiedad_es_principal))
+    ??{};
+  const ruleNumber=(key:string,fallback:number)=>Number.isFinite(Number(farmRules[key]))?Number(farmRules[key]):fallback;
+  const active=animal.estado==='ACTIVO';
+  const female=active&&animal.sexo==='HEMBRA';
+  const adult=female&&completedMonths(animal.fecha_nacimiento,date)>=ruleNumber('edad_minima_celo_meses',12);
+  const pregnancies=animal.historial_preneces??[];
+  const activePregnancy=pregnancies.find(item=>item.rol==='VACA'&&item.estado==='CONFIRMADA');
+  const latestBirth=[...(animal.historial_partos??[])].filter(item=>item.rol==='MADRE').sort((a,b)=>String(b.fecha).localeCompare(String(a.fecha)))[0];
+  const latestAbortion=[...(animal.historial_abortos??[])].sort((a,b)=>String(b.fecha).localeCompare(String(a.fecha)))[0];
+  const daysAfterBirth=elapsedDays(latestBirth?.fecha,date);const daysAfterAbortion=elapsedDays(latestAbortion?.fecha,date);
+  const heatRested=daysAfterBirth>=ruleNumber('dias_posparto_para_celo',30)&&daysAfterAbortion>=ruleNumber('dias_posaborto_para_celo',21);
+  const pregnancyRested=daysAfterBirth>=ruleNumber('dias_posparto_para_prenez',45)&&daysAfterAbortion>=ruleNumber('dias_posaborto_para_prenez',30);
+  const inactiveReason=`${animal.nombre} no está activo y no admite nuevas operaciones.`;
+  const femaleReason='Esta operación solo está disponible para hembras activas con la edad configurada.';
+  const action=(code:string,eligible=active,reason=inactiveReason)=>localAvailability(eligible&&operationAllowed(code),eligible?`${code.replaceAll('_',' ').toLowerCase()} no está disponible en la propiedad actual.`:reason);
+  const normalHeat=adult&&!activePregnancy&&heatRested;
+  const falseHeat=adult&&Boolean(activePregnancy)&&Boolean(farmRules.permitir_celo_falso_en_prenez??true)&&heatRested;
+  const canPregnancy=adult&&!activePregnancy&&pregnancyRested;
+  const productionHistory=Boolean(animal.historial_produccion?.length);
+  const recentBirth=Boolean(latestBirth)&&elapsedDays(latestBirth?.fecha,date)<=ruleNumber('dias_maximos_ordeno_posparto',305);
+  const productionRegister=female&&Boolean(animal.en_ordeno)&&recentBirth&&operationAllowed('PRODUCCION_LECHE');
+  const movementCodes=['MOVIMIENTO_UBICACION','MOVIMIENTO_GRUPO','MOVIMIENTO_PROPIEDAD'];
+  return{
+    id_animal:animalId,fecha:date,
+    produccion:{consultar:productionHistory||productionRegister,registrar:productionRegister,motivo:productionRegister?null:'La hembra no está habilitada actualmente para registrar producción.'},
+    aplica_reproduccion:female,id_prenez_confirmada:activePregnancy?.id_prenez??null,
+    celo:{...localAvailability((normalHeat||falseHeat)&&operationAllowed('CELO'),adult?'El celo no está habilitado por el estado reproductivo o la propiedad actual.':femaleReason),solo_falso:falseHeat&&!normalHeat},
+    prenez:localAvailability(canPregnancy&&operationAllowed('PRENEZ'),adult?'La preñez no está habilitada por el estado reproductivo o la propiedad actual.':femaleReason),
+    inseminacion:localAvailability(canPregnancy&&operationAllowed('INSEMINACION_ARTIFICIAL'),adult?'La inseminación no está habilitada por el estado reproductivo o la propiedad actual.':femaleReason),
+    embrion:localAvailability(canPregnancy&&operationAllowed('TRANSFERENCIA_EMBRIONES'),adult?'La implantación no está habilitada por el estado reproductivo o la propiedad actual.':femaleReason),
+    parto:localAvailability(Boolean(activePregnancy)&&operationAllowed('PARTO'),activePregnancy?'El parto no está habilitado en la propiedad actual.':'Primero debe existir una preñez confirmada.'),
+    aborto:localAvailability(Boolean(activePregnancy)&&operationAllowed('ABORTO'),activePregnancy?'El aborto no está habilitado en la propiedad actual.':'Solo se puede registrar un aborto si existe una preñez confirmada.'),
+    movimiento:localAvailability(active&&movementCodes.some(operationAllowed),inactiveReason),
+    sanidad:action('TRATAMIENTO'),pesaje:action('PESAJE'),venta:action('VENTA'),muerte:action('MUERTE'),
+  };
+}
+
+export async function getLocalAnimalOperationAvailability<T>(animalId:string,date:string):Promise<T|null>{
+  const session=loadSession();if(!session?.user)return null;
+  const path=`/reproduccion/disponibilidad/${animalId}?fecha=${date}`;
+  const exact=await getOfflineCache<unknown>(session.user.id,path);
+  if(exact!==null)return await prepareOfflinePayload(path,unwrapApiData(exact)) as T;
+  const prefix=`/reproduccion/disponibilidad/${animalId}?fecha=`;
+  const latest=(await listOfflineCacheEntries(session.user.id)).filter(entry=>entry.path.startsWith(prefix)).sort((left,right)=>right.savedAt-left.savedAt)[0];
+  if(latest)return await prepareOfflinePayload(path,unwrapApiData(latest.payload)) as T;
+  const derived=await deriveLocalAnimalOperationAvailability(session.user.id,animalId,date);
+  return derived===null?null:await prepareOfflinePayload(path,derived) as T;
 }
 
 async function derivedOfflineResponse(userId: string, path: string): Promise<unknown | null> {

@@ -602,6 +602,8 @@ h1, h2, h3, p { margin-top: 0; }
 .catalog-menu button:hover { background: var(--surface-alt); color: var(--primary-dark); }
 .catalog-menu button.active { background: var(--primary-soft); color: var(--primary-dark); }
 .catalog-content { min-width: 0; }
+.catalog-table-card,.catalog-table-card .table-responsive{width:100%;max-width:100%;min-width:0}
+.catalog-data-table td{max-width:260px;overflow-wrap:anywhere}
 .catalog-heading { margin-bottom: 14px; }
 .catalog-heading h2 { margin: 0 0 3px; }
 
@@ -1299,6 +1301,23 @@ body, .shell-main, .page-content, .topbar, .card, .input, .modal { transition: b
 .history-entry small { color: var(--muted); overflow-wrap: anywhere; }
 @media(max-width:760px){.group-detail-summary{grid-template-columns:1fr}.history-entry{grid-template-columns:1fr}}
 @media(max-width:680px){.operation-policy-groups{grid-template-columns:1fr}.operation-policy-layout{max-width:100%}.operation-policy-group .settings-switch-row{grid-template-columns:minmax(0,1fr) auto}}
+
+@media(max-width:760px){
+  .catalog-table-card .table-responsive{overflow:hidden}
+  .catalog-data-table{display:block;width:100%;min-width:0}
+  .catalog-data-table thead{display:none}
+  .catalog-data-table tbody{display:grid;width:100%}
+  .catalog-data-table tr{display:grid;width:100%;min-width:0;grid-template-columns:minmax(0,1fr) auto;gap:7px 12px;padding:12px 13px;border-top:1px solid var(--border)}
+  .catalog-data-table tr:first-child{border-top:0}
+  .catalog-data-table td{display:grid;min-width:0;max-width:100%;padding:0;border:0;overflow-wrap:anywhere}
+  .catalog-data-table .catalog-primary-cell{grid-column:1/-1;gap:2px}
+  .catalog-data-table .catalog-primary-cell small{max-width:100%;white-space:pre-line;overflow-wrap:anywhere}
+  .catalog-data-table .catalog-field-cell{grid-column:1/-1;grid-template-columns:minmax(105px,.42fr) minmax(0,1fr);gap:9px;align-items:start;color:var(--text)}
+  .catalog-data-table .catalog-field-cell::before{content:attr(data-label);color:var(--muted);font-size:.65rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+  .catalog-data-table .catalog-status-cell{grid-column:1;align-self:center;justify-self:start}
+  .catalog-data-table .catalog-action-cell{grid-column:2;align-self:center;justify-self:end}
+  .catalog-data-table .catalog-action-cell .inline-actions{flex-wrap:nowrap}
+}
 
 .reproduction-tabs { margin-bottom: 18px; }
 .reproduction-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }

@@ -132,7 +132,7 @@
   gap: 12px;
 }
 
-.farm-settings-form { display: grid; gap: 17px; }
+.farm-settings-form { padding: 17px; display: grid; gap: 17px; }
 .settings-switch-row {
   min-height: 64px;
   padding: 10px 12px;
@@ -154,7 +154,7 @@
 }
 
 .tick-threshold-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.tick-stage-card { display: grid; gap: 8px; }
+.tick-stage-card { padding: 17px; display: grid; gap: 8px; }
 .tick-stage-card h3 { margin: 0 0 5px; font-size: .92rem; }
 .tick-stage-card > div {
   padding: 9px 10px;
@@ -185,6 +185,7 @@
   .notification-preference-card > .settings-card-icon { width: 40px; height: 40px; }
   .notification-mode-options { grid-column: 1 / 3; }
   .farm-settings-layout { grid-template-columns: 1fr; }
+  .farm-settings-form, .tick-stage-card { padding: 14px; }
   .tick-threshold-grid { grid-template-columns: 1fr; }
   .settings-header-actions { width: 100%; justify-content: space-between; }
   .settings-header-actions .button { flex: 1; }

@@ -35,7 +35,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { apiRequest, ApiError } from '../../api/client';
+import { apiRequest, ApiError, getLocalAnimalOperationAvailability } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
 import {
@@ -136,10 +136,19 @@ export function AnimalDetailPage() {
     queryFn: () => apiRequest<Animal>(`/animales/${id}`),
     enabled: Boolean(id),
   });
+  const availabilityDate=currentDateInput();
   const availability=useQuery({
-    queryKey:['animal',id,'operation-availability',currentDateInput()],
-    queryFn:()=>apiRequest<AnimalOperationAvailability>(`/reproduccion/disponibilidad/${id}?fecha=${currentDateInput()}`),
-    enabled:Boolean(id&&query.data),
+    queryKey:['animal',id,'operation-availability',availabilityDate],
+    queryFn:async()=>{
+      const path=`/reproduccion/disponibilidad/${id}?fecha=${availabilityDate}`;
+      const local=await getLocalAnimalOperationAvailability<AnimalOperationAvailability>(id,availabilityDate);
+      if(local){
+        void apiRequest<AnimalOperationAvailability>(path).then(fresh=>client.setQueryData(['animal',id,'operation-availability',availabilityDate],fresh)).catch(()=>undefined);
+        return local;
+      }
+      return apiRequest<AnimalOperationAvailability>(path);
+    },
+    enabled:Boolean(id),
     staleTime:60_000,
     retry:1,
   });
@@ -322,7 +331,7 @@ export function AnimalDetailPage() {
   const canRegisterBirth=hasPermission('PARTO_ADMINISTRAR')&&availability.data?.parto?.permitido===true;
   const canRegisterAbortion=hasPermission('ABORTO_ADMINISTRAR')&&availability.data?.aborto?.permitido===true;
   const reproductionCanAct=canHeat||canInseminate||canImplantEmbryo||canConfirmPregnancy||canRegisterBirth||canRegisterAbortion;
-  const productionActionVisible=Boolean(animal.en_ordeno)&&((productionCanConsult&&hasPermission('PRODUCCION_CONSULTAR'))||(productionCanRegister&&hasPermission('PRODUCCION_ADMINISTRAR')));
+  const productionActionVisible=(Boolean(animal.en_ordeno)||hasProductionHistory)&&((productionCanConsult&&hasPermission('PRODUCCION_CONSULTAR'))||(productionCanRegister&&hasPermission('PRODUCCION_ADMINISTRAR')));
   const canConsultReproduction=hasPermission('PARTO_CONSULTAR')||hasPermission('ABORTO_CONSULTAR');
   const reproductionActionVisible=reproductionCanAct||(hasReproductionHistory&&canConsultReproduction);
   const currentGallery = gallery[galleryIndex];
