@@ -88,9 +88,9 @@
 }
 .sgb-select-menu button:disabled { opacity: .48; }
 :root[data-theme='dark'] .sgb-select-menu {
-  color: #edf6f1;
-  background: #17231e;
-  border-color: #31443b;
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--border);
 }
 
 /* Pantalla de respaldo ante errores de la interfaz. */

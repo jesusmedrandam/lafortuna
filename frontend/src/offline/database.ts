@@ -242,7 +242,7 @@ function transferableCachePath(path:string){
 
 const transferModuleRules:Array<[string,(path:string)=>boolean]>=[
   ['panel',(path)=>path.startsWith('/dashboard')],
-  ['animales',(path)=>path.startsWith('/animales')],
+  ['animales',(path)=>path.startsWith('/animales')||path.startsWith('/reproduccion/disponibilidad/')],
   ['multimedia',(path)=>path.startsWith('/imagenes')],
   ['lugares',(path)=>['/grupos','/ubicaciones','/potreros','/corrales','/configuracion/operaciones-animales'].some((root)=>path.startsWith(root))],
   ['movimientos',(path)=>path.startsWith('/movimientos')],

@@ -4,6 +4,7 @@ import { getOfflineCache, getOfflineSetting, listOfflineMutations, offlineTransf
 import { userHasPermission } from './permissions';
 import { DOWNLOAD_NOTIFICATION_ID, isWifiConnected, showLocalNotification } from './native';
 import { optimizedCloudinaryMediaUrl, type MediaType } from '../media';
+import { currentDateInput } from '../utils';
 
 export interface DownloadModule {
   id: string;
@@ -255,6 +256,10 @@ export async function downloadSelectedContent(
           collectMediaUrls(cachedDetail, media,detailPath);
           if (descriptor.base === '/animales' && cachedDetail && typeof cachedDetail === 'object') animalDetails.set(id, cachedDetail as Animal);
         }
+        if (descriptor.base === '/animales') details.push({
+          label: 'Acciones disponibles de animales',
+          path: `/reproduccion/disponibilidad/${id}?fecha=${currentDateInput()}`,
+        });
       }
     }
     if (job.path === '/animales?limit=100') {

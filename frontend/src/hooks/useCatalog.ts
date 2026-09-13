@@ -6,11 +6,11 @@ export function useCatalog(name: string, enabled = true) {
   return useQuery({
     queryKey: ['catalog', name],
     queryFn: () => cachedCatalogRequest<CatalogItem[]>(name),
-    select: (value) => Array.isArray(value)
+    select: (value) => (Array.isArray(value)
       ? value
       : value && typeof value === 'object' && Array.isArray((value as { data?: unknown }).data)
         ? (value as { data: CatalogItem[] }).data
-        : [],
+        : []).slice().sort((left,right)=>itemLabel(left).localeCompare(itemLabel(right),'es',{sensitivity:'base'})),
     staleTime: 10 * 60_000,
     gcTime: 24 * 60 * 60_000,
     enabled,

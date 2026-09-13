@@ -1002,9 +1002,9 @@ body { background: var(--page-bg, #f4f7f5); color: var(--text, #17231d); }
 :root[data-theme='dark'] .form-alert-error { background: #421f22; color: #ffb5b5; border-color: #6b3034; }
 :root[data-theme='dark'] .form-alert-success { background: #173b29; color: #9be1b5; border-color: #2f6848; }
 :root[data-theme='dark'] .animal-photo-picker:hover { background: #1d2b24; }
-:root[data-theme='dark'] option { background: #18211d; color: #ecf4ef; }
+:root[data-theme='dark'] option { background: var(--surface); color: var(--text); }
 :root[data-theme='dark'] select,
-:root[data-theme='dark'] select.input { color-scheme: dark; background-color: #18211d; color: #ecf4ef; }
+:root[data-theme='dark'] select.input { color-scheme: dark; background-color: var(--surface); color: var(--text); border-color: var(--border); }
 :root[data-theme='dark'] .app-footer { background: var(--page-bg); color: var(--muted); border-color: var(--border); }
 body, .shell-main, .page-content, .topbar, .card, .input, .modal { transition: background-color .18s ease, color .18s ease, border-color .18s ease; }
 

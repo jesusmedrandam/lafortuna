@@ -1312,6 +1312,14 @@ async function offlineFallback<T>(path: string): Promise<T> {
     }
     return await prepareOfflinePayload(path, normalized) as T;
   }
+  const availabilityMatch=pathWithoutQuery(path).match(/^\/reproduccion\/disponibilidad\/([^/]+)$/);
+  if(availabilityMatch){
+    const prefix=`/reproduccion/disponibilidad/${availabilityMatch[1]}?fecha=`;
+    const latest=(await listOfflineCacheEntries(session.user.id))
+      .filter((entry)=>entry.path.startsWith(prefix))
+      .sort((left,right)=>right.savedAt-left.savedAt)[0];
+    if(latest)return await prepareOfflinePayload(path,latest.payload) as T;
+  }
   const derived = await derivedOfflineResponse(session.user.id, path);
   if (derived !== null) return derived as T;
   const collection = await offlineCollection(session.user.id, path);
