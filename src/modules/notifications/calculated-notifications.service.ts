@@ -199,6 +199,7 @@ async function notifyBirthdays(client: PoolClient, today: string) {
             DATE_PART('year',AGE($1::date,a.fecha_nacimiento))::int edad_anios,
             (DATE_PART('year',AGE($1::date,a.fecha_nacimiento))*12+DATE_PART('month',AGE($1::date,a.fecha_nacimiento)))::int edad_meses,
             CASE
+              WHEN (a.fecha_nacimiento+INTERVAL '15 days')::date=$1::date THEN '15_DIAS'
               WHEN (a.fecha_nacimiento+INTERVAL '1 month')::date=$1::date THEN '1_MES'
               WHEN (a.fecha_nacimiento+INTERVAL '3 months')::date=$1::date THEN '3_MESES'
               WHEN (a.fecha_nacimiento+INTERVAL '6 months')::date=$1::date THEN '6_MESES'
@@ -210,7 +211,8 @@ async function notifyBirthdays(client: PoolClient, today: string) {
      WHERE a.estado='ACTIVO' AND a.deleted_at IS NULL AND a.fecha_nacimiento IS NOT NULL
        AND a.fecha_nacimiento<$1::date
        AND (
-         (a.fecha_nacimiento+INTERVAL '1 month')::date=$1::date
+         (a.fecha_nacimiento+INTERVAL '15 days')::date=$1::date
+         OR (a.fecha_nacimiento+INTERVAL '1 month')::date=$1::date
          OR (a.fecha_nacimiento+INTERVAL '3 months')::date=$1::date
          OR (a.fecha_nacimiento+INTERVAL '6 months')::date=$1::date
          OR (EXTRACT(MONTH FROM a.fecha_nacimiento)=EXTRACT(MONTH FROM $1::date)
@@ -222,13 +224,17 @@ async function notifyBirthdays(client: PoolClient, today: string) {
   for (const row of rows) {
     const months = number(row.edad_meses);
     const years = number(row.edad_anios);
-    const age = years >= 1 ? countLabel(years,'año','años') : countLabel(months,'mes','meses');
+    const fifteenDays = row.hito === '15_DIAS';
+    const age = fifteenDays ? '15 días' : years >= 1 ? countLabel(years,'año','años') : countLabel(months,'mes','meses');
     const dedupe = row.hito === 'ANUAL'
       ? `CALC:CUMPLE:${row.id_animal}:${today.slice(0,4)}`
       : `CALC:CUMPLE:${row.id_animal}:${row.hito}:${today}`;
     await emitNotification(client, {
       tipo: 'CUMPLEANOS_ANIMAL', categoria: 'ANIMALES', prioridad: 'INFO',
-      titulo: `${animalLabel(row)} cumple ${age}`, mensaje: `Fecha de nacimiento: ${shortDate(row.fecha_nacimiento)}.`,
+      titulo: `${animalLabel(row)} cumple ${age}`,
+      mensaje: fifteenDays
+        ? `Ya puede ingresar a pastoreo · Fecha de nacimiento: ${shortDate(row.fecha_nacimiento)}.`
+        : `Fecha de nacimiento: ${shortDate(row.fecha_nacimiento)}.`,
       permiso: 'ANIMAL_CONSULTAR', entidadTipo: 'ANIMAL', entidadId: String(row.id_animal),
       ruta: `/animales/${row.id_animal}`, datos: notificationData({ edad_anios: years, edad_meses: months, fecha_nacimiento: localDate(row.fecha_nacimiento) }, row),
       claveDedupe: dedupe,

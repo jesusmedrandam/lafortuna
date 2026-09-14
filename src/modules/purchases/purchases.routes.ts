@@ -10,6 +10,7 @@ import { requirePermission } from '../../middleware/permission.js';
 import { buildInsert } from '../shared/sql.js';
 import { cache } from '../../services/cache.service.js';
 import { assertPropertyOperationAllowed, principalPropertyId } from '../../services/animal-operation-policy.js';
+import { notifyPurchase } from '../notifications/business-notifications.service.js';
 
 const purchasedAnimal=z.object({
   codigo_arete:z.string().trim().max(60).nullable().optional(),
@@ -121,6 +122,7 @@ purchasesRouter.post('/',requirePermission('COMPRA_ADMINISTRAR'),asyncHandler(as
         valor_unitario:input.valor_unitario,valor_total:total,moneda:input.moneda.toUpperCase(),
         observaciones:input.observaciones??null,registrado_por:req.user!.id,
       }))).rows[0];
+      await notifyPurchase(client,purchase,req.user!.id);
       return {...purchase,animal:input.animal?.nombre??null};
     },req.user!.id);
     cache.forgetModuleVersion('compras');

@@ -9,6 +9,7 @@ const poolMax = Math.max(1, Math.min(env.DATABASE_POOL_MAX, 4));
 export const pool = new Pool({
   connectionString: env.DATABASE_URL,
   max: poolMax,
+  options: '-c timezone=America/Guayaquil',
   ssl: env.DATABASE_SSL ? { rejectUnauthorized: false } : undefined,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000

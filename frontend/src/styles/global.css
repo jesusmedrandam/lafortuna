@@ -619,6 +619,9 @@ h1, h2, h3, p { margin-top: 0; }
 .catalog-summary-row>footer{position:absolute;right:10px;bottom:8px;display:flex;gap:2px}
 .catalog-summary-row:has(>footer){padding-right:88px;min-height:74px}
 .catalog-summary-row>footer .icon-button{width:34px;height:34px;border:0;background:transparent}
+.catalog-summary-row[role="button"]{cursor:pointer;transition:background .16s ease}
+.catalog-summary-row[role="button"]:hover,.catalog-summary-row[role="button"]:focus-visible{background:var(--surface-alt);outline:none}
+.catalog-item-detail .detail-grid strong{white-space:pre-line;overflow-wrap:anywhere}
 .catalog-heading { margin-bottom: 14px; }
 .catalog-heading h2 { margin: 0 0 3px; }
 
@@ -1495,3 +1498,10 @@ body, .shell-main, .page-content, .topbar, .card, .input, .modal { transition: b
 .offline-transfer-prepared>div:first-child{display:flex;align-items:center;gap:10px}.offline-transfer-prepared>div:first-child>svg{flex:0 0 auto;color:var(--primary)}
 .offline-transfer-prepared span{min-width:0;display:grid;gap:2px}.offline-transfer-prepared small{color:var(--muted);overflow-wrap:anywhere}.offline-transfer-prepared .offline-actions{margin:0}
 .offline-media-category-settings{display:grid;gap:10px;padding-top:4px}.offline-media-category-settings>div:first-child{display:grid;gap:3px}.offline-media-category-settings>div:first-child small{color:var(--muted)}.offline-media-category-settings .offline-setting-list{overflow:hidden;border:1px solid var(--border);border-radius:14px}.offline-media-category-settings .offline-setting-row{border:0;border-top:1px solid var(--border);border-radius:0}.offline-media-category-settings .offline-setting-row:first-child{border-top:0}
+.offline-download-choices{min-width:0;border:1px solid var(--border);border-radius:14px;background:var(--surface-alt);overflow:hidden}
+.offline-download-choices>summary{min-height:62px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:14px;cursor:pointer;list-style:none}
+.offline-download-choices>summary::-webkit-details-marker{display:none}
+.offline-download-choices>summary>span{min-width:0;display:grid;gap:3px}
+.offline-download-choices>summary strong{font-size:.88rem}.offline-download-choices>summary small{color:var(--muted);font-size:.74rem}
+.offline-download-choices>summary svg{flex:none;transition:transform .18s ease}.offline-download-choices[open]>summary svg{transform:rotate(180deg)}
+.offline-download-choices-content{padding:0 14px 14px;border-top:1px solid var(--border);background:var(--surface)}

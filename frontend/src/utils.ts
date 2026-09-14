@@ -1,10 +1,21 @@
+export const APP_TIME_ZONE = 'America/Guayaquil';
+
+function dateInAppTimeZone(value: Date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: APP_TIME_ZONE,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
 export function formatDate(value?: string | null) {
   if (!value) return '—';
   const isCalendarDate = /^\d{4}-\d{2}-\d{2}(?:T00:00:00(?:\.000)?Z)?$/.test(value);
   const normalized = isCalendarDate ? `${value.slice(0, 10)}T12:00:00` : value;
   const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('es-EC', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date);
+  return new Intl.DateTimeFormat('es-EC', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: APP_TIME_ZONE }).format(date);
 }
 
 export function dateInputValue(value?: string | null) {
@@ -14,9 +25,7 @@ export function dateInputValue(value?: string | null) {
 }
 
 export function currentDateInput() {
-  const date = new Date();
-  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-  return date.toISOString().slice(0, 10);
+  return dateInAppTimeZone(new Date());
 }
 
 export function formatAge(value?: string | null, reference = new Date()) {
@@ -66,7 +75,7 @@ export function formatDateTime(value?: string | null) {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('es-EC', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  return new Intl.DateTimeFormat('es-EC', { dateStyle: 'medium', timeStyle: 'short', timeZone: APP_TIME_ZONE }).format(date);
 }
 
 export function formatNumber(value?: number | string | null, maximumFractionDigits = 2) {

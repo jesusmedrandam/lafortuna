@@ -39,6 +39,7 @@ export function CatalogsPage() {
   const administrationRoutes = useCatalog('vias');
   const treatmentTypes = useCatalog('tipos-tratamiento');
   const [open, setOpen] = useState(false);
+  const [detailItem, setDetailItem] = useState<CatalogItem | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CatalogForm>(emptyForm);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -46,7 +47,7 @@ export function CatalogsPage() {
   const [descending, setDescending] = useState(false);
   const catalogTabs = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setOpen(false); setEditingId(null); setForm(emptyForm()); }, [catalog]);
+  useEffect(() => { setOpen(false); setDetailItem(null); setEditingId(null); setForm(emptyForm()); }, [catalog]);
   useEffect(() => {
     catalogTabs.current?.querySelector<HTMLElement>('button.active')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
   }, [catalog]);
@@ -132,12 +133,35 @@ export function CatalogsPage() {
     if(catalog==='tipos-producto-compra')return detail('Tipo',displayValue(item,'es_animal'));
     return detail('Descripción',item.descripcion);
   };
+  const fieldLabel=(field:string)=>({
+    codigo:'Código',nombre:'Nombre',descripcion:'Descripción',simbolo:'Símbolo',magnitud:'Magnitud',
+    id_especie:'Especie',requiere_productos:'Requiere productos',id_categoria_producto:'Categoría',
+    nombre_comercial:'Nombre comercial',principio_activo:'Principio activo',fabricante:'Fabricante',
+    id_unidad_predeterminada:'Unidad predeterminada',instrucciones:'Instrucciones',
+    id_tipo_tratamiento:'Tipo de tratamiento',dosis_sugerida:'Dosis sugerida',indicaciones:'Indicaciones',
+    dias_retiro_leche:'Retiro de leche (días)',dias_retiro_carne:'Retiro de carne (días)',
+    id_unidad_venta:'Unidad de venta',id_unidad_complementaria:'Unidad complementaria',
+    contacto:'Contacto',destino:'Destino',es_animal:'Tipo de compra',
+  } as Record<string,string>)[field]??field.replace(/^id_/,'').replaceAll('_',' ');
+  const detailsFor=(item:CatalogItem)=>{
+    const details=fields.map((field)=>({label:fieldLabel(field),value:displayValue(item,field)}));
+    if(catalog==='medicamentos'){
+      const routeNames=Array.isArray(item.vias_administracion)
+        ? item.vias_administracion.map((route)=>typeof route==='object'&&route!==null?String((route as Record<string,unknown>).nombre??''):'').filter(Boolean)
+        : [];
+      const resolvedRoutes=routeNames.length?routeNames:(Array.isArray(item.id_vias_administracion)?item.id_vias_administracion.map((routeId)=>itemLabel(administrationRoutes.data?.find((route)=>itemId(route)===String(routeId))??{nombre:'—'})):[]);
+      details.splice(1,0,{label:'Vías de administración',value:resolvedRoutes.join(', ')||'—'});
+    }
+    return details;
+  };
 
   return <div className="module-no-header">
     <CompactToolbar search={search} onSearch={setSearch} placeholder={`Buscar en ${title.toLowerCase()}…`} count={visibleItems.length} actions={<>{catalog === 'categorias-animales' && hasPermission('UBICACION_CONSULTAR') ? <IconButton label="Otras propiedades" onClick={() => navigate('/ubicaciones')}><MapPinned size={18}/></IconButton> : null}<IconButton label={descending ? 'Orden Z a A' : 'Orden A a Z'} onClick={() => setDescending((value) => !value)}><ArrowUpDown size={18}/></IconButton></>} below={<div ref={catalogTabs} className="compact-scroll-tabs catalog-scroll-tabs" aria-label="Catálogo visible">{orderedCatalogDefinitions.map(([name,label])=><button type="button" className={catalog===name?'active':''} aria-current={catalog===name?'page':undefined} onClick={()=>selectCatalog(name)} key={name}>{label}</button>)}</div>}/>
     <section className="catalog-content compact-catalog-content">
-      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : visibleItems.length ? <div className="catalog-summary-list">{visibleItems.map((item)=>{const summary=summaryFor(item);return <article className="catalog-summary-row" key={itemId(item)}><header><strong>{itemLabel(item)}</strong><Badge tone={item.activo!==false?'success':'neutral'}>{item.activo!==false?'Activo':'Inactivo'}</Badge></header>{summary.length?<dl>{summary.map((entry)=><div key={entry.label}><dt>{entry.label}</dt><dd>{entry.value}</dd></div>)}</dl>:null}{hasPermission('CATALOGO_ADMINISTRAR')?<footer><IconButton label={`Editar ${itemLabel(item)}`} onClick={()=>openEdit(item)}><Edit3 size={16}/></IconButton>{catalog!=='condiciones-animales'||!item.es_sistema?<IconButton label={`Desactivar ${itemLabel(item)}`} onClick={()=>setDeleteId(itemId(item))}><Trash2 size={16}/></IconButton>:null}</footer>:null}</article>;})}</div> : <EmptyState icon={BookOpen} title={`Sin elementos en ${title.toLowerCase()}`} description="Agrega el primer elemento para utilizarlo en los demás módulos." />}
+      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : visibleItems.length ? <div className="catalog-summary-list">{visibleItems.map((item)=>{const summary=summaryFor(item);return <article className="catalog-summary-row" role="button" tabIndex={0} aria-label={`Ver detalles de ${itemLabel(item)}`} key={itemId(item)} onClick={()=>setDetailItem(item)} onKeyDown={(event)=>{if(event.target!==event.currentTarget)return;if(event.key==='Enter'||event.key===' '){event.preventDefault();setDetailItem(item);}}}><header><strong>{itemLabel(item)}</strong><Badge tone={item.activo!==false?'success':'neutral'}>{item.activo!==false?'Activo':'Inactivo'}</Badge></header>{summary.length?<dl>{summary.map((entry)=><div key={entry.label}><dt>{entry.label}</dt><dd>{entry.value}</dd></div>)}</dl>:null}{hasPermission('CATALOGO_ADMINISTRAR')?<footer><IconButton label={`Editar ${itemLabel(item)}`} onClick={(event)=>{event.stopPropagation();openEdit(item);}}><Edit3 size={16}/></IconButton>{catalog!=='condiciones-animales'||!item.es_sistema?<IconButton label={`Desactivar ${itemLabel(item)}`} onClick={(event)=>{event.stopPropagation();setDeleteId(itemId(item));}}><Trash2 size={16}/></IconButton>:null}</footer>:null}</article>;})}</div> : <EmptyState icon={BookOpen} title={`Sin elementos en ${title.toLowerCase()}`} description="Agrega el primer elemento para utilizarlo en los demás módulos." />}
     </section>
+
+    {detailItem?<Modal title={`Detalle · ${title}`} onClose={()=>setDetailItem(null)} footer={<><Button variant="ghost" onClick={()=>setDetailItem(null)}>Cerrar</Button>{hasPermission('CATALOGO_ADMINISTRAR')?<Button variant="secondary" onClick={()=>{const item=detailItem;setDetailItem(null);openEdit(item);}}><Edit3 size={16}/>Editar</Button>:null}</>}><div className="record-detail catalog-item-detail"><div className="record-detail-heading"><div className="record-icon"><BookOpen size={22}/></div><div><h2>{itemLabel(detailItem)}</h2><p>{title}</p></div><Badge tone={detailItem.activo!==false?'success':'neutral'}>{detailItem.activo!==false?'Activo':'Inactivo'}</Badge></div><div className="detail-grid">{detailsFor(detailItem).map((detail)=><div key={detail.label}><small>{detail.label}</small><strong>{detail.value}</strong></div>)}</div></div></Modal>:null}
 
     {open ? <Modal title={editingId ? `Editar ${title}` : `Nuevo elemento · ${title}`} onClose={() => setOpen(false)} footer={<><Button variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button><Button onClick={() => save.mutate()} loading={save.isPending}>Guardar</Button></>}><div className="form-stack">{catalog==='medicamentos'?<Field label="Vías de administración" required hint="Puedes seleccionar más de una."><div className="medication-route-selector">{administrationRoutes.data?.filter((item)=>item.activo!==false).map((item)=>{const id=itemId(item);const selected=Array.isArray(form.id_vias_administracion)&&form.id_vias_administracion.includes(id);return <label className={selected?'selected':''} key={id}><input type="checkbox" checked={selected} onChange={()=>setForm((current)=>{const values=Array.isArray(current.id_vias_administracion)?current.id_vias_administracion:[];return {...current,id_vias_administracion:selected?values.filter((value)=>value!==id):[...values,id]};})}/><span>{itemLabel(item)}</span></label>;})}</div></Field>:null}{fields.map((field) => {
       const label = field.replace(/^id_/, '').replaceAll('_', ' ');

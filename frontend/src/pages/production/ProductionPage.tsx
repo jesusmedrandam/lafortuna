@@ -25,7 +25,7 @@ export function ProductionPage(){
   const navigate=useNavigate();
   const [searchParams,setSearchParams]=useSearchParams();
   const [tab,setTab]=useState<'lactations'|'production'>(searchParams.get('tab')==='lactations'?'lactations':'production');const [date,setDate]=useState(searchParams.get('fecha')??currentDateInput());
-  const [query,setQuery]=useState('');const [filtersOpen,setFiltersOpen]=useState(Boolean(searchParams.get('animal')));const [animalFilter,setAnimalFilter]=useState(searchParams.get('animal')??'');const [fromDate,setFromDate]=useState('');const [toDate,setToDate]=useState('');
+  const [query,setQuery]=useState('');const [filtersOpen,setFiltersOpen]=useState(false);const [animalFilter,setAnimalFilter]=useState(searchParams.get('animal')??'');const [fromDate,setFromDate]=useState('');const [toDate,setToDate]=useState('');
   const [lactationOpen,setLactationOpen]=useState(false);const [lactation,setLactation]=useState<LactationForm>(emptyLactation);
   const [milkOpen,setMilkOpen]=useState(false);const [milk,setMilk]=useState<MilkForm>(emptyMilk);
   const [tankOpen,setTankOpen]=useState(false);const [tank,setTank]=useState<TankForm>(emptyTank);

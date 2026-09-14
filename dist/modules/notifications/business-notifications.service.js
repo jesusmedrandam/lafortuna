@@ -298,14 +298,14 @@ export async function notifyProductSale(database, row, count, actor) {
 }
 export async function notifyPurchase(database, row, actor) {
     const animal = row.id_animal ? await animalContext(database, text(row.id_animal)) : undefined;
-    const context = (await database.query(`SELECT t.nombre tipo,COALESCE(u.simbolo,u.nombre,'unidades') unidad
+    const context = (await database.query(`SELECT t.nombre tipo
      FROM compra c JOIN tipo_producto_compra t ON t.id_tipo_producto_compra=c.id_tipo_producto_compra
-     LEFT JOIN unidad_medida u ON u.id_unidad=c.id_unidad WHERE c.id_compra=$1`, [row.id_compra])).rows[0];
+     WHERE c.id_compra=$1`, [row.id_compra])).rows[0];
     const product = text(row.producto ?? row.animal, text(context?.tipo, 'Compra'));
     return emitBusinessNotification(database, actor, text(row.id_compra), {
         dedupe: 'COMPRA', tipo: 'COMPRA_REGISTRADA', categoria: 'COMPRAS', prioridad: 'INFO',
         titulo: animal ? `${animalLabel(animal)} fue comprado${text(animal.sexo) === 'HEMBRA' ? 'a' : ''}` : `Compra de ${product}`,
-        mensaje: `${animal ? '' : `${decimal(row.cantidad)} ${text(context?.unidad)} · `}${text(row.proveedor, 'Proveedor no indicado')} · ${money(row.valor_total, text(row.moneda, 'USD'))}.`,
+        mensaje: `${animal ? '' : `${decimal(row.cantidad)} · `}${text(row.proveedor, 'Proveedor no indicado')} · ${money(row.valor_total, text(row.moneda, 'USD'))}.`,
         permiso: 'COMPRA_CONSULTAR', entidadTipo: 'COMPRA', ruta: detailRoute('/compras', 'compra', row.id_compra),
         datos: withProfile({ total: number(row.valor_total), moneda: text(row.moneda, 'USD'), id_animal: row.id_animal ?? null }, animal),
     });

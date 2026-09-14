@@ -74,7 +74,7 @@ const notificationDefinitions: Array<{
   descripcion: string;
   icon: LucideIcon;
 }> = [
-  { categoria: 'ANIMALES', nombre: 'Animales', descripcion: 'Muertes, bajas y novedades generales.', icon: Beef },
+  { categoria: 'ANIMALES', nombre: 'Animales y edades', descripcion: 'Hitos de 15 días, 1, 3 y 6 meses, aniversarios, bajas y novedades.', icon: Beef },
   { categoria: 'MOVIMIENTOS', nombre: 'Movimientos', descripcion: 'Cambios de grupo, potrero o propiedad.', icon: Users },
   { categoria: 'PESAJES', nombre: 'Pesajes', descripcion: 'Nuevos controles de peso.', icon: Weight },
   { categoria: 'SANIDAD', nombre: 'Sanidad y garrapatas', descripcion: 'Condiciones, tratamientos y riesgos sanitarios.', icon: Syringe },

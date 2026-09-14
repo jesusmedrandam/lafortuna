@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronRight, CloudDownload, Database, FileUp, HardDrive, RefreshCw, Share2, Trash2, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, CloudDownload, Database, FileUp, HardDrive, RefreshCw, Share2, Trash2, Wifi, WifiOff } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 import { Badge, Button, Card, Field, Modal, PageHeader, PasswordInput } from '../../components/ui';
 import { useToast } from '../../components/ToastContext';
@@ -12,6 +12,7 @@ import { describeOfflineMutation } from '../../offline/descriptions';
 import { hasNetworkConnection } from '../../api/client';
 import { useOffline } from '../../offline/OfflineContext';
 import { DOWNLOAD_NOTIFICATION_ID, showLocalNotification } from '../../offline/native';
+import { APP_TIME_ZONE } from '../../utils';
 
 type DetailPanel = 'queries' | 'storage' | 'pending' | 'failed';
 interface PreparedBackup { name:string;size:number;createdAt:number }
@@ -20,7 +21,7 @@ interface TransferOptionState { moduleCounts:Record<string,number>;mediaCounts:P
 const allMediaCategories=Object.keys(offlineTransferMediaLabels) as OfflineTransferMediaCategory[];
 
 function formatDate(value: number | null) {
-  return value ? new Intl.DateTimeFormat('es-EC', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : 'Nunca';
+  return value ? new Intl.DateTimeFormat('es-EC', { dateStyle: 'medium', timeStyle: 'short', timeZone: APP_TIME_ZONE }).format(new Date(value)) : 'Nunca';
 }
 
 function formatBytes(value: number) {
@@ -287,9 +288,14 @@ export function DownloadsPage() {
 
     <section className="offline-section compact-offline-section">
       <div className="section-heading-inline"><div><h2>Contenido disponible sin conexión</h2></div></div>
-      <div className="offline-setting-list module-settings">{modules.map((module) => <label key={module.id} className="offline-setting-row"><div><strong>{module.label}</strong><span>{module.description}</span></div><span className="switch"><input type="checkbox" checked={selected.includes(module.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...new Set([...current, module.id])] : current.filter((id) => id !== module.id))} /><i /></span></label>)}</div>
-      <label className="offline-select-all"><span>Seleccionar todo</span><span className="switch"><input type="checkbox" checked={modules.length > 0 && selected.length === modules.length} onChange={(event) => setSelected(event.target.checked ? modules.map((module) => module.id) : [])} /><i /></span></label>
-      {selected.includes('multimedia')||selected.includes('animales')?<div className="offline-media-category-settings"><div><strong>Fotos y videos a descargar</strong><small>Elige las categorías que ocuparán espacio en este dispositivo.</small></div><div className="offline-setting-list">{allMediaCategories.map((category)=><label key={category} className="offline-setting-row"><span><strong>{offlineTransferMediaLabels[category]}</strong></span><span className="switch"><input type="checkbox" checked={downloadMedia.includes(category)} onChange={(event)=>setDownloadMedia((current)=>event.target.checked?[...new Set([...current,category])]:current.filter((item)=>item!==category))}/><i/></span></label>)}</div></div>:null}
+      <details className="offline-download-choices">
+        <summary><span><strong>Contenido a descargar</strong><small>{selected.length} de {modules.length} categorías seleccionadas</small></span><ChevronDown size={19}/></summary>
+        <div className="offline-download-choices-content">
+          <div className="offline-setting-list module-settings">{modules.map((module) => <label key={module.id} className="offline-setting-row"><div><strong>{module.label}</strong><span>{module.description}</span></div><span className="switch"><input type="checkbox" checked={selected.includes(module.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...new Set([...current, module.id])] : current.filter((id) => id !== module.id))} /><i /></span></label>)}</div>
+          <label className="offline-select-all"><span>Seleccionar todo</span><span className="switch"><input type="checkbox" checked={modules.length > 0 && selected.length === modules.length} onChange={(event) => setSelected(event.target.checked ? modules.map((module) => module.id) : [])} /><i /></span></label>
+          {selected.includes('multimedia')||selected.includes('animales')?<div className="offline-media-category-settings"><div><strong>Fotos y videos a descargar</strong><small>Elige las categorías que ocuparán espacio en este dispositivo.</small></div><div className="offline-setting-list">{allMediaCategories.map((category)=><label key={category} className="offline-setting-row"><span><strong>{offlineTransferMediaLabels[category]}</strong></span><span className="switch"><input type="checkbox" checked={downloadMedia.includes(category)} onChange={(event)=>setDownloadMedia((current)=>event.target.checked?[...new Set([...current,category])]:current.filter((item)=>item!==category))}/><i/></span></label>)}</div></div>:null}
+        </div>
+      </details>
       {downloading ? <div className="download-progress"><div><span>{progress.label}</span><strong>{percent}%</strong></div><progress max={100} value={percent} /></div> : null}
       <div className="offline-actions"><Button onClick={() => void download()} loading={downloading} disabled={!offline.online || !selected.length}><CloudDownload size={18} />Descargar o actualizar</Button><Button variant="ghost" onClick={() => void clearDownloads()}><Trash2 size={17} />Borrar descargas</Button></div>
     </section>
