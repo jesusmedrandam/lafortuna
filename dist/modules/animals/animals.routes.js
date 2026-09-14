@@ -230,7 +230,7 @@ animalsRouter.get('/', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async
     params.push(p.limit, offset(p.page, p.limit));
     const limitIndex = params.length - 1;
     const offsetIndex = params.length;
-    const result = await pool.query(`SELECT a.*,e.nombre especie,oa.nombre origen,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,
+    const result = await pool.query(`SELECT a.*,a.fecha_nacimiento::text fecha_nacimiento,e.nombre especie,oa.nombre origen,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,
       fn_clasificacion_animal(a.id_animal,CURRENT_DATE) clasificacion_codigo,
       g.nombre grupo,u.nombre ubicacion,pg.nombre propiedad,pg.es_principal propiedad_es_principal,im.secure_url foto_perfil,
       mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
@@ -370,7 +370,7 @@ animalsRouter.delete('/enlaces-publicos/:shareId', requirePermission('ANIMAL_MOD
     return noContent(res);
 }));
 animalsRouter.get('/:id', requirePermission('ANIMAL_CONSULTAR'), asyncHandler(async (req, res) => {
-    const result = await pool.query(`SELECT a.*,e.nombre especie,oa.nombre origen,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
+    const result = await pool.query(`SELECT a.*,a.fecha_nacimiento::text fecha_nacimiento,e.nombre especie,oa.nombre origen,ca.nombre categoria,ca.codigo categoria_codigo,coa.nombre condicion,g.nombre grupo,u.nombre ubicacion,m.nombre madre,p.nombre padre,
       fn_clasificacion_animal(a.id_animal,CURRENT_DATE) clasificacion_codigo,
       mq.nombre marquilla,mq.codigo marquilla_codigo,mq.secure_url marquilla_foto,
       COALESCE((SELECT string_agg(TRIM(CONCAT(mu_u.nombres,' ',mu_u.apellidos)),', ' ORDER BY mu.es_principal DESC,mu_u.nombres,mu_u.apellidos)

@@ -212,7 +212,7 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
       </div>
       <div className="image-lightbox-details">
         <div><strong>{current.title}</strong><small>{[current.subtitle,current.date?formatDate(current.date):null,items.length>1?`${index+1} de ${items.length}`:null].filter(Boolean).join(' · ')}</small></div>
-        {!minimalControls?actions?.(current):null}
+        {actions?.(current)}
       </div>
     </div>
   </div>;
