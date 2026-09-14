@@ -245,6 +245,7 @@ export function MovementsPage() {
       setOriginFiles([]);setDestinationFiles([]);
       void queryClient.invalidateQueries({ queryKey: ['movements'] });
       void queryClient.invalidateQueries({ queryKey: ['movement-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
     onError: (error) => toast.show(error instanceof ApiError ? error.message : (error as Error).message, 'error'),
   });
@@ -273,10 +274,18 @@ export function MovementsPage() {
   const action = useMutation({
     mutationFn: ({ id, kind }: { id: string; kind: 'apply' | 'cancel' }) => apiRequest(`/movimientos/${id}/${kind === 'apply' ? 'aplicar' : 'cancelar'}`, { method: 'POST' }),
     onSuccess: (_, variables) => {
+      const estado = variables.kind === 'apply' ? 'COMPLETADO' : 'CANCELADO';
+      const updateMovement = (movement: Movement) => movement.id_movimiento === variables.id
+        ? { ...movement, estado, aplicado_en: variables.kind === 'apply' ? new Date().toISOString() : movement.aplicado_en }
+        : movement;
+      setSelected((current) => current ? updateMovement(current) : current);
+      queryClient.setQueryData<Movement[]>(['movements'], (current) => current?.map(updateMovement));
+      queryClient.setQueryData<Movement>(['movement-detail', variables.id], (current) => current ? updateMovement(current) : current);
       toast.show(variables.kind === 'apply' ? 'Movimiento aplicado.' : 'Movimiento cancelado.');
       void queryClient.invalidateQueries({ queryKey: ['movements'] });
       void queryClient.invalidateQueries({ queryKey: ['movement-detail'] });
       void queryClient.invalidateQueries({ queryKey: ['animals'] });
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
     onError: (error) => toast.show((error as ApiError).message, 'error'),
   });
@@ -301,9 +310,9 @@ export function MovementsPage() {
   return <div className="module-no-header">
     <CompactToolbar search={list.search} onSearch={list.setSearch} placeholder="Buscar movimiento…" count={list.visible.length} actions={<IconButton label="Cambiar orden" onClick={cycleOrder}><ArrowUpDown size={19}/></IconButton>}/>
 
-    {movements.isLoading ? <LoadingState /> : movements.isError ? <ErrorState message={(movements.error as Error).message} onRetry={() => void movements.refetch()} /> : list.visible.length ? <Card className="record-list movements-record-list"><div className="record-list-head"><span>Movimiento</span><span>Fecha</span><span>Origen y destino</span><span>Estado</span><span /></div>{list.visible.map((movement) => {const pending=Boolean((movement as Movement&{__offline?:boolean;__sync_state?:string}).__offline||(movement as Movement&{__sync_state?:string}).__sync_state==='PENDING');const origin=movementRouteSide(movement,'origin');const destination=movementRouteSide(movement,'destination');return <button type="button" className="record-list-row movement-compact-route" key={movement.id_movimiento} onClick={() => setSelected(movement)}><span><strong>{movementTitle(movement)}</strong><small>{movementAnimalSummary(movement)}</small></span><span><strong>{formatDate(movement.fecha_movimiento)}</strong></span><span><strong className="route-summary"><ArrowLeftRight size={16}/>{origin} → {destination}</strong></span><span className="record-status-with-sync"><Badge tone={movementTone(movement.estado)}>{humanizeCode(movement.estado)}</Badge>{pending?<span className="inline-sync-pending" title="Cambio pendiente de sincronizar"><CloudOff size={15}/></span>:null}</span><span className="record-row-actions">{movement.estado !== 'CANCELADO' && hasPermission('MOVIMIENTO_CREAR') ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); editMovement(movement); }}><Edit3 size={16} />Editar</Button> : null}<ChevronRight size={18} /></span></button>;})}</Card> : <EmptyState icon={ArrowLeftRight} title="Aún no hay movimientos" description="Registra un cambio de grupo, potrero, corral u otra ubicación." />}
+    {movements.isLoading ? <LoadingState /> : movements.isError ? <ErrorState message={(movements.error as Error).message} onRetry={() => void movements.refetch()} /> : list.visible.length ? <Card className="record-list movements-record-list"><div className="record-list-head"><span>Movimiento</span><span>Fecha</span><span>Origen y destino</span><span>Estado</span><span /></div>{list.visible.map((movement) => {const pending=Boolean((movement as Movement&{__offline?:boolean;__sync_state?:string}).__offline||(movement as Movement&{__sync_state?:string}).__sync_state==='PENDING');const origin=movementRouteSide(movement,'origin');const destination=movementRouteSide(movement,'destination');return <button type="button" className="record-list-row movement-compact-route" key={movement.id_movimiento} onClick={() => setSelected(movement)}><span><strong>{movementTitle(movement)}</strong><small>{movementAnimalSummary(movement)}</small></span><span><strong>{formatDate(movement.fecha_movimiento)}</strong></span><span><strong className="route-summary"><ArrowLeftRight size={16}/>{origin} → {destination}</strong></span><span className="record-status-with-sync"><Badge tone={movementTone(movement.estado)}>{humanizeCode(movement.estado)}</Badge>{pending?<span className="inline-sync-pending" title="Cambio pendiente de sincronizar"><CloudOff size={15}/></span>:null}</span><span className="record-row-actions">{movement.estado === 'BORRADOR' && hasPermission('MOVIMIENTO_CREAR') ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); editMovement(movement); }}><Edit3 size={16} />Editar</Button> : null}<ChevronRight size={18} /></span></button>;})}</Card> : <EmptyState icon={ArrowLeftRight} title="Aún no hay movimientos" description="Registra un cambio de grupo, potrero, corral u otra ubicación." />}
 
-    {selected ? <MovementDetailModal item={selected} onClose={() => setSelected(null)} onEdit={selected.estado !== 'CANCELADO' && hasPermission('MOVIMIENTO_CREAR') ? editMovement : undefined} onApply={selected.estado === 'BORRADOR' && hasPermission('MOVIMIENTO_CREAR') ? () => action.mutate({ id: selected.id_movimiento, kind: 'apply' }) : undefined} onCancel={selected.estado === 'BORRADOR' && hasPermission('MOVIMIENTO_ANULAR') ? () => action.mutate({ id: selected.id_movimiento, kind: 'cancel' }) : undefined} loading={action.isPending} /> : null}
+    {selected ? <MovementDetailModal item={selected} onClose={() => setSelected(null)} onEdit={hasPermission('MOVIMIENTO_CREAR') ? editMovement : undefined} onApply={hasPermission('MOVIMIENTO_CREAR') ? () => action.mutate({ id: selected.id_movimiento, kind: 'apply' }) : undefined} onCancel={hasPermission('MOVIMIENTO_ANULAR') ? () => action.mutate({ id: selected.id_movimiento, kind: 'cancel' }) : undefined} loading={action.isPending} /> : null}
 
     {creating ? <Modal title={editing ? 'Editar movimiento' : 'Nuevo movimiento'} wide onClose={() => { setCreating(false); setEditing(null); }} footer={<><Button variant="ghost" onClick={() => { setCreating(false); setEditing(null); }}>Cancelar</Button><Button onClick={() => save.mutate()} loading={save.isPending}>{editing ? 'Guardar cambios' : 'Guardar borrador'}</Button></>}>
       <div className="form-stack">
@@ -422,8 +431,9 @@ function MovementDetailModal({ item, onClose, onEdit, onApply, onCancel, loading
   const navigate=useNavigate();
   const detail=useQuery({queryKey:['movement-detail',item.id_movimiento],queryFn:()=>apiRequest<Movement>(`/movimientos/${item.id_movimiento}`)});
   const current=detail.data??item;
+  const isDraft=current.estado==='BORRADOR';
   const implicated=selectedMovementDetails(current);
-  return <Modal title="Detalle del movimiento" wide onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cerrar</Button>{onCancel ? <Button variant="ghost" onClick={onCancel} loading={loading}><Ban size={17} />Cancelar movimiento</Button> : null}{onEdit ? <Button variant="secondary" onClick={()=>onEdit(current)}><Edit3 size={17} />Editar</Button> : null}{onApply ? <Button onClick={onApply} loading={loading}><CheckCircle2 size={17} />Aplicar</Button> : null}</>}>
+  return <Modal title="Detalle del movimiento" wide onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cerrar</Button>{isDraft&&onCancel ? <Button variant="ghost" onClick={onCancel} loading={loading}><Ban size={17} />Cancelar movimiento</Button> : null}{isDraft&&onEdit ? <Button variant="secondary" onClick={()=>onEdit(current)}><Edit3 size={17} />Editar</Button> : null}{isDraft&&onApply ? <Button onClick={onApply} loading={loading}><CheckCircle2 size={17} />Aplicar</Button> : null}</>}>
     <div className="record-detail">
       <div className="record-detail-heading"><div className="record-icon"><ArrowLeftRight size={22} /></div><div><h2>{movementTitle(current)}</h2><p>{formatDate(current.fecha_movimiento)}</p></div><Badge tone={movementTone(current.estado)}>{humanizeCode(current.estado)}</Badge></div>
       <div className="detail-grid"><div><small>Origen</small><strong>{movementRouteSide(current,'origin')}</strong></div><div><small>Destino</small><strong>{movementRouteSide(current,'destination')}</strong></div><div><small>Seleccionados</small><strong>{current.total_seleccionados}</strong></div><div><small>Candidatos</small><strong>{current.total_candidatos}</strong></div></div>

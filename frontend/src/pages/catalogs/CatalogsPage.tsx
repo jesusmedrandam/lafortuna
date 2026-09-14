@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowUpDown, BookOpen, Edit3, MapPinned, Plus, Trash2 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -44,8 +44,12 @@ export function CatalogsPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [descending, setDescending] = useState(false);
+  const catalogTabs = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setOpen(false); setEditingId(null); setForm(emptyForm()); }, [catalog]);
+  useEffect(() => {
+    catalogTabs.current?.querySelector<HTMLElement>('button.active')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }, [catalog]);
   const title = catalogDefinitions.find(([name]) => name === catalog)?.[1] ?? 'Catálogo';
   const visibleItems = useMemo(() => {
     const term = search.trim().toLocaleLowerCase('es');
@@ -115,13 +119,24 @@ export function CatalogsPage() {
     if (field === 'es_animal') return item[field] ? 'Crea un animal' : 'Producto o insumo';
     return String(item[field] ?? '—');
   };
-  const tableFields=fields.filter((field)=>!['nombre','nombre_comercial','descripcion','instrucciones'].includes(field)).slice(0,3);
-  const fieldLabel=(field:string)=>field.replace(/^id_/,'').replaceAll('_',' ');
+  const summaryFor=(item:CatalogItem):Array<{label:string;value:string}>=>{
+    const present=(value:unknown)=>value!==null&&value!==undefined&&String(value).trim()!=='';
+    const detail=(label:string,value:unknown)=>present(value)?[{label,value:String(value)}]:[];
+    if(catalog==='medicamentos')return[{label:'Dosis sugerida',value:present(item.dosis_sugerida)?String(item.dosis_sugerida):'Sin dosis sugerida'}];
+    if(catalog==='compradores')return[...detail('Contacto',item.contacto),...detail('Destino',item.destino)];
+    if(catalog==='productos-venta')return detail('Unidad de venta',displayValue(item,'id_unidad_venta'));
+    if(catalog==='unidades')return[...detail('Símbolo',item.simbolo),...detail('Magnitud',item.magnitud)];
+    if(catalog==='razas'||catalog==='tipos-grupo')return detail('Especie',displayValue(item,'id_especie'));
+    if(catalog==='tipos-limpieza')return detail('Usa productos',displayValue(item,'requiere_productos'));
+    if(catalog==='agroquimicos')return[...detail('Categoría',displayValue(item,'id_categoria_producto')),...detail('Fabricante',item.fabricante)];
+    if(catalog==='tipos-producto-compra')return detail('Tipo',displayValue(item,'es_animal'));
+    return detail('Descripción',item.descripcion);
+  };
 
   return <div className="module-no-header">
-    <CompactToolbar search={search} onSearch={setSearch} placeholder={`Buscar en ${title.toLowerCase()}…`} count={visibleItems.length} actions={<>{catalog === 'categorias-animales' && hasPermission('UBICACION_CONSULTAR') ? <IconButton label="Otras propiedades" onClick={() => navigate('/ubicaciones')}><MapPinned size={18}/></IconButton> : null}<IconButton label={descending ? 'Orden Z a A' : 'Orden A a Z'} onClick={() => setDescending((value) => !value)}><ArrowUpDown size={18}/></IconButton></>} below={<Select aria-label="Catálogo visible" value={catalog} onChange={(event) => selectCatalog(event.target.value as CatalogName)}>{orderedCatalogDefinitions.map(([name, label]) => <option value={name} key={name}>{label}</option>)}</Select>}/>
+    <CompactToolbar search={search} onSearch={setSearch} placeholder={`Buscar en ${title.toLowerCase()}…`} count={visibleItems.length} actions={<>{catalog === 'categorias-animales' && hasPermission('UBICACION_CONSULTAR') ? <IconButton label="Otras propiedades" onClick={() => navigate('/ubicaciones')}><MapPinned size={18}/></IconButton> : null}<IconButton label={descending ? 'Orden Z a A' : 'Orden A a Z'} onClick={() => setDescending((value) => !value)}><ArrowUpDown size={18}/></IconButton></>} below={<div ref={catalogTabs} className="compact-scroll-tabs catalog-scroll-tabs" aria-label="Catálogo visible">{orderedCatalogDefinitions.map(([name,label])=><button type="button" className={catalog===name?'active':''} aria-current={catalog===name?'page':undefined} onClick={()=>selectCatalog(name)} key={name}>{label}</button>)}</div>}/>
     <section className="catalog-content compact-catalog-content">
-      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : visibleItems.length ? <div className="table-card catalog-table-card"><div className="table-responsive"><table className="data-table catalog-data-table"><thead><tr><th>Nombre</th>{tableFields.map((field)=><th key={field}>{fieldLabel(field)}</th>)}<th>Estado</th>{hasPermission('CATALOGO_ADMINISTRAR')?<th>Acciones</th>:null}</tr></thead><tbody>{visibleItems.map((item)=><tr key={itemId(item)}><td className="catalog-primary-cell"><strong>{itemLabel(item)}</strong><small>{String(item.descripcion??item.instrucciones??item.principio_activo??'')}</small></td>{tableFields.map((field)=><td className="catalog-field-cell" data-label={fieldLabel(field)} key={field}>{displayValue(item,field)}</td>)}<td className="catalog-status-cell" data-label="Estado"><Badge tone={item.activo!==false?'success':'neutral'}>{item.activo!==false?'Activo':'Inactivo'}</Badge></td>{hasPermission('CATALOGO_ADMINISTRAR')?<td className="catalog-action-cell" data-label="Acciones"><div className="inline-actions"><Button variant="ghost" aria-label={`Editar ${itemLabel(item)}`} onClick={()=>openEdit(item)}><Edit3 size={16}/></Button>{catalog!=='condiciones-animales'||!item.es_sistema?<Button variant="ghost" aria-label={`Desactivar ${itemLabel(item)}`} onClick={()=>setDeleteId(itemId(item))}><Trash2 size={16}/></Button>:null}</div></td>:null}</tr>)}</tbody></table></div></div> : <EmptyState icon={BookOpen} title={`Sin elementos en ${title.toLowerCase()}`} description="Agrega el primer elemento para utilizarlo en los demás módulos." />}
+      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} /> : visibleItems.length ? <div className="catalog-summary-list">{visibleItems.map((item)=>{const summary=summaryFor(item);return <article className="catalog-summary-row" key={itemId(item)}><header><strong>{itemLabel(item)}</strong><Badge tone={item.activo!==false?'success':'neutral'}>{item.activo!==false?'Activo':'Inactivo'}</Badge></header>{summary.length?<dl>{summary.map((entry)=><div key={entry.label}><dt>{entry.label}</dt><dd>{entry.value}</dd></div>)}</dl>:null}{hasPermission('CATALOGO_ADMINISTRAR')?<footer><IconButton label={`Editar ${itemLabel(item)}`} onClick={()=>openEdit(item)}><Edit3 size={16}/></IconButton>{catalog!=='condiciones-animales'||!item.es_sistema?<IconButton label={`Desactivar ${itemLabel(item)}`} onClick={()=>setDeleteId(itemId(item))}><Trash2 size={16}/></IconButton>:null}</footer>:null}</article>;})}</div> : <EmptyState icon={BookOpen} title={`Sin elementos en ${title.toLowerCase()}`} description="Agrega el primer elemento para utilizarlo en los demás módulos." />}
     </section>
 
     {open ? <Modal title={editingId ? `Editar ${title}` : `Nuevo elemento · ${title}`} onClose={() => setOpen(false)} footer={<><Button variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button><Button onClick={() => save.mutate()} loading={save.isPending}>Guardar</Button></>}><div className="form-stack">{catalog==='medicamentos'?<Field label="Vías de administración" required hint="Puedes seleccionar más de una."><div className="medication-route-selector">{administrationRoutes.data?.filter((item)=>item.activo!==false).map((item)=>{const id=itemId(item);const selected=Array.isArray(form.id_vias_administracion)&&form.id_vias_administracion.includes(id);return <label className={selected?'selected':''} key={id}><input type="checkbox" checked={selected} onChange={()=>setForm((current)=>{const values=Array.isArray(current.id_vias_administracion)?current.id_vias_administracion:[];return {...current,id_vias_administracion:selected?values.filter((value)=>value!==id):[...values,id]};})}/><span>{itemLabel(item)}</span></label>;})}</div></Field>:null}{fields.map((field) => {

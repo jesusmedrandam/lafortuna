@@ -1,5 +1,5 @@
 import { clearSession, loadSession, saveSession } from './storage';
-import type { Animal, AnimalFilterOptions, ApiFailure, ApiSuccess, AuthTokens, Birth, GenericRecord, Group, Location, MultimediaItem, OwnerOption, SelectableAnimal, TankProduction } from '../types/api';
+import type { Animal, AnimalFilterOptions, ApiFailure, ApiSuccess, AuthTokens, Birth, DashboardSummary, GenericRecord, Group, Location, MultimediaItem, OwnerOption, SelectableAnimal, TankProduction } from '../types/api';
 import {
   addOfflineMutation, emitOfflineChange, getLocalMedia, getLocalMediaByRemoteUrl, getOfflineCache, getOfflineSetting,
   linkLocalMediaToRemote, listOfflineCacheEntries, listOfflineMutations, putLocalMedia, putOfflineCache, putOfflineSetting,
@@ -413,13 +413,17 @@ async function queueOfflineMutation<T>(path: string, options: RequestOptions): P
     throw new ApiError(400, 'OFFLINE_VALIDATION_ERROR', validation.errors.join(' '), { formErrors: validation.errors, fieldErrors: {} });
   }
   await assertNoOfflineMilkProductionDuplicate(session.user.id, path, method, options.body);
+  await assertOfflineMovementActionAllowed(session.user.id, path, method);
 
   const idField = method === 'POST' ? temporaryIdField(path) : null;
   const temporaryId = idField ? `offline-${crypto.randomUUID()}` : undefined;
   const birthChildren = path === '/partos' && options.body && typeof options.body === 'object' && Array.isArray((options.body as { crias?: unknown[] }).crias)
     ? (options.body as { crias: unknown[] }).crias.map(() => `offline-${crypto.randomUUID()}`) : undefined;
   const bodyType: OfflineMutation['bodyType'] = options.body instanceof FormData ? 'form' : options.body === undefined ? 'none' : 'json';
-  const mutationId = crypto.randomUUID();
+  const movementActionPath = method === 'POST' && /^\/movimientos\/[^/]+\/(?:aplicar|cancelar)$/.test(pathWithoutQuery(path)) ? pathWithoutQuery(path) : null;
+  // Una clave determinista evita duplicados incluso ante dos pulsaciones que
+  // alcancen la validación antes de que IndexedDB termine la primera escritura.
+  const mutationId = movementActionPath ? `movement-action:${session.user.id}:${encodeURIComponent(movementActionPath)}` : crypto.randomUUID();
   const storedForm = bodyType === 'form' ? await storedFormEntries(options.body as FormData, session.user.id, mutationId) : null;
   const mutation: OfflineMutation = {
     id: mutationId, userId: session.user.id, path, method, permission,
@@ -484,6 +488,7 @@ async function queueOfflineMutation<T>(path: string, options: RequestOptions): P
   const optimisticMedia = storedForm?.localMediaIds.length
     ? await applyOptimisticMediaMutation(session.user.id, path, optimistic, storedForm.localMediaIds)
     : null;
+  emitOfflineChange();
   if (optimisticMedia?.length) return (optimisticMedia.length === 1 ? optimisticMedia[0] : optimisticMedia) as T;
   return await materializeLocalMedia(optimistic) as T;
 }
@@ -517,6 +522,37 @@ async function assertNoOfflineMilkProductionDuplicate(userId: string, path: stri
     throw new ApiError(409, 'DUPLICATE_MILK_PRODUCTION', `Ya existe una producción para este animal el ${date.slice(0, 10)} en el turno ${shift.toLowerCase()}.`, {
       formErrors: [], fieldErrors: { id_vaca: ['Este registro ya existe en los datos descargados o pendientes.'] },
     });
+  }
+}
+
+async function assertOfflineMovementActionAllowed(userId: string, path: string, method: string) {
+  if (method !== 'POST') return;
+  const match = pathWithoutQuery(path).match(/^\/movimientos\/([^/]+)\/(aplicar|cancelar)$/);
+  if (!match) return;
+  const [, movementId, action] = match;
+  const duplicated = (await listOfflineMutations(userId)).some((mutation) => (
+    mutation.state !== 'FAILED'
+      && mutation.method === 'POST'
+      && pathWithoutQuery(mutation.path) === pathWithoutQuery(path)
+  ));
+  if (duplicated) {
+    throw new ApiError(409, 'MOVEMENT_ACTION_ALREADY_PENDING', action === 'aplicar'
+      ? 'Este movimiento ya fue aplicado en el dispositivo y está pendiente de sincronizar.'
+      : 'Este movimiento ya fue cancelado en el dispositivo y está pendiente de sincronizar.');
+  }
+
+  const entries = await listOfflineCacheEntries(userId);
+  const movement = entries
+    .filter((entry) => pathWithoutQuery(entry.path) === '/movimientos' || pathWithoutQuery(entry.path) === `/movimientos/${movementId}`)
+    .flatMap((entry) => cachedRecords(entry.payload))
+    .find((item) => String(item.id_movimiento ?? '') === movementId);
+  if (!movement) {
+    throw new ApiError(0, 'OFFLINE_MOVEMENT_NOT_DOWNLOADED', 'No se encontró el movimiento en los datos del dispositivo. Actualiza las descargas antes de procesarlo sin conexión.');
+  }
+  if (String(movement.estado ?? '') !== 'BORRADOR') {
+    throw new ApiError(409, 'MOVEMENT_ALREADY_PROCESSED', action === 'aplicar'
+      ? 'Este movimiento ya fue aplicado y no puede aplicarse nuevamente.'
+      : 'Este movimiento ya fue procesado y no puede cancelarse nuevamente.');
   }
 }
 
@@ -1289,6 +1325,209 @@ async function reapplyPendingMutations(userId: string) {
   }
 }
 
+function dashboardLocalDate(value: unknown) {
+  return String(value ?? '').slice(0, 10);
+}
+
+function dashboardToday() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+function dashboardPeriodStart(period: 'day' | 'yesterday' | 'week' | 'month' | 'year', today: string) {
+  const current = new Date(`${today}T12:00:00`);
+  if (period === 'yesterday') current.setDate(current.getDate() - 1);
+  if (period === 'week') current.setDate(current.getDate() - ((current.getDay() + 6) % 7));
+  if (period === 'month') current.setDate(1);
+  if (period === 'year') { current.setMonth(0); current.setDate(1); }
+  return `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+}
+
+function dashboardInPeriod(value: unknown, start: string, end: string) {
+  const date = dashboardLocalDate(value);
+  return Boolean(date && date >= start && date <= end);
+}
+
+function dashboardNumber(value: unknown) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function dashboardRecordActive(record: Record<string, unknown>) {
+  return record.deleted_at == null;
+}
+
+function dashboardOfflineRecord(record: Record<string, unknown>) {
+  return record.__offline === true || record.__sync_state === 'PENDING' || record.__sync_state === 'FAILED';
+}
+
+async function deriveOfflineDashboard(userId: string, baseline: DashboardSummary): Promise<DashboardSummary> {
+  const entries = await listOfflineCacheEntries(userId);
+  const completeSources = new Set((await getOfflineSetting<string[]>(`dashboardCompleteSources:${userId}`)) ?? []);
+  const latestCollection = (root: string) => {
+    const entry = entries
+      .filter((item) => pathWithoutQuery(item.path) === root)
+      .sort((left, right) => right.savedAt - left.savedAt)[0];
+    return entry ? dataArray<Record<string, unknown>>(entry.payload) : null;
+  };
+  const today = dashboardToday();
+  const yesterday = dashboardPeriodStart('yesterday', today);
+  const week = dashboardPeriodStart('week', today);
+  const month = dashboardPeriodStart('month', today);
+  const year = dashboardPeriodStart('year', today);
+  const next: DashboardSummary = {
+    ...baseline,
+    animales: { ...baseline.animales, grupos: [...(baseline.animales.grupos ?? [])] },
+    ingresos: { ...baseline.ingresos, conceptos: [...(baseline.ingresos.conceptos ?? [])] },
+    egresos: { ...baseline.egresos }, ventas: { ...baseline.ventas }, produccion: { ...baseline.produccion },
+    tratamientos: { ...baseline.tratamientos }, traslados: { ...baseline.traslados }, potreros: { ...baseline.potreros },
+    grupos: { ...baseline.grupos }, reproduccion: { ...baseline.reproduccion }, sexo: { ...baseline.sexo },
+  };
+  const sourceReady = (root: string, records: Record<string, unknown>[] | null) => Boolean(records
+    && (completeSources.has(root) || records.some(dashboardOfflineRecord)));
+
+  const animals = await loadOfflineAnimals(userId);
+  const animalsReady = Boolean(animals && (completeSources.has('/animales') || animals.some((item) => dashboardOfflineRecord(item as unknown as Record<string, unknown>))));
+  if (animals && animalsReady) {
+    const current = animals.filter((item) => item && (item as unknown as Record<string, unknown>).deleted_at == null);
+    const active = current.filter((item) => item.estado === 'ACTIVO');
+    const inProperty = current.filter((item) => item.categoria_codigo === 'EN_PROPIEDAD');
+    const principal = active.filter((item) => item.categoria_codigo === 'EN_PROPIEDAD');
+    const classified = (code: string) => principal.filter((item) => item.clasificacion_codigo === code).length;
+    next.animales = {
+      ...next.animales,
+      en_propiedad: inProperty.length,
+      fuera_propiedad: current.filter((item) => item.categoria_codigo === 'FUERA_PROPIEDAD').length,
+      activos: active.length,
+      inactivos: current.length - active.length,
+      principal_total: principal.length,
+      vacas: classified('VACA'), vaconas: classified('VACONA'), toros: classified('TORO'), toretes: classified('TORETE'),
+      terneras: classified('TERNERA'), terneros: classified('TERNERO'),
+      hembras: principal.filter((item) => item.sexo === 'HEMBRA').length,
+      machos: principal.filter((item) => item.sexo === 'MACHO').length,
+    };
+    next.sexo = { hembras: next.animales.hembras, machos: next.animales.machos };
+  }
+
+  const groups = latestCollection('/grupos');
+  if (groups && sourceReady('/grupos', groups)) {
+    const currentGroups = groups.filter((item) => dashboardRecordActive(item) && item.activo !== false);
+    const activeAnimals = (animals ?? []).filter((item) => item.estado === 'ACTIVO');
+    next.grupos = {
+      total: currentGroups.length,
+      con_animales: animalsReady ? new Set(activeAnimals.map((item) => item.id_grupo_actual).filter(Boolean)).size : next.grupos.con_animales,
+      animales_agrupados: animalsReady ? activeAnimals.filter((item) => Boolean(item.id_grupo_actual)).length : next.grupos.animales_agrupados,
+    };
+    if (animalsReady) next.animales.grupos = currentGroups
+      .filter((item) => item.propiedad_es_principal !== false)
+      .map((item) => ({ id_grupo: String(item.id_grupo ?? ''), nombre: String(item.nombre ?? 'Grupo'), total: activeAnimals.filter((animal) => animal.id_grupo_actual === item.id_grupo).length }))
+      .sort((left, right) => left.nombre.localeCompare(right.nombre, 'es', { sensitivity: 'base' }));
+  }
+
+  const animalSales = latestCollection('/ventas');
+  const productSales = latestCollection('/ventas/productos');
+  if (animalSales && productSales && (sourceReady('/ventas', animalSales) || sourceReady('/ventas/productos', productSales))) {
+    const completed = (record: Record<string, unknown>) => dashboardRecordActive(record)
+      && (record.estado === 'COMPLETADA' || (dashboardOfflineRecord(record) && record.estado !== 'ANULADA'));
+    const validAnimals = (animalSales ?? []).filter(completed);
+    const validProducts = (productSales ?? []).filter(completed);
+    const all: Array<Record<string, unknown> & { concept: string }> = [...validAnimals.map((item) => ({ ...item, concept: 'VENTA_ANIMALES' })), ...validProducts.map((item) => ({ ...item, concept: 'VENTA_PRODUCTOS' }))];
+    const totalFor = (start: string) => all.filter((item) => dashboardInPeriod(item.fecha_venta, start, today)).reduce((sum, item) => sum + dashboardNumber(item.precio_total), 0);
+    const countFor = (start: string) => all.filter((item) => dashboardInPeriod(item.fecha_venta, start, today)).length;
+    next.ingresos = {
+      semana: totalFor(week), mes: totalFor(month), anio: totalFor(year),
+      conceptos: [
+        { codigo: 'VENTA_ANIMALES', nombre: 'Venta de animales', semana: validAnimals.filter((item) => dashboardInPeriod(item.fecha_venta, week, today)).reduce((sum, item) => sum + dashboardNumber(item.precio_total), 0), mes: validAnimals.filter((item) => dashboardInPeriod(item.fecha_venta, month, today)).reduce((sum, item) => sum + dashboardNumber(item.precio_total), 0), anio: validAnimals.filter((item) => dashboardInPeriod(item.fecha_venta, year, today)).reduce((sum, item) => sum + dashboardNumber(item.precio_total), 0) },
+        { codigo: 'VENTA_PRODUCTOS', nombre: 'Venta de productos', semana: validProducts.filter((item) => dashboardInPeriod(item.fecha_venta, week, today)).reduce((sum, item) => sum + dashboardNumber(item.precio_total), 0), mes: validProducts.filter((item) => dashboardInPeriod(item.fecha_venta, month, today)).reduce((sum, item) => sum + dashboardNumber(item.precio_total), 0), anio: validProducts.filter((item) => dashboardInPeriod(item.fecha_venta, year, today)).reduce((sum, item) => sum + dashboardNumber(item.precio_total), 0) },
+      ],
+    };
+    next.ventas = {
+      semana: countFor(week), mes: countFor(month), anio: countFor(year),
+      ventas_animales_mes: validAnimals.filter((item) => dashboardInPeriod(item.fecha_venta, month, today)).length,
+      animales_vendidos_mes: validAnimals.filter((item) => dashboardInPeriod(item.fecha_venta, month, today)).reduce((sum, item) => sum + (Array.isArray(item.animales) ? item.animales.length : 0), 0),
+      ventas_productos_mes: validProducts.filter((item) => dashboardInPeriod(item.fecha_venta, month, today)).length,
+    };
+  }
+
+  const purchases = latestCollection('/compras');
+  if (purchases && sourceReady('/compras', purchases)) {
+    const valid = purchases.filter(dashboardRecordActive);
+    const value = (item: Record<string, unknown>) => item.valor_total == null
+      ? dashboardNumber(item.cantidad || 1) * dashboardNumber(item.valor_unitario)
+      : dashboardNumber(item.valor_total);
+    const total = (start: string) => valid.filter((item) => dashboardInPeriod(item.fecha_compra, start, today)).reduce((sum, item) => sum + value(item), 0);
+    next.egresos = { semana: total(week), mes: total(month), anio: total(year) };
+  }
+
+  const productions = latestCollection('/registros/producciones');
+  const tankProductions = latestCollection('/registros/produccion-tanque');
+  if (productions && tankProductions && (sourceReady('/registros/producciones', productions) || sourceReady('/registros/produccion-tanque', tankProductions))) {
+    const valid = (productions ?? []).filter(dashboardRecordActive);
+    const tanks = (tankProductions ?? []).filter(dashboardRecordActive);
+    const liters = (start: string, end = today) => valid.filter((item) => dashboardInPeriod(item.fecha_produccion, start, end)).reduce((sum, item) => sum + dashboardNumber(item.litros), 0);
+    const todayRows = valid.filter((item) => dashboardInPeriod(item.fecha_produccion, today, today));
+    next.produccion = {
+      hoy: liters(today), ayer: liters(yesterday, yesterday), semana: liters(week), mes: liters(month),
+      vacas_hoy: new Set(todayRows.map((item) => String(item.id_vaca ?? '')).filter(Boolean)).size,
+      promedio_vaca_hoy: todayRows.length ? todayRows.reduce((sum, item) => sum + dashboardNumber(item.litros), 0) / todayRows.length : 0,
+      tanque_hoy: tanks.filter((item) => dashboardInPeriod(item.fecha_produccion, today, today)).reduce((sum, item) => sum + dashboardNumber(item.litros), 0),
+    };
+  }
+
+  const treatments = latestCollection('/registros/tratamientos');
+  if (treatments && sourceReady('/registros/tratamientos', treatments)) {
+    const valid = treatments.filter(dashboardRecordActive);
+    const within = (start: string) => valid.filter((item) => dashboardInPeriod(item.fecha_aplicacion, start, today));
+    const monthly = within(month);
+    next.tratamientos = {
+      hoy: within(today).length, semana: within(week).length, mes: monthly.length,
+      animales_mes: new Set(monthly.map((item) => String(item.id_animal ?? '')).filter(Boolean)).size,
+      medicamentos_mes: new Set(monthly.map((item) => String(item.id_medicamento ?? '')).filter(Boolean)).size,
+    };
+  }
+
+  const movements = latestCollection('/movimientos');
+  if (movements && sourceReady('/movimientos', movements)) {
+    const valid = movements.filter((item) => dashboardRecordActive(item)
+      && (item.estado === 'COMPLETADO' || (dashboardOfflineRecord(item) && item.estado === 'BORRADOR')));
+    const within = (start: string) => valid.filter((item) => dashboardInPeriod(item.fecha_movimiento, start, today));
+    const monthly = within(month);
+    const countType = (type: string) => monthly.filter((item) => item.tipo_movimiento === type).length;
+    const animalIds = new Set(monthly.flatMap((item) => (Array.isArray(item.detalles) ? item.detalles : Array.isArray(item.animales) ? item.animales : [])
+      .filter((detail) => detail && typeof detail === 'object' && (detail as Record<string, unknown>).seleccionado !== false)
+      .map((detail) => String((detail as Record<string, unknown>).id_animal ?? '')).filter(Boolean)));
+    next.traslados = {
+      semana: within(week).length, mes: monthly.length, anio: within(year).length,
+      rotaciones_mes: countType('UBICACION'), cambios_grupo_mes: countType('GRUPO'), propiedades_mes: countType('PROPIEDAD'), combinados_mes: countType('COMBINADO'),
+      grupos_completos_mes: monthly.filter((item) => item.modo_seleccion === 'TODOS' || item.modo_seleccion === 'GRUPO').length,
+      selecciones_manuales_mes: monthly.filter((item) => item.modo_seleccion === 'SELECCION_MANUAL').length,
+      animales_mes: animalIds.size,
+    };
+  }
+
+  const pastures = latestCollection('/potreros');
+  if (pastures && sourceReady('/potreros', pastures)) {
+    const valid = pastures.filter((item) => dashboardRecordActive(item) && item.activo !== false);
+    const occupiedIds = new Set((animals ?? []).filter((item) => item.estado === 'ACTIVO').map((item) => item.id_ubicacion_actual).filter(Boolean));
+    const occupied = animalsReady ? valid.filter((item) => occupiedIds.has(String(item.id_ubicacion ?? ''))).length : next.potreros.ocupados;
+    next.potreros = { total: valid.length, ocupados: occupied, descanso: animalsReady ? Math.max(0, valid.length - occupied) : next.potreros.descanso };
+  }
+
+  const heats = latestCollection('/reproduccion/celos');
+  const pregnancies = latestCollection('/reproduccion/preneces');
+  const upcomingBirths = latestCollection('/reproduccion/proximos-partos');
+  const births = latestCollection('/partos');
+  if (sourceReady('/reproduccion/celos', heats) || sourceReady('/reproduccion/preneces', pregnancies) || sourceReady('/reproduccion/proximos-partos', upcomingBirths) || sourceReady('/partos', births)) {
+    next.reproduccion = {
+      celos_abiertos: heats && sourceReady('/reproduccion/celos', heats) ? heats.filter((item) => dashboardRecordActive(item) && (!item.fecha_fin || dashboardLocalDate(item.fecha_fin) >= today)).length : next.reproduccion.celos_abiertos,
+      preneces_confirmadas: pregnancies && sourceReady('/reproduccion/preneces', pregnancies) ? pregnancies.filter((item) => dashboardRecordActive(item) && item.estado === 'CONFIRMADA').length : next.reproduccion.preneces_confirmadas,
+      proximos_partos: upcomingBirths && sourceReady('/reproduccion/proximos-partos', upcomingBirths) ? upcomingBirths.filter((item) => dashboardRecordActive(item) && item.estado === 'PENDIENTE').length : next.reproduccion.proximos_partos,
+      partos_anio: births && sourceReady('/partos', births) ? births.filter((item) => dashboardRecordActive(item) && dashboardInPeriod(item.fecha_parto, year, today)).length : next.reproduccion.partos_anio,
+    };
+  }
+  return next;
+}
+
 async function offlineFallback<T>(path: string): Promise<T> {
   const session = loadSession();
   if (!session?.user) throw new ApiError(0, 'OFFLINE_NO_SESSION', 'Inicia sesión con conexión antes de usar el modo sin conexión.');
@@ -1300,6 +1539,7 @@ async function offlineFallback<T>(path: string): Promise<T> {
   if (cached !== null) {
     const normalized = unwrapApiData(cached);
     if (normalized !== cached) await putOfflineCache(session.user.id, path, normalized);
+    if (pathWithoutQuery(path) === '/dashboard/resumen') return await deriveOfflineDashboard(session.user.id, normalized as DashboardSummary) as T;
     if (path === '/animales/opciones/propietarios' && Array.isArray(normalized)) {
       const sanitized = normalized.filter((item) => Boolean(
         item && typeof item === 'object'
@@ -1605,6 +1845,13 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 }
 
+export async function dashboardSummaryRequest(): Promise<DashboardSummary> {
+  const summary = await apiRequest<DashboardSummary>('/dashboard/resumen');
+  const session = loadSession();
+  if (!isAndroidOfflineEnabled() || !session?.user) return summary;
+  return deriveOfflineDashboard(session.user.id, summary);
+}
+
 export async function apiRequestWithMeta<T>(path: string, options: RequestOptions = {}) {
   if (isAndroidOfflineEnabled() && getConnectionQuality() !== 'stable') {
     const session = loadSession();
@@ -1845,7 +2092,20 @@ export async function syncOfflineMutations(force = false): Promise<{ synced: num
     const session = loadSession();
     if (!force && Date.now() < nextAutomaticSyncAt) return { synced: 0, failed: 0 };
     if (!session?.user || !(await verifyServerConnection(true))) return { synced: 0, failed: 0 };
-    const queue = await listOfflineMutations(session.user.id);
+    const storedQueue = await listOfflineMutations(session.user.id);
+    const movementActions = new Set<string>();
+    const queue: OfflineMutation[] = [];
+    for (const mutation of storedQueue) {
+      const key = mutation.method === 'POST' && /^\/movimientos\/[^/]+\/(?:aplicar|cancelar)$/.test(pathWithoutQuery(mutation.path))
+        ? `${mutation.method}:${pathWithoutQuery(mutation.path)}`
+        : null;
+      if (key && movementActions.has(key)) {
+        await removeOfflineMutation(mutation.id);
+        continue;
+      }
+      if (key) movementActions.add(key);
+      queue.push(mutation);
+    }
     if (!queue.length) {
       transientSyncFailures = 0;
       nextAutomaticSyncAt = 0;

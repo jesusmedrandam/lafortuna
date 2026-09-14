@@ -14,7 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { apiRequest, ApiError } from '../../api/client';
+import { apiRequest, ApiError, dashboardSummaryRequest } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/ToastContext';
 import { Button, Card, ErrorState, LoadingState, Modal } from '../../components/ui';
@@ -64,7 +64,7 @@ const modules: ModuleDefinition[] = [
     { key: 'hoy', label: 'Hoy' }, { key: 'semana', label: 'Esta semana' }, { key: 'mes', label: 'Este mes' },
     { key: 'animales_mes', label: 'Animales tratados este mes', default:false }, { key: 'medicamentos_mes', label: 'Medicamentos usados este mes', default:false },
   ] },
-  { key: 'traslados', label: 'Traslados', description: 'Movimientos completados', icon: ArrowRightLeft, route: '/movimientos', permission: 'MOVIMIENTO_CONSULTAR', tone: 'blue', metrics: [
+  { key: 'traslados', label: 'Traslados', description: 'Aplicados y borradores locales', icon: ArrowRightLeft, route: '/movimientos', permission: 'MOVIMIENTO_CONSULTAR', tone: 'blue', metrics: [
     { key: 'semana', label: 'Esta semana' }, { key: 'mes', label: 'Este mes' }, { key: 'anio', label: 'Este año' },
     { key: 'rotaciones_mes', label: 'Rotaciones de potrero este mes', default:false }, { key: 'cambios_grupo_mes', label: 'Cambios de grupo este mes', default:false }, { key: 'propiedades_mes', label: 'Traslados de propiedad este mes', default:false }, { key: 'combinados_mes', label: 'Cambios combinados este mes', default:false }, { key: 'grupos_completos_mes', label: 'Grupos completos este mes', default:false }, { key: 'selecciones_manuales_mes', label: 'Selecciones de animales este mes', default:false }, { key: 'animales_mes', label: 'Animales trasladados este mes', default:false },
   ] },
@@ -210,7 +210,7 @@ export function DashboardPage() {
   const client = useQueryClient();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draft, setDraft] = useState<DashboardConfiguration>({});
-  const query = useQuery({ queryKey: ['dashboard'], queryFn: () => apiRequest<DashboardSummary>('/dashboard/resumen'), staleTime: 60_000 });
+  const query = useQuery({ queryKey: ['dashboard'], queryFn: dashboardSummaryRequest, staleTime: 60_000 });
   const preferences = useQuery({ queryKey: ['dashboard', 'preferences'], queryFn: () => apiRequest<{ configuracion: DashboardConfiguration | null }>('/dashboard/preferencias') });
   const allowedModules = useMemo(() => modules.filter((module) => hasPermission(module.permission)), [hasPermission]);
   const savedConfiguration = preferences.data?.configuracion;
@@ -222,6 +222,12 @@ export function DashboardPage() {
   // currentConfiguration es derivada y solo se copia al abrir el modal.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsOpen]);
+
+  useEffect(() => {
+    const refreshLocalSummary = () => { void client.invalidateQueries({ queryKey: ['dashboard'] }); };
+    window.addEventListener('sgb-offline-change', refreshLocalSummary);
+    return () => window.removeEventListener('sgb-offline-change', refreshLocalSummary);
+  }, [client]);
 
   useEffect(() => {
     if (searchParams.get('ajustes_panel') !== '1') return;

@@ -23,7 +23,7 @@ export const catalogNames = [
 ] as const;
 
 export const downloadModules: DownloadModule[] = [
-  { id: 'panel', label: 'Panel', description: 'Indicadores, preferencias y reglas visibles.', permissions: ['DASHBOARD_CONSULTAR'], endpoints: ['/dashboard/resumen', '/dashboard/preferencias', '/configuracion/finca', '/configuracion/operaciones-visibles'] },
+  { id: 'panel', label: 'Panel', description: 'Indicadores actualizables, preferencias, reglas y datos permitidos para recalcular el resumen sin conexión.', permissions: ['DASHBOARD_CONSULTAR'], endpoints: ['/dashboard/resumen', '/dashboard/preferencias', '/configuracion/finca', '/configuracion/operaciones-visibles'] },
   { id: 'animales', label: 'Animales', description: 'Listado, perfiles, novedades, filtros y fotografías vinculadas.', permissions: ['ANIMAL_CONSULTAR'], endpoints: ['/animales?limit=100', '/animales/opciones/filtros', '/animales/opciones/propietarios', '/animales/novedades'], catalogs: ['categorias-animales', 'condiciones-animales', 'especies', 'origenes', 'colores', 'razas'] },
   { id: 'multimedia', label: 'Multimedia', description: 'Fotos, videos, filtros, animales y etiquetas relacionadas.', permissions: ['IMAGEN_CONSULTAR'], endpoints: ['/imagenes/multimedia?page=1&limit=100', '/animales?limit=100', '/animales/opciones/filtros'], catalogs: ['etiquetas-multimedia', 'tipos-actividad'] },
   { id: 'lugares', label: 'Grupos y ubicaciones', description: 'Grupos, potreros, corrales, propiedades y opciones de edición.', permissions: ['GRUPO_CONSULTAR', 'POTRERO_CONSULTAR', 'CORRAL_CONSULTAR', 'UBICACION_CONSULTAR'], endpoints: ['/grupos?limit=100', '/ubicaciones', '/potreros', '/corrales', '/configuracion/operaciones-visibles'], catalogs: ['tipos-grupo', 'categorias-animales', 'especies', 'pastos', 'usos-potrero', 'tipos-corral', 'unidades'] },
@@ -201,8 +201,25 @@ export async function downloadSelectedContent(
   if (!(await verifyServerConnection(true))) throw new Error('No fue posible conectar con el servidor de SGB. Revisa la red e intenta nuevamente.');
   showLocalNotification('downloads', 'Actualizando contenido de SGB', 'Se descargarán únicamente datos y archivos faltantes o modificados.', DOWNLOAD_NOTIFICATION_ID, true);
   const modules = availableDownloadModules(user).filter((module) => selected.includes(module.id));
-  const endpointJobs = [...new Map(modules
-    .flatMap((module) => module.endpoints.map((path) => ({ module, path })))
+  const panelModule=modules.find((module)=>module.id==='panel');
+  const panelSources=panelModule?[
+    {path:'/animales?limit=100',permission:'ANIMAL_CONSULTAR'},
+    {path:'/grupos?limit=100',permission:'GRUPO_CONSULTAR'},
+    {path:'/potreros',permission:'POTRERO_CONSULTAR'},
+    {path:'/movimientos',permission:'MOVIMIENTO_CONSULTAR'},
+    {path:'/ventas',permission:'VENTA_CONSULTAR'},
+    {path:'/ventas/productos',permission:'VENTA_CONSULTAR'},
+    {path:'/compras',permission:'COMPRA_CONSULTAR'},
+    {path:'/registros/producciones',permission:'PRODUCCION_CONSULTAR'},
+    {path:'/registros/produccion-tanque',permission:'PRODUCCION_CONSULTAR'},
+    {path:'/registros/tratamientos',permission:'SANIDAD_CONSULTAR'},
+    {path:'/reproduccion/celos',permission:'PARTO_CONSULTAR'},
+    {path:'/reproduccion/preneces',permission:'PARTO_CONSULTAR'},
+    {path:'/reproduccion/proximos-partos',permission:'PARTO_CONSULTAR'},
+    {path:'/partos',permission:'PARTO_CONSULTAR'},
+  ].filter((source)=>userHasPermission(user,source.permission)).map((source)=>({module:panelModule,path:source.path})):[];
+  const endpointJobs = [...new Map([...modules
+    .flatMap((module) => module.endpoints.map((path) => ({ module, path }))),...panelSources]
     .map((job) => [job.path, job])).values()];
   const catalogJobs = modules.some((module) => module.id === 'catalogos')
     ? [...catalogNames]
@@ -215,6 +232,7 @@ export async function downloadSelectedContent(
   let failedDetails = 0;
   let downloadedAnimals: Animal[] = [];
   const animalDetails = new Map<string, Animal>();
+  const completeDashboardSources=new Set((await getOfflineSetting<string[]>(`dashboardCompleteSources:${user.id}`))??[]);
 
   for (const job of endpointJobs) {
     onProgress(completed, total, job.module.label);
@@ -225,6 +243,8 @@ export async function downloadSelectedContent(
       : job.path === '/imagenes/multimedia?page=1&limit=100'
         ? await downloadPagedCollection(user.id, job.path, '/imagenes/multimedia?page=1&limit=100')
         : await apiRequest<unknown>(job.path);
+    completeDashboardSources.add(job.path === '/animales?limit=100' ? '/animales' : job.path.split('?')[0]);
+    await putOfflineSetting(`dashboardCompleteSources:${user.id}`,[...completeDashboardSources]);
     collectMediaUrls(data, media,job.path);
     const descriptor = job.path === '/animales?limit=100'
       ? { field: 'id_animal', label: 'Perfiles de animales', base: '/animales', suffix: '' }
