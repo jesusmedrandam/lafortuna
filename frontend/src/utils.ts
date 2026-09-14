@@ -9,11 +9,25 @@ function dateInAppTimeZone(value: Date) {
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
+function formatCalendarDate(value: string) {
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/);
+  if (!match) return null;
+  const [, year, month, day] = match;
+  const probe = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (probe.getUTCFullYear() !== Number(year)
+      || probe.getUTCMonth() + 1 !== Number(month)
+      || probe.getUTCDate() !== Number(day)) return null;
+  return `${day}/${month}/${year}`;
+}
+
 export function formatDate(value?: string | null) {
   if (!value) return '—';
-  const isCalendarDate = /^\d{4}-\d{2}-\d{2}(?:T00:00:00(?:\.000)?Z)?$/.test(value);
-  const normalized = isCalendarDate ? `${value.slice(0, 10)}T12:00:00` : value;
-  const date = new Date(normalized);
+  // Nacimientos, compras, movimientos y demás fechas del negocio representan
+  // un día de calendario, no un instante. Conservamos ese día aunque la API
+  // agregue medianoche, UTC u otro sufijo al serializarlo.
+  const calendarDate = formatCalendarDate(value);
+  if (calendarDate) return calendarDate;
+  const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat('es-EC', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: APP_TIME_ZONE }).format(date);
 }
@@ -32,15 +46,16 @@ export function formatAge(value?: string | null, reference = new Date()) {
   const normalized = dateInputValue(value);
   if (!normalized) return 'Sin fecha';
   const [year, month, day] = normalized.split('-').map(Number);
-  const birth = new Date(year, month - 1, day);
-  const today = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate());
+  const [referenceYear, referenceMonth, referenceDay] = dateInAppTimeZone(reference).split('-').map(Number);
+  const birth = new Date(Date.UTC(year, month - 1, day));
+  const today = new Date(Date.UTC(referenceYear, referenceMonth - 1, referenceDay));
   if (Number.isNaN(birth.getTime()) || birth > today) return 'Fecha inválida';
-  let years = today.getFullYear() - birth.getFullYear();
-  let months = today.getMonth() - birth.getMonth();
-  let days = today.getDate() - birth.getDate();
+  let years = today.getUTCFullYear() - birth.getUTCFullYear();
+  let months = today.getUTCMonth() - birth.getUTCMonth();
+  let days = today.getUTCDate() - birth.getUTCDate();
   if (days < 0) {
-    const previousMonth = new Date(today.getFullYear(), today.getMonth(), 0);
-    days += previousMonth.getDate();
+    const previousMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0));
+    days += previousMonth.getUTCDate();
     months -= 1;
   }
   if (months < 0) {
