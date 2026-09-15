@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   ArrowLeftRight, Baby, Beef, ChevronRight, Droplets,
   HeartOff, Home, Images, LayoutDashboard, LogOut, MapPinned, Menu, Milk, Moon, ShoppingCart, Sprout, Sun, Syringe,
-  Settings2, UserCircle, Users, Warehouse, Weight, X, Activity, AlertTriangle, PackagePlus, CloudDownload, RefreshCw, Wifi, WifiOff, type LucideIcon,
+  Settings2, UserCircle, Users, Warehouse, Weight, X, Activity, AlertTriangle, PackagePlus, CloudDownload, RefreshCw, Wifi, WifiOff, BarChart3, type LucideIcon,
 } from 'lucide-react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -56,6 +56,11 @@ const destinations: Destination[] = [
 ];
 
 const sectionNames = { principal: 'Gestión principal', operaciones: 'Operaciones', configuracion: 'Cuenta y administración' } as const;
+const summaryRoutes:Partial<Record<string,string>>={
+  '/animales':'/animales/resumen','/movimientos':'/movimientos/resumen','/sanidad':'/sanidad/resumen',
+  '/limpiezas':'/limpiezas/resumen','/partos':'/partos/resumen','/produccion':'/produccion/resumen',
+  '/pesajes':'/pesajes/resumen','/muertes':'/muertes/resumen','/ventas':'/ventas/resumen','/compras':'/compras/resumen',
+};
 
 export function AppShell() {
   const { user, hasPermission, logout } = useAuth();
@@ -76,6 +81,7 @@ export function AppShell() {
     return operations.some((operation) => operationVisibility.data?.operaciones?.[operation] !== false);
   }), [hasPermission, operationVisibility.data]);
   const current = visible.find((item) => item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to));
+  const summaryRoute=current?summaryRoutes[current.to]:undefined;
 
   function closeMenu() { setOpen(false); }
 
@@ -104,7 +110,7 @@ export function AppShell() {
       <div className="shell-main">
         <header className="topbar">
           <div className="topbar-left"><IconButton label="Abrir menú" className="mobile-menu-button" onClick={() => setOpen(true)}><Menu size={22} /></IconButton><div><span className="breadcrumb">Sistema de Gestión Bovina</span><h2>{current?.label ?? 'Gestión ganadera'}</h2></div></div>
-          <div className="topbar-actions"><NavLink to="/descargas" title={offline.failed ? 'Hay cambios que requieren revisión' : undefined} className={`connectivity-pill ${offline.quality} ${offline.failed ? 'has-conflict' : ''}`}>{offline.quality === 'offline' ? <WifiOff size={16} /> : offline.waking || offline.syncing ? <RefreshCw className="spin" size={16} /> : <Wifi size={16} />}<span>{offline.quality === 'stable' ? offline.syncing ? 'Sincronizando' : 'Conexión estable' : offline.quality === 'unstable' ? offline.waking ? 'Activando servidor' : 'Conexión inestable' : 'Sin conexión'}</span>{offline.pending + offline.failed ? <b>{offline.pending + offline.failed}</b> : null}{offline.failed ? <AlertTriangle className="connectivity-warning" size={14} /> : null}</NavLink><IconButton label={theme === 'dark' ? 'Usar tema claro' : 'Usar tema oscuro'} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</IconButton><NotificationCenter syncFailures={offline.failed} online={offline.quality === 'stable'}/><NavLink to="/perfil" className="profile-link">{user?.fotoPerfilUrl?<img src={user.fotoPerfilUrl} alt=""/>:<UserCircle size={21}/>}<span>Mi perfil</span></NavLink></div>
+          <div className="topbar-actions">{summaryRoute?<NavLink to={summaryRoute} title={`Resumen de ${current?.label??'la sección'}`} aria-label={`Resumen de ${current?.label??'la sección'}`} className={({isActive})=>`section-summary-link${isActive?' active':''}`}><BarChart3 size={17}/><span>Resumen</span></NavLink>:null}<NavLink to="/descargas" title={offline.failed ? 'Hay cambios que requieren revisión' : undefined} className={`connectivity-pill ${offline.quality} ${offline.failed ? 'has-conflict' : ''}`}>{offline.quality === 'offline' ? <WifiOff size={16} /> : offline.waking || offline.syncing ? <RefreshCw className="spin" size={16} /> : <Wifi size={16} />}<span>{offline.quality === 'stable' ? offline.syncing ? 'Sincronizando' : 'Conexión estable' : offline.quality === 'unstable' ? offline.waking ? 'Activando servidor' : 'Conexión inestable' : 'Sin conexión'}</span>{offline.pending + offline.failed ? <b>{offline.pending + offline.failed}</b> : null}{offline.failed ? <AlertTriangle className="connectivity-warning" size={14} /> : null}</NavLink><IconButton label={theme === 'dark' ? 'Usar tema claro' : 'Usar tema oscuro'} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</IconButton><NotificationCenter syncFailures={offline.failed} online={offline.quality === 'stable'}/><NavLink to="/perfil" className="profile-link">{user?.fotoPerfilUrl?<img src={user.fotoPerfilUrl} alt=""/>:<UserCircle size={21}/>}<span>Mi perfil</span></NavLink></div>
         </header>
         <main className="page-content"><Outlet /></main>
         <footer className="app-footer"><Home size={14} /><span>SGB · Sistema de Gestión Bovina</span></footer>

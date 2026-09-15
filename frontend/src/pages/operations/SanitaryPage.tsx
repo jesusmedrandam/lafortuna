@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { ArrowUpDown, CheckCircle2, ChevronRight, Edit3, Plus, Stethoscope, Syringe, Trash2, Users } from 'lucide-react';
+import { ArrowUpDown, CheckCircle2, ChevronRight, Edit3, Plus, Stethoscope, Syringe, Trash2, Users, X } from 'lucide-react';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { AnimalSelectionBuilder, type AnimalSelectionValue } from '../../components/AnimalSelectionBuilder';
@@ -59,12 +59,12 @@ const emptyCondition=():ConditionForm=>({id_animal:'',id_tipo_condicion_salud:''
 
 
 export function SanitaryPage() {
-  const [searchParams]=useSearchParams();
+  const [searchParams,setSearchParams]=useSearchParams();
   const consumedRoute=useRef(false);
   const { hasPermission } = useAuth();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<Tab>('campaigns');
+  const [tab, setTab] = useState<Tab>(()=>{const requested=searchParams.get('tab');return requested==='individual'||requested==='conditions'||requested==='campaigns'?requested:'campaigns';});
   const [ownershipScope, setOwnershipScope] = useState<OwnershipScope>('EN_PROPIEDAD');
   const [campaignOpen, setCampaignOpen] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<SanitaryCampaign | null>(null);
@@ -208,8 +208,10 @@ export function SanitaryPage() {
   };
 
   const scopedAnimals = directory.animals.filter((item) => isInOwnershipScope(item.categoria_codigo, ownershipScope));
-  const campaignList = useListControls({ items: (campaigns.data ?? []).filter((item) => item.detalles.some((detail) => detail.seleccionado && isInOwnershipScope(detail.categoria_codigo, ownershipScope))), storageKey: 'sanitary-campaigns', searchText: (item) => `${item.tipo_tratamiento} ${item.medicamento} ${item.via} ${item.responsable ?? ''} ${item.detalles.map((detail) => detail.animal).join(' ')}`, dateValue: (item) => item.fecha_aplicacion, nameValue: (item) => item.tipo_tratamiento });
-  const treatmentList = useListControls({ items: (treatments.data ?? []).filter((item) => isInOwnershipScope(String(item.categoria_codigo ?? ''), ownershipScope)), storageKey: 'sanitary-treatments', searchText: (item) => `${String(item.animal ?? '')} ${String(item.codigo_arete ?? '')} ${typeName(item.id_tipo_tratamiento)} ${medicineName(item.id_medicamento)}`, dateValue: (item) => String(item.fecha_aplicacion ?? ''), nameValue: (item) => String(item.animal ?? '') });
+  const routePeriod=searchParams.get('periodo');
+  const routePeriodStart=(()=>{if(!['hoy','semana','mes'].includes(routePeriod??''))return'';const date=new Date(`${currentDateInput()}T12:00:00`);if(routePeriod==='semana')date.setDate(date.getDate()-((date.getDay()+6)%7));else if(routePeriod==='mes')date.setDate(1);return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;})();
+  const campaignList = useListControls({ items: (campaigns.data ?? []).filter((item) => (!routePeriodStart||dateInputValue(item.fecha_aplicacion)>=routePeriodStart)&&item.detalles.some((detail) => detail.seleccionado && isInOwnershipScope(detail.categoria_codigo, ownershipScope))), storageKey: 'sanitary-campaigns', searchText: (item) => `${item.tipo_tratamiento} ${item.medicamento} ${item.via} ${item.responsable ?? ''} ${item.detalles.map((detail) => detail.animal).join(' ')}`, dateValue: (item) => item.fecha_aplicacion, nameValue: (item) => item.tipo_tratamiento });
+  const treatmentList = useListControls({ items: (treatments.data ?? []).filter((item) => (!routePeriodStart||dateInputValue(String(item.fecha_aplicacion??''))>=routePeriodStart)&&isInOwnershipScope(String(item.categoria_codigo ?? ''), ownershipScope)), storageKey: 'sanitary-treatments', searchText: (item) => `${String(item.animal ?? '')} ${String(item.codigo_arete ?? '')} ${typeName(item.id_tipo_tratamiento)} ${medicineName(item.id_medicamento)}`, dateValue: (item) => String(item.fecha_aplicacion ?? ''), nameValue: (item) => String(item.animal ?? '') });
   const conditionList=useListControls({items:(conditions.data??[]).filter((item)=>isInOwnershipScope(item.categoria_codigo,ownershipScope)),storageKey:'sanitary-conditions',searchText:(item)=>`${item.animal} ${item.codigo_arete??''} ${item.tipo_condicion??''} ${item.descripcion} ${item.estado}`,dateValue:(item)=>item.fecha_deteccion,nameValue:(item)=>item.animal});
   const controls = tab === 'campaigns' ? campaignList : tab==='individual'?treatmentList:conditionList;
   const conditionTreatments=(id:string)=>(treatments.data??[]).filter((record)=>String(record.id_condicion_salud??'')===id);
@@ -225,7 +227,7 @@ export function SanitaryPage() {
   const openNew=()=>tab==='campaigns'?(setCampaign(emptyCampaign()),setCampaignOpen(true)):tab==='individual'?(setTreatment(emptyTreatment()),setTreatmentOpen(true)):(setCondition(emptyCondition()),setConditionOpen(true));
 
   return <div className="module-no-header">
-    <CompactToolbar search={controls.search} onSearch={controls.setSearch} placeholder="Buscar en sanidad…" count={controls.visible.length} actions={<><IconButton label="Cambiar orden" onClick={cycleOrder}><ArrowUpDown size={19}/></IconButton><OwnershipScopeFilter compact value={ownershipScope} onChange={changeScope}/></>} below={<div className="compact-scroll-tabs"><button className={tab === 'conditions' ? 'active' : ''} onClick={() => setTab('conditions')}><Stethoscope size={17} />Condiciones de salud</button><button className={tab === 'individual' ? 'active' : ''} onClick={() => setTab('individual')}><Syringe size={17} />Tratamientos</button><button className={tab === 'campaigns' ? 'active' : ''} onClick={() => setTab('campaigns')}><Users size={17} />Jornadas colectivas</button></div>}/>
+    <CompactToolbar search={controls.search} onSearch={controls.setSearch} placeholder="Buscar en sanidad…" count={controls.visible.length} actions={<><IconButton label="Cambiar orden" onClick={cycleOrder}><ArrowUpDown size={19}/></IconButton><OwnershipScopeFilter compact value={ownershipScope} onChange={changeScope}/></>} below={<><div className="compact-scroll-tabs"><button className={tab === 'conditions' ? 'active' : ''} onClick={() => setTab('conditions')}><Stethoscope size={17} />Condiciones de salud</button><button className={tab === 'individual' ? 'active' : ''} onClick={() => setTab('individual')}><Syringe size={17} />Tratamientos</button><button className={tab === 'campaigns' ? 'active' : ''} onClick={() => setTab('campaigns')}><Users size={17} />Jornadas colectivas</button></div>{routePeriodStart?<span className="active-route-filter">{routePeriod==='hoy'?'Hoy':routePeriod==='semana'?'Esta semana':'Este mes'}<button type="button" aria-label="Quitar filtro de período" onClick={()=>{const next=new URLSearchParams(searchParams);next.delete('periodo');setSearchParams(next,{replace:true});}}><X size={14}/></button></span>:null}</>}/>
 
     {tab === 'campaigns' ? <>
       {campaigns.isLoading ? <LoadingState /> : campaigns.isError ? <ErrorState message={(campaigns.error as Error).message} onRetry={() => void campaigns.refetch()} /> : campaignList.visible.length ? <Card className="record-list sanitary-record-list"><div className="record-list-head"><span>Jornada</span><span>Fecha</span><span>Medicamento</span><span>Animales</span><span>Estado</span><span /></div>{campaignList.visible.map((item) => <button type="button" className="record-list-row" key={item.id_jornada} onClick={() => setSelectedCampaign(item)}><span><strong>{item.tipo_tratamiento}</strong><small>{item.via} · {formatNumber(item.dosis_general, 4)} {item.unidad}</small></span><span><strong>{formatDate(item.fecha_aplicacion)}</strong></span><span><strong>{item.medicamento}</strong><small>{item.responsable || 'Sin responsable'}</small></span><span><strong>{item.total_seleccionados} seleccionados</strong><small>{item.total_candidatos} candidatos</small></span><span><Badge tone={item.estado === 'COMPLETADO' ? 'success' : item.estado === 'CANCELADO' ? 'danger' : 'warning'}>{humanizeCode(item.estado)}</Badge></span><span className="record-row-actions">{item.estado === 'BORRADOR' && hasPermission('SANIDAD_ADMINISTRAR') ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); editCampaign(item); }}><Edit3 size={16} />Editar</Button> : null}<ChevronRight size={18} /></span></button>)}</Card> : <EmptyState icon={Syringe} title="Sin jornadas sanitarias" description="Crea una vacunación, desparasitación o tratamiento para varios animales." action={hasPermission('SANIDAD_ADMINISTRAR') ? <Button onClick={() => setCampaignOpen(true)}><Plus size={18} />Nueva jornada</Button> : undefined} />}

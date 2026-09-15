@@ -100,7 +100,7 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
     const root=document.documentElement;
     const normalBackground=getComputedStyle(root).getPropertyValue('--page-bg').trim()||'#f4f7f5';
     root.classList.add('sgb-lightbox-open');
-    try { window.SGBAndroid?.setSystemBarColors?.('#050806','#050806'); } catch { /* Solo Android. */ }
+    try { (window.SGBAndroid?.setTransientSystemBarColors??window.SGBAndroid?.setSystemBarColors)?.('#050806','#050806'); } catch { /* Solo Android. */ }
     return()=>{
       root.classList.remove('sgb-lightbox-open');
       try { window.SGBAndroid?.setSystemBarColors?.(normalBackground,normalBackground); } catch { /* Solo Android. */ }

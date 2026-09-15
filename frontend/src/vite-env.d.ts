@@ -7,6 +7,7 @@ interface Window {
     isAppUpdateDownloaded?: (filename: string) => boolean;
     getPushToken?: () => string;
     requestPushToken?: () => void;
+    setAuthenticatedSession?: (active: boolean) => void;
     isOnline?: () => boolean;
     isWifiConnected?: () => boolean;
     setPendingMutations?: (count: number) => void;
@@ -26,6 +27,7 @@ interface Window {
     confirmOfflineBackupImportSelected?: (mediaUrlsJson: string) => void;
     discardOfflineBackupImport?: () => void;
     setSystemBarColors?: (primary: string, background: string) => void;
+    setTransientSystemBarColors?: (primary: string, background: string) => void;
     clearMediaCache?: () => void;
     getMediaCacheInfo?: () => string;
     setChartFullscreen?: (enabled: boolean) => void;

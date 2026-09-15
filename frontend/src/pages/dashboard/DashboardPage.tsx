@@ -46,15 +46,15 @@ const modules: ModuleDefinition[] = [
   { key: 'animales', label: 'Animales', description: 'Inventario general', icon: Beef, route: '/animales', permission: 'ANIMAL_CONSULTAR', tone: 'green', metrics: [
     { key: 'en_propiedad', label: 'En propiedad' }, { key: 'fuera_propiedad', label: 'Fuera de propiedad' }, { key: 'activos', label: 'Activos' }, { key: 'inactivos', label: 'No activos' },
   ] },
-  { key: 'ingresos', label: 'Ingresos', description: 'Totales facturados', icon: CircleDollarSign, route: '/ventas', permission: 'VENTA_CONSULTAR', tone: 'lime', metrics: [
+  { key: 'ingresos', label: 'Ingresos', description: 'Totales facturados', icon: CircleDollarSign, route: '/ventas?tipo=todas', permission: 'VENTA_CONSULTAR', tone: 'lime', metrics: [
     { key: 'semana', label: 'Esta semana', format: 'money' }, { key: 'mes', label: 'Este mes', format: 'money' }, { key: 'anio', label: 'Este año', format: 'money' },
   ] },
   { key: 'egresos', label: 'Egresos', description: 'Compras registradas', icon: CircleDollarSign, route: '/compras', permission: 'COMPRA_CONSULTAR', tone: 'red', metrics: [
     { key: 'semana', label: 'Esta semana', format: 'money' }, { key: 'mes', label: 'Este mes', format: 'money' }, { key: 'anio', label: 'Este año', format: 'money' },
   ] },
-  { key: 'ventas', label: 'Ventas', description: 'Operaciones completadas', icon: ShoppingCart, route: '/ventas', permission: 'VENTA_CONSULTAR', tone: 'orange', metrics: [
+  { key: 'ventas', label: 'Ventas', description: 'Operaciones completadas', icon: ShoppingCart, route: '/ventas?tipo=todas', permission: 'VENTA_CONSULTAR', tone: 'orange', metrics: [
     { key: 'semana', label: 'Esta semana' }, { key: 'mes', label: 'Este mes' }, { key: 'anio', label: 'Este año' },
-    { key: 'ventas_animales_mes', label: 'Ventas de animales este mes', default:false }, { key: 'animales_vendidos_mes', label: 'Animales vendidos este mes', default:false }, { key: 'ventas_productos_mes', label: 'Ventas de productos este mes', default:false },
+    { key: 'animales_vendidos_mes', label: 'Animales vendidos este mes', default:false }, { key: 'ventas_productos_mes', label: 'Ventas de productos este mes', default:false },
   ] },
   { key: 'produccion', label: 'Producción', description: 'Leche registrada', icon: Droplets, route: '/produccion', permission: 'PRODUCCION_CONSULTAR', tone: 'cyan', metrics: [
     { key: 'hoy', label: 'Hoy', format: 'liters' }, { key: 'semana', label: 'Esta semana', format: 'liters' }, { key: 'mes', label: 'Este mes', format: 'liters' },
@@ -107,16 +107,32 @@ function animalListRoute(filters: Record<string, string>) {
 }
 
 function periodRoute(route: string, period: 'semana'|'mes'|'anio') {
-  return `${route}?periodo=${period}`;
+  const [pathname,query='']=route.split('?');const params=new URLSearchParams(query);params.set('periodo',period);
+  return `${pathname}?${params.toString()}`;
 }
 
 function metricRoute(module: ModuleDefinition, metricKey: string) {
   if (module.key === 'ventas' && (metricKey === 'semana' || metricKey === 'mes' || metricKey === 'anio')) return periodRoute(module.route, metricKey);
   if (module.key === 'ventas' && metricKey.includes('productos')) return '/ventas?tipo=productos&periodo=mes';
   if (module.key === 'ventas' && (metricKey.includes('animales') || metricKey === 'animales_vendidos_mes')) return '/ventas?tipo=animales&periodo=mes';
+  if (module.key === 'egresos' && (metricKey === 'semana' || metricKey === 'mes' || metricKey === 'anio')) return periodRoute(module.route, metricKey);
+  if (module.key === 'produccion') return metricKey === 'hoy' ? '/produccion?periodo=hoy' : metricKey === 'semana' || metricKey === 'mes' ? periodRoute(module.route, metricKey) : module.route;
+  if (module.key === 'tratamientos') {
+    const period = metricKey === 'hoy' ? 'hoy' : metricKey === 'semana' ? 'semana' : 'mes';
+    return `/sanidad?tab=individual&periodo=${period}`;
+  }
+  if (module.key === 'traslados') {
+    const params = new URLSearchParams({ periodo: metricKey === 'semana' || metricKey === 'anio' ? metricKey : 'mes' });
+    const type = metricKey === 'rotaciones_mes' ? 'UBICACION' : metricKey === 'cambios_grupo_mes' ? 'GRUPO' : metricKey === 'propiedades_mes' ? 'PROPIEDAD' : metricKey === 'combinados_mes' ? 'COMBINADO' : '';
+    if (type) params.set('tipo', type);
+    if (metricKey === 'grupos_completos_mes') params.set('seleccion', 'GRUPO');
+    if (metricKey === 'selecciones_manuales_mes') params.set('seleccion', 'SELECCION_MANUAL');
+    return `/movimientos?${params}`;
+  }
+  if (module.key === 'potreros') return metricKey === 'ocupados' ? '/potreros?estado=OCUPADO' : metricKey === 'descanso' ? '/potreros?estado=DESCANSO' : '/potreros';
   if (module.key === 'reproduccion') {
-    const tab = metricKey === 'celos_abiertos' ? 'heats' : metricKey === 'preneces_confirmadas' ? 'pregnancies' : 'births';
-    return `/partos?tab=${tab}`;
+    const tab = metricKey === 'celos_abiertos' ? 'heats' : metricKey === 'preneces_confirmadas' ? 'pregnancies' : metricKey === 'proximos_partos' ? 'upcoming' : 'births';
+    return `/partos?tab=${tab}${metricKey === 'partos_anio' ? '&periodo=anio' : ''}`;
   }
   return module.route;
 }
@@ -178,7 +194,7 @@ function IncomeDashboardCard({ module, values, onOpen }: {
   const conceptRoute = (code: string, period: 'semana'|'mes'|'anio') => {
     const normalized = code.toLocaleUpperCase('es');
     const type = normalized.includes('PRODUCT') || normalized.includes('LECHE') || normalized.includes('QUESO') ? 'productos' : 'animales';
-    return `/ventas?tipo=${type}&periodo=${period}`;
+    return `/ventas?tipo=${type}&periodo=${period}&concepto=${encodeURIComponent(code)}`;
   };
   return <Card className="dashboard-module-card dashboard-income-card stat-lime" onClick={() => onOpen()}>
     <DashboardModuleHeading module={module} onClick={() => onOpen()} />

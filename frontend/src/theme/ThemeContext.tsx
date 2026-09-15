@@ -107,6 +107,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.style.setProperty('--topbar-bg',topbar);
     root.style.setProperty('--topbar-text',topbarText);
     root.style.background=background;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content',background);
     localStorage.setItem(STORAGE_KEY, theme);
     localStorage.setItem(APPEARANCE_STORAGE_KEY,JSON.stringify(appearance));
     const syncNativeBars=()=>{

@@ -12,7 +12,7 @@ import { useListControls } from '../../hooks/useListControls';
 import type { AnimalSale, CatalogItem, ProductSale } from '../../types/api';
 import { currentDateInput, dateInputValue, formatDate, formatNumber, numberOrNull, nullIfEmpty } from '../../utils';
 
-type SaleTab = 'ANIMALES' | 'PRODUCTOS';
+type SaleTab = 'TODAS' | 'ANIMALES' | 'PRODUCTOS';
 type ProductSaleFrequency = ProductSale['periodicidad'];
 
 function money(value: number | string | null, currency: string) {
@@ -27,12 +27,15 @@ export function SalesPage() {
   const toast = useToast();
   const client = useQueryClient();
   const consumedDetail=useRef(false);
-  const [tab, setTab] = useState<SaleTab>(searchParams.get('tipo')==='productos'?'PRODUCTOS':'ANIMALES');
+  const routeTab=():SaleTab=>searchParams.get('tipo')==='productos'?'PRODUCTOS':searchParams.get('tipo')==='todas'?'TODAS':'ANIMALES';
+  const [tab, setTab] = useState<SaleTab>(routeTab);
   const [creating, setCreating] = useState(searchParams.get('nuevo')==='1'&&Boolean(initialAnimalId));
   const [detail, setDetail] = useState<AnimalSale | ProductSale | null>(null);
   const [editing, setEditing] = useState<AnimalSale | ProductSale | null>(null);
   const animalSales = useQuery({ queryKey: ['sales', 'animals'], queryFn: () => apiRequest<AnimalSale[]>('/ventas') });
   const productSales = useQuery({ queryKey: ['sales', 'products'], queryFn: () => apiRequest<ProductSale[]>('/ventas/productos') });
+  const chooseTab=(nextTab:SaleTab)=>{setTab(nextTab);setCreating(false);const next=new URLSearchParams(searchParams);next.set('tipo',nextTab.toLocaleLowerCase('es'));setSearchParams(next,{replace:true});};
+  useEffect(()=>{const next=routeTab();setTab(next);setCreating(false);},[searchParams]);
   useEffect(()=>{
     if(consumedDetail.current)return;
     const animalId=searchParams.get('venta');
@@ -50,10 +53,15 @@ export function SalesPage() {
     },
     onError: (error) => toast.show((error as ApiError).message, 'error'),
   });
-  const current = tab === 'ANIMALES' ? animalSales : productSales;
+  const current = tab === 'ANIMALES' ? animalSales : tab === 'PRODUCTOS' ? productSales : { isLoading: animalSales.isLoading||productSales.isLoading, isError: animalSales.isError||productSales.isError, error: animalSales.error??productSales.error, refetch: async()=>{await Promise.all([animalSales.refetch(),productSales.refetch()]);} };
   const animalList = useListControls({ items: animalSales.data ?? [], storageKey: 'sales-animals', searchText: (sale) => `${sale.comprador_nombre} ${sale.destino ?? ''} ${sale.animales.map((item) => `${item.animal} ${item.codigo_arete ?? ''}`).join(' ')}`, dateValue: (sale) => sale.fecha_venta, nameValue: (sale) => sale.comprador_nombre });
   const productList = useListControls({ items: productSales.data ?? [], storageKey: 'sales-products', searchText: (sale) => `${sale.comprador_nombre} ${sale.destino ?? ''} ${sale.productos.map((item) => item.producto).join(' ')}`, dateValue: (sale) => sale.fecha_venta, nameValue: (sale) => sale.comprador_nombre });
-  const controls = tab === 'ANIMALES' ? animalList : productList;
+  const combinedSales=useMemo<Array<{id:string;type:'ANIMALES'|'PRODUCTOS';sale:AnimalSale|ProductSale}>>(()=>[
+    ...(animalSales.data??[]).map((sale)=>({id:sale.id_venta,type:'ANIMALES' as const,sale})),
+    ...(productSales.data??[]).map((sale)=>({id:sale.id_venta_producto,type:'PRODUCTOS' as const,sale})),
+  ],[animalSales.data,productSales.data]);
+  const combinedList=useListControls({items:combinedSales,storageKey:'sales-all',searchText:(item)=>item.type==='ANIMALES'?`${item.sale.comprador_nombre} ${(item.sale as AnimalSale).animales.map((animal)=>`${animal.animal} ${animal.codigo_arete??''}`).join(' ')}`:`${item.sale.comprador_nombre} ${(item.sale as ProductSale).productos.map((product)=>product.producto).join(' ')}`,dateValue:(item)=>item.sale.fecha_venta,nameValue:(item)=>item.sale.comprador_nombre});
+  const controls = tab === 'ANIMALES' ? animalList : tab === 'PRODUCTOS' ? productList : combinedList;
   const period = searchParams.get('periodo');
   const periodStart = useMemo(() => {
     if (period !== 'semana' && period !== 'mes' && period !== 'anio') return null;
@@ -70,19 +78,25 @@ export function SalesPage() {
   const filterPeriod = <T extends { fecha_venta: string }>(items: T[]) => periodStart === null ? items : items.filter((item) => new Date(item.fecha_venta).getTime() >= periodStart);
   const visibleAnimalSales = filterPeriod(animalList.visible);
   const visibleProductSales = filterPeriod(productList.visible);
-  const visibleCount = tab === 'ANIMALES' ? visibleAnimalSales.length : visibleProductSales.length;
+  const visibleCombinedSales=filterPeriod(combinedList.visible.map((item)=>({...item,fecha_venta:item.sale.fecha_venta}))).map(({fecha_venta:_,...item})=>item);
+  const visibleCount = tab === 'ANIMALES' ? visibleAnimalSales.length : tab === 'PRODUCTOS' ? visibleProductSales.length : visibleCombinedSales.length;
   const cycleOrder=()=>controls.setOrder(controls.order==='NEWEST'?'OLDEST':controls.order==='OLDEST'?'AZ':controls.order==='AZ'?'ZA':'NEWEST');
 
   return <div className="module-no-header">
-    <CompactToolbar search={controls.search} onSearch={controls.setSearch} placeholder={tab === 'ANIMALES' ? 'Buscar venta o animal…' : 'Buscar venta o producto…'} count={visibleCount} actions={<IconButton label="Cambiar orden" onClick={cycleOrder}><ArrowUpDown size={19}/></IconButton>} below={<><div className="compact-scroll-tabs"><button className={tab === 'ANIMALES' ? 'active' : ''} onClick={() => { setTab('ANIMALES'); setCreating(false); }}><Users size={17} />Animales</button><button className={tab === 'PRODUCTOS' ? 'active' : ''} onClick={() => { setTab('PRODUCTOS'); setCreating(false); }}><Package size={17} />Leche, queso y productos</button></div>{periodLabel?<span className="active-route-filter">{periodLabel}<button type="button" aria-label="Quitar filtro de período" onClick={()=>{const next=new URLSearchParams(searchParams);next.delete('periodo');setSearchParams(next,{replace:true});}}><X size={14}/></button></span>:null}</>}/>
-    {current.isLoading ? <LoadingState /> : current.isError ? <ErrorState message={(current.error as Error).message} onRetry={() => void current.refetch()} /> : tab === 'ANIMALES' ? <AnimalSalesList sales={visibleAnimalSales} canAdmin={hasPermission('VENTA_ADMINISTRAR')} onCreate={() => setCreating(true)} onOpen={setDetail} onEdit={setEditing} onCancel={(id) => cancelSale.mutate({ id, type: 'ANIMALES' })} cancelling={cancelSale.isPending} /> : <ProductSalesList sales={visibleProductSales} canAdmin={hasPermission('VENTA_ADMINISTRAR')} onCreate={() => setCreating(true)} onOpen={setDetail} onEdit={setEditing} onCancel={(id) => cancelSale.mutate({ id, type: 'PRODUCTOS' })} cancelling={cancelSale.isPending} />}
+    <CompactToolbar search={controls.search} onSearch={controls.setSearch} placeholder={tab === 'TODAS'?'Buscar en todas las ventas…':tab === 'ANIMALES' ? 'Buscar venta o animal…' : 'Buscar venta o producto…'} count={visibleCount} actions={<IconButton label="Cambiar orden" onClick={cycleOrder}><ArrowUpDown size={19}/></IconButton>} below={<><div className="compact-scroll-tabs"><button className={tab === 'TODAS' ? 'active' : ''} onClick={() => chooseTab('TODAS')}><ShoppingCart size={17} />Todas</button><button className={tab === 'ANIMALES' ? 'active' : ''} onClick={() => chooseTab('ANIMALES')}><Users size={17} />Animales</button><button className={tab === 'PRODUCTOS' ? 'active' : ''} onClick={() => chooseTab('PRODUCTOS')}><Package size={17} />Leche, queso y productos</button></div>{periodLabel?<span className="active-route-filter">{periodLabel}<button type="button" aria-label="Quitar filtro de período" onClick={()=>{const next=new URLSearchParams(searchParams);next.delete('periodo');setSearchParams(next,{replace:true});}}><X size={14}/></button></span>:null}</>}/>
+    {current.isLoading ? <LoadingState /> : current.isError ? <ErrorState message={(current.error as Error).message} onRetry={() => void current.refetch()} /> : tab === 'TODAS'?<CombinedSalesList sales={visibleCombinedSales} onOpen={setDetail}/>:tab === 'ANIMALES' ? <AnimalSalesList sales={visibleAnimalSales} canAdmin={hasPermission('VENTA_ADMINISTRAR')} onCreate={() => setCreating(true)} onOpen={setDetail} onEdit={setEditing} onCancel={(id) => cancelSale.mutate({ id, type: 'ANIMALES' })} cancelling={cancelSale.isPending} /> : <ProductSalesList sales={visibleProductSales} canAdmin={hasPermission('VENTA_ADMINISTRAR')} onCreate={() => setCreating(true)} onOpen={setDetail} onEdit={setEditing} onCancel={(id) => cancelSale.mutate({ id, type: 'PRODUCTOS' })} cancelling={cancelSale.isPending} />}
     {creating && tab === 'ANIMALES' ? <AnimalSaleForm initialAnimalId={initialAnimalId} onClose={() => setCreating(false)} onSaved={() => setCreating(false)} /> : null}
     {creating && tab === 'PRODUCTOS' ? <ProductSaleForm onClose={() => setCreating(false)} onSaved={() => setCreating(false)} /> : null}
     {detail ? <SaleDetail sale={detail} onClose={() => setDetail(null)} onEdit={hasPermission('VENTA_ADMINISTRAR') && detail.estado === 'COMPLETADA' ? () => { setEditing(detail); setDetail(null); } : undefined} onCancel={hasPermission('VENTA_ADMINISTRAR') && detail.estado === 'COMPLETADA' ? () => cancelSale.mutate({ id: 'id_venta' in detail ? detail.id_venta : detail.id_venta_producto, type: 'id_venta' in detail ? 'ANIMALES' : 'PRODUCTOS' }) : undefined} cancelling={cancelSale.isPending} /> : null}
     {editing && 'id_venta' in editing ? <AnimalSaleEditForm sale={editing} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} /> : null}
     {editing && 'id_venta_producto' in editing ? <ProductSaleForm sale={editing} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} /> : null}
-    {hasPermission('VENTA_ADMINISTRAR')?<FloatingActionDock><IconButton label={tab==='ANIMALES'?'Vender animales':'Vender productos'} onClick={()=>setCreating(true)}><Plus size={23}/></IconButton></FloatingActionDock>:null}
+    {hasPermission('VENTA_ADMINISTRAR')&&tab!=='TODAS'?<FloatingActionDock><IconButton label={tab==='ANIMALES'?'Vender animales':'Vender productos'} onClick={()=>setCreating(true)}><Plus size={23}/></IconButton></FloatingActionDock>:null}
   </div>;
+}
+
+function CombinedSalesList({sales,onOpen}:{sales:Array<{id:string;type:'ANIMALES'|'PRODUCTOS';sale:AnimalSale|ProductSale}>;onOpen:(sale:AnimalSale|ProductSale)=>void}){
+  if(!sales.length)return <EmptyState icon={ShoppingCart} title="No hay ventas en este período" description="No se encontraron ventas de animales ni de productos."/>;
+  return <Card className="commerce-list">{sales.map((item)=>{const products=item.type==='PRODUCTOS';const sale=item.sale;const description=products?(sale as ProductSale).productos.map((product)=>product.producto).join(', '):`${(sale as AnimalSale).animales.length} animal${(sale as AnimalSale).animales.length===1?'':'es'} · ${(sale as AnimalSale).animales.map((animal)=>animal.animal).join(', ')}`;return <button type="button" className="commerce-row" key={`${item.type}-${item.id}`} onClick={()=>onOpen(sale)}><span className="commerce-main"><strong>{description}</strong><small>{sale.comprador_nombre} · {formatDate(sale.fecha_venta)}</small></span><span className="commerce-price"><strong>{money(sale.precio_total,sale.moneda)}</strong><Badge tone={sale.estado==='COMPLETADA'?'success':'danger'}>{products?'Productos':'Animales'}</Badge></span><ChevronRight size={18}/></button>;})}</Card>;
 }
 
 function AnimalSalesList({ sales, canAdmin, onCreate, onOpen, onEdit }: { sales: AnimalSale[]; canAdmin: boolean; onCreate: () => void; onOpen: (sale: AnimalSale) => void; onEdit: (sale: AnimalSale) => void; onCancel: (id: string) => void; cancelling: boolean }) {

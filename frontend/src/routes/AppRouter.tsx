@@ -40,6 +40,7 @@ import { SettingsPage } from '../pages/admin/SettingsPage';
 import { PurchasesPage } from '../pages/purchases/PurchasesPage';
 import { ActivitiesPage } from '../pages/activities/ActivitiesPage';
 import { DownloadsPage } from '../pages/offline/DownloadsPage';
+import { SectionSummaryPage } from '../pages/summary/SectionSummaryPage';
 
 function ProtectedRoot() {
   const { user, ready } = useAuth();
@@ -76,6 +77,7 @@ export function AppRouter() {
         <Route element={<AppShell />}>
           <Route index element={<HomePage />} />
           <Route path="animales" element={<PermissionRoute permissions={['ANIMAL_CONSULTAR']}><AnimalsPage /></PermissionRoute>} />
+          <Route path="animales/resumen" element={<PermissionRoute permissions={['ANIMAL_CONSULTAR']}><SectionSummaryPage section="animales" /></PermissionRoute>} />
           <Route path="animales/asistencia" element={<PermissionRoute permissions={['ANIMAL_CONSULTAR']}><AnimalAttendancePage /></PermissionRoute>} />
           <Route path="animales/:id" element={<PermissionRoute permissions={['ANIMAL_CONSULTAR']}><AnimalDetailPage /></PermissionRoute>} />
           <Route path="multimedia" element={<PermissionRoute permissions={['IMAGEN_CONSULTAR']}><MultimediaPage /></PermissionRoute>} />
@@ -86,15 +88,24 @@ export function AppRouter() {
           <Route path="perfil" element={<ProfilePage />} />
           <Route path="descargas" element={<DownloadsPage />} />
           <Route path="movimientos" element={<PermissionRoute permissions={['MOVIMIENTO_CONSULTAR']}><MovementsPage /></PermissionRoute>} />
+          <Route path="movimientos/resumen" element={<PermissionRoute permissions={['MOVIMIENTO_CONSULTAR']}><SectionSummaryPage section="movimientos" /></PermissionRoute>} />
           <Route path="sanidad" element={<PermissionRoute permissions={['SANIDAD_CONSULTAR']}><SanitaryPage /></PermissionRoute>} />
+          <Route path="sanidad/resumen" element={<PermissionRoute permissions={['SANIDAD_CONSULTAR']}><SectionSummaryPage section="sanidad" /></PermissionRoute>} />
           <Route path="limpiezas" element={<PermissionRoute permissions={['LIMPIEZA_CONSULTAR']}><CleaningsPage /></PermissionRoute>} />
+          <Route path="limpiezas/resumen" element={<PermissionRoute permissions={['LIMPIEZA_CONSULTAR']}><SectionSummaryPage section="limpiezas" /></PermissionRoute>} />
           <Route path="partos" element={<PermissionRoute permissions={['PARTO_CONSULTAR', 'ABORTO_CONSULTAR']}><BirthsPage /></PermissionRoute>} />
+          <Route path="partos/resumen" element={<PermissionRoute permissions={['PARTO_CONSULTAR', 'ABORTO_CONSULTAR']}><SectionSummaryPage section="reproduccion" /></PermissionRoute>} />
           <Route path="produccion" element={<PermissionRoute permissions={['PRODUCCION_CONSULTAR', 'LACTANCIA_CONSULTAR']}><ProductionPage /></PermissionRoute>} />
+          <Route path="produccion/resumen" element={<PermissionRoute permissions={['PRODUCCION_CONSULTAR', 'LACTANCIA_CONSULTAR']}><SectionSummaryPage section="produccion" /></PermissionRoute>} />
           <Route path="produccion/medidor" element={<PermissionRoute permissions={['PRODUCCION_CONSULTAR']}><MilkMeterPage /></PermissionRoute>} />
           <Route path="pesajes" element={<PermissionRoute permissions={['PESAJE_CONSULTAR']}><AnimalRecordsPage mode="pesajes" /></PermissionRoute>} />
+          <Route path="pesajes/resumen" element={<PermissionRoute permissions={['PESAJE_CONSULTAR']}><SectionSummaryPage section="pesajes" /></PermissionRoute>} />
           <Route path="muertes" element={<PermissionRoute permissions={['MUERTE_CONSULTAR']}><AnimalRecordsPage mode="muertes" /></PermissionRoute>} />
+          <Route path="muertes/resumen" element={<PermissionRoute permissions={['MUERTE_CONSULTAR']}><SectionSummaryPage section="muertes" /></PermissionRoute>} />
           <Route path="ventas" element={<PermissionRoute permissions={['VENTA_CONSULTAR']}><SalesPage /></PermissionRoute>} />
+          <Route path="ventas/resumen" element={<PermissionRoute permissions={['VENTA_CONSULTAR']}><SectionSummaryPage section="ventas" /></PermissionRoute>} />
           <Route path="compras" element={<PermissionRoute permissions={['COMPRA_CONSULTAR']}><PurchasesPage /></PermissionRoute>} />
+          <Route path="compras/resumen" element={<PermissionRoute permissions={['COMPRA_CONSULTAR']}><SectionSummaryPage section="compras" /></PermissionRoute>} />
           <Route path="actividades" element={<PermissionRoute permissions={['ACTIVIDAD_CONSULTAR']}><ActivitiesPage /></PermissionRoute>} />
           <Route path="catalogos" element={<PermissionRoute permissions={['CATALOGO_CONSULTAR']}><CatalogsPage /></PermissionRoute>} />
           <Route path="configuracion" element={<SettingsPage />} />

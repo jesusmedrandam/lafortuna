@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   CalendarDays,
   ChevronRight,
@@ -506,11 +506,12 @@ function PastureModal({
 
 export function PasturesPage() {
   const { hasPermission } = useAuth();
+  const [searchParams] = useSearchParams();
   const [editing, setEditing] = useState<Pasture | null | undefined>(undefined);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState({
-    estado: "",
+    estado: ["OCUPADO","DESCANSO"].includes(searchParams.get("estado") ?? "") ? searchParams.get("estado")! : "",
     ocupacion_min: "",
     ocupacion_max: "",
     descanso_min: "",

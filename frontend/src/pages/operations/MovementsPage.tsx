@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeftRight, ArrowUpDown, Ban, CheckCircle2, ChevronRight, CloudOff, Edit3, ImagePlus, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeftRight, ArrowUpDown, Ban, CheckCircle2, ChevronRight, CloudOff, Edit3, ImagePlus, Plus, Trash2, X } from 'lucide-react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
@@ -114,7 +114,7 @@ function movementAnimalSummary(item:Movement) {
 export function MovementsPage() {
   const route = useLocation();
   const navigate = useNavigate();
-  const [searchParams]=useSearchParams();
+  const [searchParams,setSearchParams]=useSearchParams();
   const consumedInitialAnimal = useRef(false);
   const consumedDetail = useRef(false);
   const { hasPermission } = useAuth();
@@ -250,7 +250,10 @@ export function MovementsPage() {
     onError: (error) => toast.show(error instanceof ApiError ? error.message : (error as Error).message, 'error'),
   });
 
-  const list = useListControls({ items: movements.data ?? [], storageKey: 'movements', searchText: (item) => `${item.motivo_catalogo ?? item.motivo ?? ''} ${item.origen_descripcion ?? ''} ${item.destino_descripcion ?? ''} ${item.propiedad_origen ?? ''} ${item.propiedad_destino ?? ''} ${item.ubicacion_origen ?? ''} ${item.ubicacion_destino ?? ''} ${item.grupo_origen ?? ''} ${item.grupo_destino ?? ''} ${(item.detalles ?? []).map((detail) => `${detail.animal} ${detail.arete ?? ''}`).join(' ')}`, dateValue: (item) => item.fecha_movimiento, nameValue: (item) => item.motivo_catalogo || item.motivo || item.ubicacion_destino || item.grupo_destino || item.propiedad_destino || '' });
+  const routePeriod=searchParams.get('periodo');const routeType=searchParams.get('tipo');const routeSelection=searchParams.get('seleccion');
+  const routePeriodStart=(()=>{if(!['semana','mes','anio'].includes(routePeriod??''))return'';const date=new Date(`${currentDateInput()}T12:00:00`);if(routePeriod==='semana')date.setDate(date.getDate()-((date.getDay()+6)%7));else if(routePeriod==='mes')date.setDate(1);else{date.setMonth(0);date.setDate(1);}return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;})();
+  const routedMovements=(movements.data??[]).filter((item)=>(!routePeriodStart||dateInputValue(item.fecha_movimiento)>=routePeriodStart)&&(!routeType||item.tipo_movimiento===routeType)&&(!routeSelection||(routeSelection==='GRUPO'?(item.modo_seleccion==='GRUPO'||item.modo_seleccion==='TODOS'):item.modo_seleccion===routeSelection)));
+  const list = useListControls({ items: routedMovements, storageKey: 'movements', searchText: (item) => `${item.motivo_catalogo ?? item.motivo ?? ''} ${item.origen_descripcion ?? ''} ${item.destino_descripcion ?? ''} ${item.propiedad_origen ?? ''} ${item.propiedad_destino ?? ''} ${item.ubicacion_origen ?? ''} ${item.ubicacion_destino ?? ''} ${item.grupo_origen ?? ''} ${item.grupo_destino ?? ''} ${(item.detalles ?? []).map((detail) => `${detail.animal} ${detail.arete ?? ''}`).join(' ')}`, dateValue: (item) => item.fecha_movimiento, nameValue: (item) => item.motivo_catalogo || item.motivo || item.ubicacion_destino || item.grupo_destino || item.propiedad_destino || '' });
   const editMovement = (item: Movement) => {
     const destination = locations.data?.find((location) => location.id_ubicacion === item.id_ubicacion_destino);
     const kind: MovementKind = item.tipo_movimiento ?? (item.id_ubicacion_destino && item.id_grupo_destino ? 'COMBINADO' : item.id_grupo_destino ? 'GRUPO' : destination?.tipo === 'OTRO' ? 'PROPIEDAD' : 'UBICACION');
@@ -308,7 +311,7 @@ export function MovementsPage() {
 
   const cycleOrder=()=>list.setOrder(list.order==='NEWEST'?'OLDEST':list.order==='OLDEST'?'AZ':list.order==='AZ'?'ZA':'NEWEST');
   return <div className="module-no-header">
-    <CompactToolbar search={list.search} onSearch={list.setSearch} placeholder="Buscar movimiento…" count={list.visible.length} actions={<IconButton label="Cambiar orden" onClick={cycleOrder}><ArrowUpDown size={19}/></IconButton>}/>
+    <CompactToolbar search={list.search} onSearch={list.setSearch} placeholder="Buscar movimiento…" count={list.visible.length} actions={<IconButton label="Cambiar orden" onClick={cycleOrder}><ArrowUpDown size={19}/></IconButton>} below={routePeriodStart||routeType||routeSelection?<span className="active-route-filter">{[routePeriod==='semana'?'Esta semana':routePeriod==='mes'?'Este mes':routePeriod==='anio'?'Este año':null,routeType?humanizeCode(routeType):null,routeSelection==='GRUPO'?'Grupo completo':routeSelection==='SELECCION_MANUAL'?'Selección manual':null].filter(Boolean).join(' · ')}<button type="button" aria-label="Quitar filtros del panel" onClick={()=>{const next=new URLSearchParams(searchParams);next.delete('periodo');next.delete('tipo');next.delete('seleccion');setSearchParams(next,{replace:true});}}><X size={14}/></button></span>:undefined}/>
 
     {movements.isLoading ? <LoadingState /> : movements.isError ? <ErrorState message={(movements.error as Error).message} onRetry={() => void movements.refetch()} /> : list.visible.length ? <Card className="record-list movements-record-list"><div className="record-list-head"><span>Movimiento</span><span>Fecha</span><span>Origen y destino</span><span>Estado</span><span /></div>{list.visible.map((movement) => {const pending=Boolean((movement as Movement&{__offline?:boolean;__sync_state?:string}).__offline||(movement as Movement&{__sync_state?:string}).__sync_state==='PENDING');const origin=movementRouteSide(movement,'origin');const destination=movementRouteSide(movement,'destination');return <button type="button" className="record-list-row movement-compact-route" key={movement.id_movimiento} onClick={() => setSelected(movement)}><span><strong>{movementTitle(movement)}</strong><small>{movementAnimalSummary(movement)}</small></span><span><strong>{formatDate(movement.fecha_movimiento)}</strong></span><span><strong className="route-summary"><ArrowLeftRight size={16}/>{origin} → {destination}</strong></span><span className="record-status-with-sync"><Badge tone={movementTone(movement.estado)}>{humanizeCode(movement.estado)}</Badge>{pending?<span className="inline-sync-pending" title="Cambio pendiente de sincronizar"><CloudOff size={15}/></span>:null}</span><span className="record-row-actions">{movement.estado === 'BORRADOR' && hasPermission('MOVIMIENTO_CREAR') ? <Button variant="ghost" onClick={(event) => { event.stopPropagation(); editMovement(movement); }}><Edit3 size={16} />Editar</Button> : null}<ChevronRight size={18} /></span></button>;})}</Card> : <EmptyState icon={ArrowLeftRight} title="Aún no hay movimientos" description="Registra un cambio de grupo, potrero, corral u otra ubicación." />}
 

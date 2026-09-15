@@ -15,6 +15,7 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const setNativeSessionActive=(active:boolean)=>{try{window.SGBAndroid?.setAuthenticatedSession?.(active);}catch{/* Solo Android. */}};
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthTokens | null>(() => loadSession());
@@ -25,6 +26,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const updated = () => sync();
     const expired = () => {
+      setNativeSessionActive(false);
       clearSession();
       setSession(null);
     };
@@ -50,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(next);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
+        setNativeSessionActive(false);
         clearSession();
         setSession(null);
       } else {
@@ -63,6 +66,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshUser();
   }, [refreshUser]);
+
+  useEffect(()=>{
+    if(!ready)return;
+    setNativeSessionActive(Boolean(session?.user?.id));
+  },[ready,session?.user?.id]);
 
   useEffect(() => {
     const userId = session?.user?.id;
@@ -97,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     const current = loadSession();
+    setNativeSessionActive(false);
     try {
       if (current?.user?.id && window.SGBAndroid) {
         try {
