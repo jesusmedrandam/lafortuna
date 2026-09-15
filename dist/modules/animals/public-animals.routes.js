@@ -14,8 +14,9 @@ publicAnimalsRouter.get('/:token', asyncHandler(async (req, res) => {
     const result = await pool.query(`SELECT a.id_animal,a.nombre,a.codigo_arete,a.descripcion,a.sexo,
        a.fecha_nacimiento::text fecha_nacimiento,a.estado,e.nombre especie,oa.nombre origen,
        m.nombre madre,p.nombre padre,mq.codigo marquilla_codigo,
-       (SELECT ai.secure_url FROM animal_imagen ai
+       (SELECT COALESCE(ai.secure_url,ai.url) FROM animal_imagen ai
         WHERE ai.id_animal=a.id_animal AND ai.es_perfil=TRUE AND ai.deleted_at IS NULL
+          AND COALESCE(ai.secure_url,ai.url) IS NOT NULL
         ORDER BY ai.created_at DESC LIMIT 1) foto_perfil,
        COALESCE((SELECT jsonb_agg(jsonb_build_object(
          'id_imagen',gallery.id_imagen,

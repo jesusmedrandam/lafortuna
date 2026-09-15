@@ -41,7 +41,10 @@ async function downloadMedia(item:LightboxMedia) {
   const mimeType=item.type==='VIDEO'?'video/mp4':'image/jpeg';
   const downloadUrl=optimizedCloudinaryMediaUrl(item.url,item.type??'IMAGEN','download');
   if(window.SGBAndroid?.saveOptimizedMedia?.(item.url,downloadUrl,filename,mimeType))return;
-  if(window.SGBAndroid?.saveMedia?.(downloadUrl,filename,mimeType))return;
+  // Las descargas offline se guardan con la URL original. Las versiones de
+  // Android que no conocen saveOptimizedMedia deben recibir esa misma URL para
+  // poder exportar la copia local en vez de intentar otra descarga de red.
+  if(window.SGBAndroid?.saveMedia?.(item.url,filename,mimeType))return;
   try {
     const response=await fetch(downloadUrl);
     if(!response.ok)throw new Error('No se pudo descargar el archivo.');

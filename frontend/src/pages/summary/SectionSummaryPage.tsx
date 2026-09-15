@@ -95,8 +95,10 @@ function animalHighlight(label:string,entry:[string,{name:string;value:number}]|
 function buildAnimalModel(data:SummaryData):SummaryModel{
   const animals=data.animals.filter((item)=>item&&item.estado!=='ELIMINADO');const directory=new Map(animals.map((item)=>[item.id_animal,item]));
   const active=animals.filter((item)=>item.estado==='ACTIVO');const born=active.filter((item)=>Boolean(item.fecha_nacimiento)).sort((a,b)=>localDate(a.fecha_nacimiento).localeCompare(localDate(b.fecha_nacimiento)));
-  const productions=data.collections['/registros/producciones']??[];const month=periodStart('month');const production=new Map<string,{name:string;value:number}>();
-  productions.filter((row)=>valid(row)&&inPeriod(row.fecha_produccion,month)).forEach((row)=>add(production,row.id_vaca,row.animal??row.vaca,number(row.litros)));
+  const productions=data.collections['/registros/producciones']??[];const productionDays=new Map<string,{id:string;name:string;date:string;value:number}>();
+  productions.filter(valid).forEach((row)=>{const id=String(row.id_vaca??'');const date=localDate(row.fecha_produccion);const liters=number(row.litros);if(!id||!date||liters<=0)return;const key=`${id}:${date}`;const old=productionDays.get(key);productionDays.set(key,{id,name:String(row.animal??row.vaca??old?.name??'Animal'),date,value:(old?.value??0)+liters});});
+  const production=new Map<string,{name:string;value:number}>();const productionDates=new Map<string,string>();
+  productionDays.forEach((item)=>{const old=production.get(item.id);if(!old||item.value>old.value){production.set(item.id,{name:item.name,value:item.value});productionDates.set(item.id,item.date);}});
   const heats=new Map<string,{name:string;value:number}>();(data.collections['/reproduccion/celos']??[]).filter(valid).forEach((row)=>add(heats,row.id_vaca,row.vaca));
   const calves=new Map<string,{name:string;value:number}>();const birthDates=new Map<string,{name:string;dates:string[]}>();
   (data.collections['/partos']??[]).filter(valid).forEach((row)=>{const total=Array.isArray(row.crias)?row.crias.length:number(row.total_crias)||1;add(calves,row.id_madre,row.madre,total);const id=String(row.id_madre??'');const date=localDate(row.fecha_parto);if(id&&date){const old=birthDates.get(id)??{name:String(row.madre??'Animal'),dates:[]};old.dates.push(date);birthDates.set(id,old);}});
@@ -105,8 +107,8 @@ function buildAnimalModel(data:SummaryData):SummaryModel{
   const highlights=[
     born[0]?{label:'Animal más viejo',id:born[0].id_animal,name:born[0].nombre,photo:born[0].foto_perfil,subtitle:`Nació ${formatDate(born[0].fecha_nacimiento)}`,value:'Ver perfil'}:null,
     born.at(-1)?{label:'Animal más joven',id:born.at(-1)!.id_animal,name:born.at(-1)!.nombre,photo:born.at(-1)!.foto_perfil,subtitle:`Nació ${formatDate(born.at(-1)!.fecha_nacimiento)}`,value:'Ver perfil'}:null,
-    animalHighlight('Mayor producción del mes',topEntry(production),directory,'producción acumulada',value=>`${formatNumber(value,2)} L`),
-    animalHighlight('Menor producción del mes',topEntry(production,true),directory,'producción acumulada',value=>`${formatNumber(value,2)} L`),
+    animalHighlight('Mayor producción en un día',topEntry(production),directory,`mejor día: ${formatDate(productionDates.get(topEntry(production)?.[0]??'')??'')}`,value=>`${formatNumber(value,2)} L`),
+    animalHighlight('Menor máximo diario',topEntry(production,true),directory,`mejor día: ${formatDate(productionDates.get(topEntry(production,true)?.[0]??'')??'')}`,value=>`${formatNumber(value,2)} L`),
     animalHighlight('Más celos registrados',topEntry(heats),directory,'historial reproductivo',value=>`${formatNumber(value)} celos`),
     animalHighlight('Más crías registradas',topEntry(calves),directory,'partos registrados',value=>`${formatNumber(value)} crías`),
     animalHighlight('Intervalo más corto entre partos',topEntry(intervals,true),directory,'entre dos partos',value=>`${formatNumber(value)} días`),
@@ -125,7 +127,7 @@ function buildAnimalModel(data:SummaryData):SummaryModel{
     {label:'Toros y toretes',value:formatNumber(principal.filter((item)=>item.clasificacion_codigo==='TORO'||item.clasificacion_codigo==='TORETE').length)},
     {label:'Terneros',value:formatNumber(principal.filter((item)=>item.clasificacion_codigo==='TERNERO').length)},
     {label:'Hembras / machos',value:`${formatNumber(principal.filter((item)=>item.sexo==='HEMBRA').length)} / ${formatNumber(principal.filter((item)=>item.sexo==='MACHO').length)}`},
-  ],note:'Los destacados usan el historial disponible en este dispositivo; se amplían al actualizar las descargas.'};
+  ],note:'La producción compara el mejor día completo de cada vaca, sumando sus turnos de ese día. Los destacados usan el historial disponible en este dispositivo y se amplían al actualizar las descargas.'};
 }
 
 function buildMovementModel(data:SummaryData):SummaryModel{
