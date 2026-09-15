@@ -22,6 +22,7 @@ const rules: Rule[] = [
   { pattern: /^\/ventas(?:\/|$)/, permission: 'VENTA_ADMINISTRAR' },
   { pattern: /^\/compras(?:\/|$)/, permission: 'COMPRA_ADMINISTRAR' },
   { pattern: /^\/actividades(?:\/|$)/, permission: 'ACTIVIDAD_ADMINISTRAR' },
+  { pattern: /^\/agenda(?:\/|$)/, permission: 'USUARIO_AUTENTICADO' },
   { pattern: /^\/(catalogos|marquillas|configuracion)(?:\/|$)/, permission: 'CATALOGO_ADMINISTRAR' },
   { pattern: /^\/usuarios(?:\/|$)/, permission: 'USUARIO_ADMINISTRAR' },
   { pattern: /^\/roles(?:\/|$)/, permission: 'ROL_ADMINISTRAR' },
@@ -35,5 +36,5 @@ export function permissionForMutation(path: string, method: string): string | nu
 }
 
 export function userHasPermission(user: AuthUser, permission: string) {
-  return user.roles.includes('ADMINISTRADOR') || user.permissions.includes(permission);
+  return permission==='USUARIO_AUTENTICADO'||user.roles.includes('ADMINISTRADOR') || user.permissions.includes(permission);
 }

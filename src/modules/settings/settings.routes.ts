@@ -8,6 +8,7 @@ import { ok } from '../../core/http.js';
 import { routeParam } from '../../core/route-param.js';
 import { requirePermission } from '../../middleware/permission.js';
 import { animalOperationDefinitions } from '../../services/animal-operation-policy.js';
+import { env } from '../../config/env.js';
 
 const updateSchema = z.object({
   configuracion: z.array(z.object({
@@ -53,8 +54,13 @@ const reproductionConfigurationSchema=z.object({
   usar_ultimo_celo_valido:z.boolean(),
   dias_maximos_ordeno_posparto:z.number().int().min(1).max(730),
 });
+const agendaConfigurationSchema=z.object({tareas_habilitadas:z.boolean(),eventos_habilitados:z.boolean()});
 
 export const settingsRouter = Router();
+
+settingsRouter.get('/hora-servidor',asyncHandler(async(_req,res)=>ok(res,{...(await pool.query(`SELECT NOW()::text hora_utc,TO_CHAR(NOW() AT TIME ZONE 'America/Guayaquil','YYYY-MM-DD HH24:MI:SS') hora_ecuador,(NOW() AT TIME ZONE 'America/Guayaquil')::date::text fecha_ecuador,'America/Guayaquil' zona_horaria`)).rows[0],intervalo_alertas_ms:env.CALCULATED_ALERT_INTERVAL_MS})));
+settingsRouter.get('/agenda',asyncHandler(async(_req,res)=>ok(res,(await pool.query(`SELECT tareas_habilitadas,eventos_habilitados,updated_at FROM configuracion_agenda WHERE id_configuracion=1`)).rows[0]??{tareas_habilitadas:true,eventos_habilitados:true,updated_at:null})));
+settingsRouter.put('/agenda',requirePermission('CATALOGO_ADMINISTRAR'),asyncHandler(async(req,res)=>{const input=agendaConfigurationSchema.parse(req.body);const row=(await pool.query(`INSERT INTO configuracion_agenda(id_configuracion,tareas_habilitadas,eventos_habilitados,actualizado_por) VALUES(1,$1,$2,$3) ON CONFLICT(id_configuracion) DO UPDATE SET tareas_habilitadas=EXCLUDED.tareas_habilitadas,eventos_habilitados=EXCLUDED.eventos_habilitados,actualizado_por=EXCLUDED.actualizado_por,updated_at=NOW() RETURNING tareas_habilitadas,eventos_habilitados,updated_at`,[input.tareas_habilitadas,input.eventos_habilitados,req.user!.id])).rows[0];return ok(res,row);}));
 
 settingsRouter.get('/operaciones-visibles', asyncHandler(async (_req, res) => {
   const [properties, configuration] = await Promise.all([

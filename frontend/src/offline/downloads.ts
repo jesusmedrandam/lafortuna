@@ -2,7 +2,7 @@ import { apiRequest, apiRequestWithMeta, cachedCatalogRequest, getConnectionQual
 import type { Animal, AuthUser } from '../types/api';
 import { getOfflineCache, getOfflineSetting, listOfflineMutations, offlineTransferMediaCategoryForContext, putOfflineCache, putOfflineSetting, type OfflineTransferMediaCategory } from './database';
 import { userHasPermission } from './permissions';
-import { DOWNLOAD_NOTIFICATION_ID, isWifiConnected, showLocalNotification } from './native';
+import { cancelAgendaReminder, DOWNLOAD_NOTIFICATION_ID, isWifiConnected, scheduleAgendaReminder, scheduleLocalReminder, showLocalNotification } from './native';
 import { optimizedCloudinaryMediaUrl, type MediaType } from '../media';
 import { currentDateInput } from '../utils';
 
@@ -35,6 +35,7 @@ export const downloadModules: DownloadModule[] = [
   { id: 'registros', label: 'Pesajes y novedades', description: 'Pesajes, desapariciones, recuperaciones, muertes y animales.', permissions: ['PESAJE_CONSULTAR', 'MUERTE_CONSULTAR'], endpoints: ['/registros/pesajes', '/registros/muertes', '/animales/novedades', '/animales?limit=100'] },
   { id: 'comercio', label: 'Ventas y compras', description: 'Ventas, productos, compradores, egresos y datos relacionados.', permissions: ['VENTA_CONSULTAR', 'COMPRA_CONSULTAR'], endpoints: ['/ventas', '/ventas/productos', '/compras', '/animales?limit=100', '/grupos?limit=100', '/ubicaciones'], catalogs: ['compradores', 'productos-venta', 'unidades', 'tipos-producto-compra', 'categorias-animales', 'especies', 'origenes'] },
   { id: 'actividades', label: 'Otras actividades', description: 'Herrajes, descornes, animales, fierros y fotografías.', permissions: ['ACTIVIDAD_CONSULTAR'], endpoints: ['/actividades', '/marquillas', '/animales?limit=100'], catalogs: ['tipos-actividad'] },
+  { id: 'agenda', label: 'Tareas y eventos', description: 'Pendientes, asignaciones, animales y recordatorios para trabajar sin conexión.', permissions: [], endpoints: ['/agenda', '/agenda/opciones'] },
   { id: 'catalogos', label: 'Catálogos', description: 'Opciones necesarias para formularios sin conexión.', permissions: ['CATALOGO_CONSULTAR'], endpoints: [] },
 ];
 
@@ -81,7 +82,7 @@ export async function runAutomaticDownloadIfEnabled(user: AuthUser) {
 }
 
 export function availableDownloadModules(user: AuthUser) {
-  return downloadModules.filter((module) => module.permissions.some((permission) => userHasPermission(user, permission)));
+  return downloadModules.filter((module) => !module.permissions.length||module.permissions.some((permission) => userHasPermission(user, permission)));
 }
 
 function collectMediaUrls(value: unknown, result = new Map<string,OfflineTransferMediaCategory>(), context='otros'): Map<string,OfflineTransferMediaCategory> {
@@ -104,6 +105,27 @@ function collectMediaUrls(value: unknown, result = new Map<string,OfflineTransfe
 
 function mediaTypeForUrl(url:string):MediaType{
   return /\/video\/upload\/|\.(?:mp4|mov)(?:[?#]|$)/i.test(url)?'VIDEO':'IMAGEN';
+}
+function agendaNotificationId(id:string){let hash=17;for(const char of id)hash=((hash*31)+char.charCodeAt(0))|0;return 3200+Math.abs(hash%500000);}
+function scheduleDownloadedAgenda(value:unknown,userId:string){for(const raw of dataList<Record<string,unknown>>(value)){const id=String(raw.id_agenda_item??''),reminder=String(raw.recordatorio_para??''),users=Array.isArray(raw.usuarios)?raw.usuarios as Array<Record<string,unknown>>:[],mine=String(raw.creado_por??'')===userId||users.some(item=>String(item.id_usuario??'')===userId),notificationId=agendaNotificationId(id);if(!id)continue;cancelAgendaReminder(id,notificationId);if(reminder&&mine&&['PENDIENTE','ACEPTADA'].includes(String(raw.estado??'')))scheduleAgendaReminder(id,raw.clase==='EVENTO'?'Recordatorio de evento':'Recordatorio de tarea',String(raw.titulo??'Actividad pendiente'),new Date(reminder).getTime(),notificationId);}}
+
+function scheduleDownloadedTreatments(value:unknown){
+  const rows=dataList<Record<string,unknown>>(value);
+  for(const row of rows){
+    const id=String(row.id_tratamiento??'');
+    if(id)cancelAgendaReminder(`tratamiento-${id}`,agendaNotificationId(`tratamiento-${id}`));
+  }
+  const today=currentDateInput();
+  for(const row of rows){
+    const id=String(row.id_tratamiento??''),animalId=String(row.id_animal??''),typeId=String(row.id_tipo_tratamiento??''),next=String(row.proxima_aplicacion??'').slice(0,10);
+    if(!id||!animalId||!typeId||!next||next<today)continue;
+    const alreadyApplied=rows.some(other=>String(other.id_tratamiento??'')!==id&&String(other.id_animal??'')===animalId&&String(other.id_tipo_tratamiento??'')===typeId&&String(other.fecha_aplicacion??'').slice(0,10)>=next);
+    if(alreadyApplied)continue;
+    const midnight=new Date(`${next}T00:00:00-05:00`).getTime();
+    const triggerAt=next===today?Math.max(midnight,Date.now()+5_000):midnight;
+    const key=`tratamiento-${id}`;
+    scheduleLocalReminder(key,'Tratamiento pendiente',`${String(row.animal??'Animal')} · aplicación programada para ${next}`,triggerAt,agendaNotificationId(key),`/sanidad?tratamiento=${id}`);
+  }
 }
 
 function idList(value: unknown, field: string): string[] {
@@ -243,6 +265,8 @@ export async function downloadSelectedContent(
       : job.path === '/imagenes/multimedia?page=1&limit=100'
         ? await downloadPagedCollection(user.id, job.path, '/imagenes/multimedia?page=1&limit=100')
         : await apiRequest<unknown>(job.path);
+    if(job.path==='/agenda')scheduleDownloadedAgenda(data,user.id);
+    if(job.path==='/registros/tratamientos')scheduleDownloadedTreatments(data);
     completeDashboardSources.add(job.path === '/animales?limit=100' ? '/animales' : job.path.split('?')[0]);
     await putOfflineSetting(`dashboardCompleteSources:${user.id}`,[...completeDashboardSources]);
     collectMediaUrls(data, media,job.path);

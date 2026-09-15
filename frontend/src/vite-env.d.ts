@@ -33,6 +33,9 @@ interface Window {
     setChartFullscreen?: (enabled: boolean) => void;
     showLocalNotification?: (channel: 'sync' | 'downloads', title: string, message: string, id: number, ongoing: boolean) => void;
     cancelLocalNotification?: (id: number) => void;
+    scheduleAgendaReminder?: (key:string,title:string,message:string,triggerAt:number,notificationId:number) => void;
+    scheduleLocalReminder?: (key:string,title:string,message:string,triggerAt:number,notificationId:number,route:string) => void;
+    cancelAgendaReminder?: (key:string,notificationId:number) => void;
     requestLocalDevice?: (requestId: string, baseUrl: string, method: string, path: string, formBody: string) => void;
   };
 }

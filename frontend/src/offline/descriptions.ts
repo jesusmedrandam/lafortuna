@@ -63,6 +63,9 @@ export async function describeOfflineMutation(userId: string, path: string, meth
   if (/^\/registros\/abortos/.test(path)) return `${action} de aborto${quoted(animal)}`;
   if (/^\/actividades\/imagenes\//.test(path)) return 'Eliminación de fotografía de actividad';
   if (/^\/actividades/.test(path)) return `${action} de actividad${quoted(body.descripcion)}`;
+  if (/^\/agenda\/[^/]+\/responder$/.test(path)) return 'Respuesta a tarea asignada';
+  if (/^\/agenda\/[^/]+\/completar$/.test(path)) return 'Realización de tarea asignada';
+  if (/^\/agenda/.test(path)) return `${action} de tarea o evento${quoted(body.titulo)}`;
   if (/^\/limpiezas-potrero\/imagenes\//.test(path)) return 'Eliminación de fotografía de limpieza de potrero';
   if (/^\/limpiezas-potrero/.test(path)) return `${path.includes('/imagenes') ? 'Carga de fotografía' : action} de limpieza de potrero`;
   if (/^\/registros\/lactancias/.test(path)) return `${action} de lactancia${quoted(await animalName(userId, body.id_vaca))}`;

@@ -19,6 +19,9 @@ interface SummaryHighlight { label:string; id:string; name:string; photo?:string
 interface SummaryLine { label:string; value:string; detail?:string }
 interface SummaryModel { metrics:SummaryMetric[]; highlights:SummaryHighlight[]; lines:SummaryLine[]; note?:string }
 interface SummaryData { animals:Animal[]; collections:Record<string,Record<string,unknown>[]> }
+interface AnimalSummaryPreference { oldestMode:'HIDDEN'|'AUTOMATIC'|'MANUAL'; manualOldestId:string }
+export const ANIMAL_SUMMARY_PREFERENCE_KEY='sgb.animal-summary.preference.v1';
+function animalSummaryPreference():AnimalSummaryPreference{try{const value=JSON.parse(localStorage.getItem(ANIMAL_SUMMARY_PREFERENCE_KEY)??'null') as Partial<AnimalSummaryPreference>|null;return{oldestMode:value?.oldestMode==='AUTOMATIC'||value?.oldestMode==='MANUAL'?value.oldestMode:'HIDDEN',manualOldestId:String(value?.manualOldestId??'')};}catch{return{oldestMode:'HIDDEN',manualOldestId:''};}}
 
 const sections:Record<SummarySection,SectionDefinition>={
   animales:{label:'Animales',description:'Inventario y animales destacados',route:'/animales',icon:Beef},
@@ -92,23 +95,25 @@ function animalHighlight(label:string,entry:[string,{name:string;value:number}]|
   return {label,id,name:animal?.nombre||item.name,photo:animal?.foto_perfil,subtitle:animal?.codigo_arete?`Arete ${animal.codigo_arete} · ${subtitle}`:subtitle,value:value(item.value)};
 }
 
-function buildAnimalModel(data:SummaryData):SummaryModel{
+function buildAnimalModel(data:SummaryData,preference=animalSummaryPreference()):SummaryModel{
   const animals=data.animals.filter((item)=>item&&item.estado!=='ELIMINADO');const directory=new Map(animals.map((item)=>[item.id_animal,item]));
   const active=animals.filter((item)=>item.estado==='ACTIVO');const born=active.filter((item)=>Boolean(item.fecha_nacimiento)).sort((a,b)=>localDate(a.fecha_nacimiento).localeCompare(localDate(b.fecha_nacimiento)));
   const productions=data.collections['/registros/producciones']??[];const productionDays=new Map<string,{id:string;name:string;date:string;value:number}>();
   productions.filter(valid).forEach((row)=>{const id=String(row.id_vaca??'');const date=localDate(row.fecha_produccion);const liters=number(row.litros);if(!id||!date||liters<=0)return;const key=`${id}:${date}`;const old=productionDays.get(key);productionDays.set(key,{id,name:String(row.animal??row.vaca??old?.name??'Animal'),date,value:(old?.value??0)+liters});});
-  const production=new Map<string,{name:string;value:number}>();const productionDates=new Map<string,string>();
-  productionDays.forEach((item)=>{const old=production.get(item.id);if(!old||item.value>old.value){production.set(item.id,{name:item.name,value:item.value});productionDates.set(item.id,item.date);}});
+  const productionTotals=new Map<string,{name:string;value:number;days:number}>();productionDays.forEach(item=>{const old=productionTotals.get(item.id);productionTotals.set(item.id,{name:item.name,value:(old?.value??0)+item.value,days:(old?.days??0)+1});});
+  const production=new Map<string,{name:string;value:number}>();productionTotals.forEach((item,id)=>production.set(id,{name:item.name,value:item.value/item.days}));
   const heats=new Map<string,{name:string;value:number}>();(data.collections['/reproduccion/celos']??[]).filter(valid).forEach((row)=>add(heats,row.id_vaca,row.vaca));
-  const calves=new Map<string,{name:string;value:number}>();const birthDates=new Map<string,{name:string;dates:string[]}>();
-  (data.collections['/partos']??[]).filter(valid).forEach((row)=>{const total=Array.isArray(row.crias)?row.crias.length:number(row.total_crias)||1;add(calves,row.id_madre,row.madre,total);const id=String(row.id_madre??'');const date=localDate(row.fecha_parto);if(id&&date){const old=birthDates.get(id)??{name:String(row.madre??'Animal'),dates:[]};old.dates.push(date);birthDates.set(id,old);}});
+  const offspring=new Map<string,Set<string>>();animals.forEach(animal=>{if(!animal.id_madre)return;const children=offspring.get(animal.id_madre)??new Set<string>();children.add(animal.id_animal);offspring.set(animal.id_madre,children);});
+  const birthDates=new Map<string,{name:string;dates:string[]}>();const births=(data.collections['/partos']??[]).filter(valid);
+  births.forEach(row=>{const id=String(row.id_madre??'');if(id&&Array.isArray(row.crias)){const children=offspring.get(id)??new Set<string>();row.crias.forEach((child,index)=>{if(child&&typeof child==='object'){const item=child as Record<string,unknown>;children.add(String(item.id_cria??item.id_animal??item.id_parto_cria??`${row.id_parto}:${index}`));}});offspring.set(id,children);}const date=localDate(row.fecha_parto);if(id&&date){const old=birthDates.get(id)??{name:String(row.madre??'Animal'),dates:[]};old.dates.push(date);birthDates.set(id,old);}});
+  const calves=new Map<string,{name:string;value:number}>();offspring.forEach((children,id)=>calves.set(id,{name:directory.get(id)?.nombre??birthDates.get(id)?.name??'Animal',value:children.size}));
   const intervals=new Map<string,{name:string;value:number}>();const longIntervals=new Map<string,{name:string;value:number}>();
   birthDates.forEach((item,id)=>{const dates=[...new Set(item.dates)].sort();for(let index=1;index<dates.length;index+=1){const days=daysBetween(dates[index-1],dates[index]);const shortest=intervals.get(id);const longest=longIntervals.get(id);if(!shortest||days<shortest.value)intervals.set(id,{name:item.name,value:days});if(!longest||days>longest.value)longIntervals.set(id,{name:item.name,value:days});}});
+  const automaticOldest=born[0];const manualOldest=directory.get(preference.manualOldestId);const oldest=preference.oldestMode==='AUTOMATIC'?automaticOldest:preference.oldestMode==='MANUAL'?manualOldest:undefined;
   const highlights=[
-    born[0]?{label:'Animal más viejo',id:born[0].id_animal,name:born[0].nombre,photo:born[0].foto_perfil,subtitle:`Nació ${formatDate(born[0].fecha_nacimiento)}`,value:'Ver perfil'}:null,
-    born.at(-1)?{label:'Animal más joven',id:born.at(-1)!.id_animal,name:born.at(-1)!.nombre,photo:born.at(-1)!.foto_perfil,subtitle:`Nació ${formatDate(born.at(-1)!.fecha_nacimiento)}`,value:'Ver perfil'}:null,
-    animalHighlight('Mayor producción en un día',topEntry(production),directory,`mejor día: ${formatDate(productionDates.get(topEntry(production)?.[0]??'')??'')}`,value=>`${formatNumber(value,2)} L`),
-    animalHighlight('Menor máximo diario',topEntry(production,true),directory,`mejor día: ${formatDate(productionDates.get(topEntry(production,true)?.[0]??'')??'')}`,value=>`${formatNumber(value,2)} L`),
+    oldest?{label:'Animal más viejo',id:oldest.id_animal,name:oldest.nombre,photo:oldest.foto_perfil,subtitle:oldest.fecha_nacimiento?`Nació ${formatDate(oldest.fecha_nacimiento)}`:'Seleccionado manualmente',value:preference.oldestMode==='MANUAL'?'Selección manual':'Cálculo automático'}:null,
+    animalHighlight('Mayor producción promedio',topEntry(production),directory,'promedio por día ordeñado',value=>`${formatNumber(value,2)} L/día`),
+    animalHighlight('Menor producción promedio',topEntry(production,true),directory,'promedio por día ordeñado',value=>`${formatNumber(value,2)} L/día`),
     animalHighlight('Más celos registrados',topEntry(heats),directory,'historial reproductivo',value=>`${formatNumber(value)} celos`),
     animalHighlight('Más crías registradas',topEntry(calves),directory,'partos registrados',value=>`${formatNumber(value)} crías`),
     animalHighlight('Intervalo más corto entre partos',topEntry(intervals,true),directory,'entre dos partos',value=>`${formatNumber(value)} días`),
@@ -120,6 +125,7 @@ function buildAnimalModel(data:SummaryData):SummaryModel{
     {label:'En propiedad',value:formatNumber(animals.filter((item)=>item.categoria_codigo==='EN_PROPIEDAD').length),detail:'Inventario propio',tone:'lime'},
     {label:'Fuera de propiedad',value:formatNumber(animals.filter((item)=>item.categoria_codigo==='FUERA_PROPIEDAD').length),detail:'Trasladados o vendidos',tone:'orange'},
     {label:'No activos',value:formatNumber(animals.length-active.length),detail:'Bajas y otros estados',tone:'red'},
+    {label:'Partos este año',value:formatNumber(births.filter(item=>inPeriod(item.fecha_parto,periodStart('year'))).length),detail:'Registrados',tone:'blue'},
   ],highlights,lines:[
     {label:'Vacas',value:formatNumber(principal.filter((item)=>item.clasificacion_codigo==='VACA').length)},
     {label:'Vaconas',value:formatNumber(principal.filter((item)=>item.clasificacion_codigo==='VACONA').length)},
@@ -127,7 +133,7 @@ function buildAnimalModel(data:SummaryData):SummaryModel{
     {label:'Toros y toretes',value:formatNumber(principal.filter((item)=>item.clasificacion_codigo==='TORO'||item.clasificacion_codigo==='TORETE').length)},
     {label:'Terneros',value:formatNumber(principal.filter((item)=>item.clasificacion_codigo==='TERNERO').length)},
     {label:'Hembras / machos',value:`${formatNumber(principal.filter((item)=>item.sexo==='HEMBRA').length)} / ${formatNumber(principal.filter((item)=>item.sexo==='MACHO').length)}`},
-  ],note:'La producción compara el mejor día completo de cada vaca, sumando sus turnos de ese día. Los destacados usan el historial disponible en este dispositivo y se amplían al actualizar las descargas.'};
+  ],note:'La producción suma los turnos del mismo día y calcula el promedio diario independiente de cada vaca. La descendencia se cuenta por hijos e hijas relacionados. Los destacados usan el historial disponible en este dispositivo.'};
 }
 
 function buildMovementModel(data:SummaryData):SummaryModel{
@@ -162,10 +168,10 @@ function buildReproductionModel(data:SummaryData):SummaryModel{
 }
 
 function buildProductionModel(data:SummaryData):SummaryModel{
-  const rows=(data.collections['/registros/producciones']??[]).filter(valid);const tanks=(data.collections['/registros/produccion-tanque']??[]).filter(valid);const lactations=(data.collections['/registros/lactancias']??[]).filter(valid);const today=currentDateInput(),week=periodStart('week'),month=periodStart('month'),year=periodStart('year');const liters=(start:string)=>rows.filter((item)=>inPeriod(item.fecha_produccion,start)).reduce((sum,item)=>sum+number(item.litros),0);const monthRows=rows.filter((item)=>inPeriod(item.fecha_produccion,month));const byCow=new Map<string,{name:string;value:number}>();monthRows.forEach((row)=>add(byCow,row.id_vaca,row.animal??row.vaca,number(row.litros)));const directory=new Map(data.animals.map((item)=>[item.id_animal,item]));
-  const highlights=[animalHighlight('Mayor producción del mes',topEntry(byCow),directory,'acumulado mensual',value=>`${formatNumber(value,2)} L`),animalHighlight('Menor producción del mes',topEntry(byCow,true),directory,'acumulado mensual',value=>`${formatNumber(value,2)} L`)].filter((item):item is SummaryHighlight=>Boolean(item));
+  const rows=(data.collections['/registros/producciones']??[]).filter(valid);const tanks=(data.collections['/registros/produccion-tanque']??[]).filter(valid);const lactations=(data.collections['/registros/lactancias']??[]).filter(valid);const today=currentDateInput(),week=periodStart('week'),month=periodStart('month'),year=periodStart('year');const liters=(start:string)=>rows.filter((item)=>inPeriod(item.fecha_produccion,start)).reduce((sum,item)=>sum+number(item.litros),0);const monthRows=rows.filter((item)=>inPeriod(item.fecha_produccion,month));const days=new Map<string,{id:string;name:string;value:number}>();monthRows.forEach(row=>{const id=String(row.id_vaca??''),date=localDate(row.fecha_produccion);if(!id||!date)return;const key=`${id}:${date}`,old=days.get(key);days.set(key,{id,name:String(row.animal??row.vaca??old?.name??'Animal'),value:(old?.value??0)+number(row.litros)});});const totals=new Map<string,{name:string;sum:number;days:number}>();days.forEach(item=>{const old=totals.get(item.id);totals.set(item.id,{name:item.name,sum:(old?.sum??0)+item.value,days:(old?.days??0)+1});});const byCow=new Map<string,{name:string;value:number}>();totals.forEach((item,id)=>byCow.set(id,{name:item.name,value:item.sum/item.days}));const directory=new Map(data.animals.map((item)=>[item.id_animal,item]));
+  const highlights=[animalHighlight('Mayor promedio diario',topEntry(byCow),directory,'promedio del mes por día ordeñado',value=>`${formatNumber(value,2)} L/día`),animalHighlight('Menor promedio diario',topEntry(byCow,true),directory,'promedio del mes por día ordeñado',value=>`${formatNumber(value,2)} L/día`)].filter((item):item is SummaryHighlight=>Boolean(item));
   const tankToday=tanks.filter((item)=>inPeriod(item.fecha_produccion,today)).reduce((sum,item)=>sum+number(item.litros),0);
-  return {metrics:[{label:'Hoy',value:`${formatNumber(liters(today),2)} L`,detail:'Producción por vaca',tone:'cyan'},{label:'Esta semana',value:`${formatNumber(liters(week),2)} L`,detail:'Acumulado',tone:'blue'},{label:'Este mes',value:`${formatNumber(liters(month),2)} L`,detail:'Acumulado',tone:'green'},{label:'Este año',value:`${formatNumber(liters(year),2)} L`,detail:'Acumulado',tone:'lime'}],highlights,lines:[{label:'Vacas registradas este mes',value:formatNumber(byCow.size)},{label:'Promedio mensual por vaca',value:byCow.size?`${formatNumber(liters(month)/byCow.size,2)} L`:'Sin datos'},{label:'Tanque hoy',value:`${formatNumber(tankToday,2)} L`},{label:'Lactancias activas',value:formatNumber(lactations.filter((item)=>item.activa===true).length)}]};
+  return {metrics:[{label:'Hoy',value:`${formatNumber(liters(today),2)} L`,detail:'Producción por vaca',tone:'cyan'},{label:'Esta semana',value:`${formatNumber(liters(week),2)} L`,detail:'Acumulado',tone:'blue'},{label:'Este mes',value:`${formatNumber(liters(month),2)} L`,detail:'Acumulado',tone:'green'},{label:'Este año',value:`${formatNumber(liters(year),2)} L`,detail:'Acumulado',tone:'lime'}],highlights,lines:[{label:'Vacas registradas este mes',value:formatNumber(byCow.size)},{label:'Promedio de los promedios diarios',value:byCow.size?`${formatNumber([...byCow.values()].reduce((sum,item)=>sum+item.value,0)/byCow.size,2)} L/día`:'Sin datos'},{label:'Tanque hoy',value:`${formatNumber(tankToday,2)} L`},{label:'Lactancias activas',value:formatNumber(lactations.filter((item)=>item.activa===true).length)}],note:'Cada vaca se compara por su promedio diario del mes; primero se suman todos sus turnos del mismo día.'};
 }
 
 function buildWeightModel(data:SummaryData):SummaryModel{

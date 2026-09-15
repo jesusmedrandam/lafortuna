@@ -253,6 +253,7 @@ const transferModuleRules:Array<[string,(path:string)=>boolean]>=[
   ['registros',(path)=>['/registros/pesajes','/registros/muertes'].some((root)=>path.startsWith(root))],
   ['comercio',(path)=>['/ventas','/compras'].some((root)=>path.startsWith(root))],
   ['actividades',(path)=>['/actividades','/marquillas'].some((root)=>path.startsWith(root))],
+  ['agenda',(path)=>path.startsWith('/agenda')],
   ['catalogos',(path)=>path.startsWith('/catalogos/')],
 ];
 

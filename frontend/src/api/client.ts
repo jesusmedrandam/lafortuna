@@ -8,7 +8,7 @@ import {
 } from '../offline/database';
 import { permissionForMutation, userHasPermission } from '../offline/permissions';
 import { validateOfflineMutation } from '../offline/validation';
-import { showLocalNotification, SYNC_NOTIFICATION_ID } from '../offline/native';
+import { cancelAgendaReminder, scheduleAgendaReminder, showLocalNotification, SYNC_NOTIFICATION_ID } from '../offline/native';
 import { describeOfflineMutation } from '../offline/descriptions';
 
 export const API_URL = (import.meta.env.VITE_API_URL || 'https://lafortuna.onrender.com/api').replace(/\/$/, '');
@@ -351,6 +351,7 @@ function temporaryIdField(path: string) {
   if (path === '/ubicaciones') return 'id_ubicacion';
   if (path === '/limpiezas-potrero') return 'id_limpieza';
   if (path === '/actividades') return 'id_actividad';
+  if (path === '/agenda') return 'id_agenda_item';
   if (path === '/partos') return 'id_parto';
   if (path === '/compras') return 'id_compra';
   if (path === '/ventas') return 'id_venta';
@@ -414,6 +415,8 @@ async function queueOfflineMutation<T>(path: string, options: RequestOptions): P
   }
   await assertNoOfflineMilkProductionDuplicate(session.user.id, path, method, options.body);
   await assertOfflineMovementActionAllowed(session.user.id, path, method);
+  await assertOfflineAgendaCreateAllowed(session.user.id,path,method,options.body);
+  await assertOfflineAgendaActionAllowed(session.user.id,path,method);
 
   const idField = method === 'POST' ? temporaryIdField(path) : null;
   const temporaryId = idField ? `offline-${crypto.randomUUID()}` : undefined;
@@ -421,9 +424,10 @@ async function queueOfflineMutation<T>(path: string, options: RequestOptions): P
     ? (options.body as { crias: unknown[] }).crias.map(() => `offline-${crypto.randomUUID()}`) : undefined;
   const bodyType: OfflineMutation['bodyType'] = options.body instanceof FormData ? 'form' : options.body === undefined ? 'none' : 'json';
   const movementActionPath = method === 'POST' && /^\/movimientos\/[^/]+\/(?:aplicar|cancelar)$/.test(pathWithoutQuery(path)) ? pathWithoutQuery(path) : null;
+  const agendaActionPath=method==='POST'&&/^\/agenda\/[^/]+\/(?:responder|completar)$/.test(pathWithoutQuery(path))?pathWithoutQuery(path):null;
   // Una clave determinista evita duplicados incluso ante dos pulsaciones que
   // alcancen la validación antes de que IndexedDB termine la primera escritura.
-  const mutationId = movementActionPath ? `movement-action:${session.user.id}:${encodeURIComponent(movementActionPath)}` : crypto.randomUUID();
+  const mutationId = movementActionPath ? `movement-action:${session.user.id}:${encodeURIComponent(movementActionPath)}` : agendaActionPath?`agenda-action:${session.user.id}:${encodeURIComponent(agendaActionPath)}`:crypto.randomUUID();
   const storedForm = bodyType === 'form' ? await storedFormEntries(options.body as FormData, session.user.id, mutationId) : null;
   const mutation: OfflineMutation = {
     id: mutationId, userId: session.user.id, path, method, permission,
@@ -482,8 +486,13 @@ async function queueOfflineMutation<T>(path: string, options: RequestOptions): P
   optimistic.__sync_state = 'PENDING';
   optimistic.__mutation_id = mutation.id;
   if (path === '/movimientos' && method === 'POST') optimistic = normalizeMovement(optimistic, mutation.id);
+  if(path==='/agenda'&&method==='POST'){
+    const cached=unwrapApiData(await getOfflineCache<unknown>(session.user.id,'/agenda/opciones')) as {usuarios?:Record<string,unknown>[];animales?:Record<string,unknown>[]}|null;
+    const selectedUsers=new Set(Array.isArray(optimistic.id_usuarios)?optimistic.id_usuarios.map(String):[]),selectedAnimals=new Set(Array.isArray(optimistic.id_animales)?optimistic.id_animales.map(String):[]);
+    optimistic={...optimistic,estado:'PENDIENTE',creado_por:session.user.id,creado_por_nombre:`${session.user.nombres} ${session.user.apellidos}`.trim(),mi_respuesta:selectedUsers.has(session.user.id)?'PENDIENTE':null,usuarios:(cached?.usuarios??[]).filter(item=>selectedUsers.has(String(item.id_usuario??''))).map(item=>({...item,respuesta:'PENDIENTE'})),animales:(cached?.animales??[]).filter(item=>selectedAnimals.has(String(item.id_animal??'')))};
+  }
   await applyOptimisticMutation(session.user.id, path, method, optimistic);
-  await applyOptimisticAction(session.user.id, path, method);
+  await applyOptimisticAction(session.user.id, path, method,optimistic);
   if (method === 'DELETE') await applyOptimisticMediaDeletion(session.user.id, path);
   const optimisticMedia = storedForm?.localMediaIds.length
     ? await applyOptimisticMediaMutation(session.user.id, path, optimistic, storedForm.localMediaIds)
@@ -553,6 +562,26 @@ async function assertOfflineMovementActionAllowed(userId: string, path: string, 
     throw new ApiError(409, 'MOVEMENT_ALREADY_PROCESSED', action === 'aplicar'
       ? 'Este movimiento ya fue aplicado y no puede aplicarse nuevamente.'
       : 'Este movimiento ya fue procesado y no puede cancelarse nuevamente.');
+  }
+}
+async function assertOfflineAgendaActionAllowed(userId:string,path:string,method:string){if(method!=='POST')return;const match=pathWithoutQuery(path).match(/^\/agenda\/([^/]+)\/(responder|completar)$/);if(!match)return;const[,id,action]=match;if((await listOfflineMutations(userId)).some(m=>m.state!=='FAILED'&&m.method==='POST'&&pathWithoutQuery(m.path)===pathWithoutQuery(path)))throw new ApiError(409,'AGENDA_ACTION_ALREADY_PENDING',action==='completar'?'Esta tarea ya fue realizada en el dispositivo y está pendiente de sincronizar.':'Esta respuesta ya está pendiente de sincronizar.');const item=(await listOfflineCacheEntries(userId)).filter(e=>pathWithoutQuery(e.path)==='/agenda'||pathWithoutQuery(e.path)===`/agenda/${id}`).flatMap(e=>cachedRecords(e.payload)).find(row=>String(row.id_agenda_item??'')===id);if(!item)throw new ApiError(0,'OFFLINE_AGENDA_NOT_DOWNLOADED','La tarea no está guardada en este dispositivo. Actualiza las descargas.');if(action==='completar'&&['COMPLETADA','CANCELADA','RECHAZADA'].includes(String(item.estado??'')))throw new ApiError(409,'AGENDA_ALREADY_PROCESSED','Esta tarea ya fue cerrada.');if(action==='responder'&&String(item.mi_respuesta??'PENDIENTE')!=='PENDIENTE')throw new ApiError(409,'AGENDA_ALREADY_ANSWERED','Esta tarea ya tiene una respuesta.');}
+
+async function assertOfflineAgendaCreateAllowed(userId:string,path:string,method:string,body:unknown){
+  if(pathWithoutQuery(path)!=='/agenda'||method!=='POST'||!body||typeof body!=='object'||body instanceof FormData)return;
+  const value=body as Record<string,unknown>,options=unwrapApiData(await getOfflineCache<unknown>(userId,'/agenda/opciones')) as {usuarios?:Record<string,unknown>[];animales?:Record<string,unknown>[];configuracion?:{tareas_habilitadas?:boolean;eventos_habilitados?:boolean}}|null;
+  if(!options)throw new ApiError(0,'OFFLINE_AGENDA_OPTIONS_MISSING','Descarga Tareas y eventos antes de crear elementos sin conexión.');
+  const kind=String(value.clase??''),userIds=Array.isArray(value.id_usuarios)?value.id_usuarios.map(String):[],animalIds=Array.isArray(value.id_animales)?value.id_animales.map(String):[];
+  if(kind==='TAREA'&&options.configuracion?.tareas_habilitadas===false)throw new ApiError(409,'TASKS_DISABLED','Las tareas están desactivadas en Configuración.');
+  if(kind==='EVENTO'&&options.configuracion?.eventos_habilitados===false)throw new ApiError(409,'EVENTS_DISABLED','Los eventos están desactivados en Configuración.');
+  if(!String(value.titulo??'').trim()||!String(value.programado_para??'').trim())throw new ApiError(400,'OFFLINE_AGENDA_INVALID','Escribe el título y la fecha programada.');
+  if(kind==='TAREA'&&!userIds.length)throw new ApiError(400,'OFFLINE_AGENDA_ASSIGNEE_REQUIRED','Asigna la tarea al menos a un usuario.');
+  if(kind==='EVENTO'&&value.visibilidad==='SELECCIONADOS'&&!userIds.length)throw new ApiError(400,'OFFLINE_AGENDA_VIEWER_REQUIRED','Selecciona quién puede ver el evento.');
+  const validUsers=new Set((options.usuarios??[]).map(item=>String(item.id_usuario??''))),validAnimals=new Set((options.animales??[]).map(item=>String(item.id_animal??'')));
+  if(userIds.some(id=>!validUsers.has(id))||animalIds.some(id=>!validAnimals.has(id)))throw new ApiError(409,'OFFLINE_AGENDA_OPTION_CHANGED','Uno de los usuarios o animales ya no está disponible en los datos descargados.');
+  if(value.tipo_actividad==='TRATAMIENTO'){
+    const data=value.datos&&typeof value.datos==='object'?value.datos as Record<string,unknown>:{};
+    if(!animalIds.length)throw new ApiError(400,'OFFLINE_TREATMENT_ANIMAL_REQUIRED','Relaciona al menos un animal con el tratamiento.');
+    if(!data.id_tipo_tratamiento||!data.id_medicamento||!data.id_via_administracion||!data.id_unidad_dosis||Number(data.dosis)<=0||!data.fecha_aplicacion)throw new ApiError(400,'OFFLINE_TREATMENT_DATA_REQUIRED','Completa tipo, medicamento, vía, dosis, unidad y fecha de aplicación.');
   }
 }
 
@@ -1078,8 +1107,9 @@ function updateCachedRecords(value: unknown, idField: string, ids: Set<string>, 
   return value;
 }
 
-async function applyOptimisticAction(userId: string, path: string, method: string) {
+async function applyOptimisticAction(userId: string, path: string, method: string,body?:Record<string,unknown>) {
   if (method !== 'POST') return;
+  const agenda=pathWithoutQuery(path).match(/^\/agenda\/([^/]+)\/(responder|completar)$/);if(agenda){const[,id,action]=agenda,ids=new Set([id]);for(const entry of await listOfflineCacheEntries(userId)){if(!entry.path.startsWith('/agenda'))continue;await putOfflineCache(userId,entry.path,updateCachedRecords(entry.payload,'id_agenda_item',ids,record=>({...record,estado:action==='completar'?'COMPLETADA':String(body?.respuesta??record.estado),mi_respuesta:action==='responder'?String(body?.respuesta??'PENDIENTE'):record.mi_respuesta,__offline:true,__sync_state:'PENDING' as const})));}return;}
   const match = pathWithoutQuery(path).match(/^\/movimientos\/([^/]+)\/(aplicar|cancelar)$/);
   if (!match) return;
   const [, movementId, action] = match;
@@ -1319,7 +1349,7 @@ async function reapplyPendingMutations(userId: string) {
     const optimistic = optimisticFromMutation(mutation);
     const resolvedPath = Object.entries(temporaryIds).reduce((result, [temporary, actual]) => result.replaceAll(temporary, actual), mutation.path);
     await applyOptimisticMutation(userId, resolvedPath, mutation.method, replaceTemporaryIds(optimistic, temporaryIds) as Record<string, unknown>);
-    await applyOptimisticAction(userId, resolvedPath, mutation.method);
+    await applyOptimisticAction(userId, resolvedPath, mutation.method,mutation.jsonBody&&typeof mutation.jsonBody==='object'?mutation.jsonBody as Record<string,unknown>:undefined);
     if (mutation.method === 'DELETE') await applyOptimisticMediaDeletion(userId, mutation.path);
     if (mutation.localMediaIds?.length) await applyOptimisticMediaMutation(userId, mutation.path, optimistic, mutation.localMediaIds);
   }
@@ -1913,6 +1943,7 @@ export async function refreshOfflineCoreCache() {
     apiRequest<Animal[]>('/animales?limit=100'),
     apiRequest<AnimalFilterOptions>('/animales/opciones/filtros'),
     apiRequest<OwnerOption[]>('/animales/opciones/propietarios'),
+    apiRequest('/agenda'),apiRequest('/agenda/opciones'),
   ]);
 }
 
@@ -2076,6 +2107,12 @@ async function reconcileSyncedCreation(userId: string, mutation: OfflineMutation
   const idField = temporaryIdField(root);
   if (!idField) return;
   const actual = await normalizeOptimisticEntity(userId, root, withoutSyncMarkers({ ...(serverData as Record<string, unknown>), [idField]: actualId }));
+  if(root==='/agenda'){
+    const notificationId=(id:string)=>{let hash=17;for(const char of id)hash=((hash*31)+char.charCodeAt(0))|0;return 3200+Math.abs(hash%500000);};
+    cancelAgendaReminder(mutation.temporaryId,notificationId(mutation.temporaryId));
+    const reminder=String(actual.recordatorio_para??'');
+    if(reminder&&['PENDIENTE','ACEPTADA'].includes(String(actual.estado??'')))scheduleAgendaReminder(actualId,actual.clase==='EVENTO'?'Recordatorio de evento':'Recordatorio de tarea',String(actual.titulo??'Actividad pendiente'),new Date(reminder).getTime(),notificationId(actualId));
+  }
   if (root === '/animales') await rememberAnimalIdentities(userId, [actual as unknown as Animal]);
   for (const entry of await listOfflineCacheEntries(userId)) {
     if (!isEntityCollectionPath(root, entry.path)) continue;

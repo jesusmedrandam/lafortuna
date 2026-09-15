@@ -33,6 +33,7 @@ import { activitiesRouter } from './modules/activities/activities.routes.js';
 import { healthRouter } from './modules/health/health.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
 import { publicAnimalsRouter } from './modules/animals/public-animals.routes.js';
+import { agendaRouter } from './modules/agenda/agenda.routes.js';
 
 export const app=express();
 app.set('trust proxy',1);
@@ -78,6 +79,7 @@ api.use('/actividades',activitiesRouter);
 api.use('/condiciones-salud',healthRouter);
 api.use('/configuracion',settingsRouter);
 api.use('/notificaciones',notificationsRouter);
+api.use('/agenda',agendaRouter);
 app.use(env.API_PREFIX,api);
 app.use(notFoundHandler);
 app.use(errorHandler);
