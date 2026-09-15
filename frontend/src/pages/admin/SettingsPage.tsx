@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Activity, Baby, Beef, Bell, BookOpen, ChevronRight, ClipboardList, Download,
+  Activity, AlarmClock, Baby, Beef, Bell, BookOpen, CalendarClock, ChevronRight, ClipboardList, Clock3, Download,
   Droplets, ExternalLink, LayoutDashboard, Link2, Milk, Moon, Palette, RotateCcw, Save, Settings2,
   ShieldAlert, ShieldCheck, ShoppingCart, Sprout, Sun, Syringe, Tag, UserCircle,
   Trash2, UserCog, Users, Weight,
@@ -14,12 +14,13 @@ import { useToast } from '../../components/ToastContext';
 import { AppUpdatePanel } from '../../components/AppUpdatePrompt';
 import { useTheme } from '../../theme/ThemeContext';
 import { formatDate } from '../../utils';
+import type { Animal } from '../../types/api';
 import {
   Badge, Button, Card, EmptyState, ErrorState, Field, Input, LoadingState,
   PageHeader, Select,
 } from '../../components/ui';
 
-type SettingsSection = 'inicio' | 'notificaciones' | 'apariencia' | 'finca' | 'operaciones' | 'enlaces' | 'actualizacion';
+type SettingsSection = 'inicio' | 'notificaciones' | 'apariencia' | 'finca' | 'operaciones' | 'enlaces' | 'actualizacion'|'agenda'|'hora'|'resumen';
 type NotificationMode = 'PUSH_BUZON' | 'SOLO_BUZON' | 'DESACTIVADAS';
 
 interface OperationProperty { id_propiedad: string; codigo: string | null; nombre: string; es_principal: boolean }
@@ -60,6 +61,7 @@ interface FarmConfiguration {
 
 interface FarmConfigurationResponse { propiedades: FarmConfiguration[] }
 interface PublicAnimalLink { id_animal_compartido:string;id_animal:string;animal:string;codigo_arete:string|null;url:string;created_at:string;creado_por:string }
+interface AgendaConfiguration{tareas_habilitadas:boolean;eventos_habilitados:boolean;updated_at?:string|null}interface ServerTime{hora_utc:string;hora_ecuador:string;fecha_ecuador:string;zona_horaria:string;intervalo_alertas_ms:number}interface AnimalSummaryPreference{oldestMode:'HIDDEN'|'AUTOMATIC'|'MANUAL';manualOldestId:string}const ANIMAL_SUMMARY_PREFERENCE_KEY='sgb.animal-summary.preference.v1';
 
 interface SettingsCardDefinition {
   label: string;
@@ -106,7 +108,7 @@ function notificationValues(categoria: string, mode: NotificationMode): Notifica
 }
 
 function sectionFrom(value: string | null): SettingsSection {
-  return value === 'notificaciones' || value === 'apariencia' || value === 'finca' || value === 'operaciones' || value === 'enlaces' || value === 'actualizacion' ? value : 'inicio';
+  return value === 'notificaciones' || value === 'apariencia' || value === 'finca' || value === 'operaciones' || value === 'enlaces' || value === 'actualizacion'||value==='agenda'||value==='hora'||value==='resumen' ? value : 'inicio';
 }
 
 export function SettingsPage() {
@@ -123,6 +125,8 @@ export function SettingsPage() {
 
   const publicLinks=useQuery({queryKey:['public-animal-links'],queryFn:()=>apiRequest<PublicAnimalLink[]>('/animales/enlaces-publicos'),enabled:section==='enlaces'&&isAdministrator});
   const revokePublicLink=useMutation({mutationFn:(id:string)=>apiRequest(`/animales/enlaces-publicos/${id}`,{method:'DELETE'}),onSuccess:async()=>{toast.show('Enlace público desactivado.');await client.invalidateQueries({queryKey:['public-animal-links']});},onError:(error)=>toast.show((error as ApiError).message,'error')});
+  const agendaQuery=useQuery({queryKey:['agenda-configuration'],queryFn:()=>apiRequest<AgendaConfiguration>('/configuracion/agenda'),enabled:section==='agenda'});const[agendaDraft,setAgendaDraft]=useState<AgendaConfiguration>({tareas_habilitadas:true,eventos_habilitados:true});useEffect(()=>{if(agendaQuery.data)setAgendaDraft(agendaQuery.data);},[agendaQuery.data]);const saveAgenda=useMutation({mutationFn:()=>apiRequest('/configuracion/agenda',{method:'PUT',body:agendaDraft}),onSuccess:async()=>{toast.show('Tareas y eventos actualizados.');await Promise.all([client.invalidateQueries({queryKey:['agenda-configuration']}),client.invalidateQueries({queryKey:['agenda-options']})]);},onError:error=>toast.show((error as ApiError).message,'error')});
+  const serverTime=useQuery({queryKey:['server-time'],queryFn:()=>apiRequest<ServerTime>('/configuracion/hora-servidor'),enabled:section==='hora',refetchInterval:section==='hora'?30000:false});const summaryAnimals=useQuery({queryKey:['animals','summary-preference'],queryFn:()=>apiRequest<Animal[]>('/animales?limit=100'),enabled:section==='resumen'});const[summaryDraft,setSummaryDraft]=useState<AnimalSummaryPreference>(()=>{try{const value=JSON.parse(localStorage.getItem(ANIMAL_SUMMARY_PREFERENCE_KEY)??'null')as Partial<AnimalSummaryPreference>|null;return{oldestMode:value?.oldestMode==='AUTOMATIC'||value?.oldestMode==='MANUAL'?value.oldestMode:'HIDDEN',manualOldestId:String(value?.manualOldestId??'')};}catch{return{oldestMode:'HIDDEN',manualOldestId:''};}});
 
   const [notificationDraft, setNotificationDraft] = useState<NotificationPreference[]>([]);
   const notificationQuery = useQuery({
@@ -306,6 +310,10 @@ export function SettingsPage() {
     </div>;
   }
 
+  if(section==='resumen')return <div className="settings-page settings-content">{sectionHeader('Resumen de animales','Decide si se muestra el animal más viejo y cómo se elige.',<Button onClick={()=>{localStorage.setItem(ANIMAL_SUMMARY_PREFERENCE_KEY,JSON.stringify(summaryDraft));toast.show('Preferencia del resumen guardada.');}}><Save size={18}/>Guardar</Button>)}<Card className="farm-settings-form"><Field label="Animal más viejo"><Select value={summaryDraft.oldestMode} onChange={event=>setSummaryDraft(current=>({...current,oldestMode:event.target.value as AnimalSummaryPreference['oldestMode']}))}><option value="HIDDEN">No mostrar</option><option value="AUTOMATIC">Calcular por fecha de nacimiento</option><option value="MANUAL">Elegir manualmente</option></Select></Field>{summaryDraft.oldestMode==='MANUAL'?summaryAnimals.isLoading?<LoadingState text="Cargando animales…"/>:<Field label="Animal seleccionado"><Select value={summaryDraft.manualOldestId} onChange={event=>setSummaryDraft(current=>({...current,manualOldestId:event.target.value}))}><option value="">Selecciona un animal</option>{summaryAnimals.data?.filter(item=>item.estado==='ACTIVO').sort((a,b)=>a.nombre.localeCompare(b.nombre,'es')).map(animal=><option key={animal.id_animal} value={animal.id_animal}>{animal.nombre}{animal.codigo_arete?` · Arete ${animal.codigo_arete}`:''}</option>)}</Select></Field>:null}<div className="settings-info"><Beef size={19}/><span>El animal más joven no se mostrará. El modo automático solo compara animales con fecha de nacimiento; el manual permite conservar un dato conocido aunque falte la fecha.</span></div></Card></div>;
+  if(section==='agenda')return <div className="settings-page settings-content">{sectionHeader('Tareas y eventos','Activa cada función por separado para toda la finca.',canEditAdministration?<Button loading={saveAgenda.isPending} onClick={()=>saveAgenda.mutate()}><Save size={18}/>Guardar</Button>:undefined)}{agendaQuery.isLoading?<LoadingState/>:agendaQuery.isError?<ErrorState message={(agendaQuery.error as Error).message} onRetry={()=>void agendaQuery.refetch()}/>:<Card className="farm-settings-form"><label className="settings-switch-row"><span><strong>Tareas</strong><small>Asignaciones, aceptación, ejecución y recordatorios.</small></span><span className="switch"><input type="checkbox" disabled={!canEditAdministration} checked={agendaDraft.tareas_habilitadas} onChange={event=>setAgendaDraft(current=>({...current,tareas_habilitadas:event.target.checked}))}/><i/></span></label><label className="settings-switch-row"><span><strong>Eventos</strong><small>Fechas privadas, compartidas o visibles para todos.</small></span><span className="switch"><input type="checkbox" disabled={!canEditAdministration} checked={agendaDraft.eventos_habilitados} onChange={event=>setAgendaDraft(current=>({...current,eventos_habilitados:event.target.checked}))}/><i/></span></label><div className="settings-info"><AlarmClock size={19}/><span>Al desactivar una opción se impide crear nuevos elementos; el historial se conserva.</span></div></Card>}</div>;
+  if(section==='hora')return <div className="settings-page settings-content">{sectionHeader('Hora del servidor','Consulta la hora usada para cálculos y notificaciones. Solo se actualiza mientras estás aquí.')}{serverTime.isLoading?<LoadingState/>:serverTime.isError?<ErrorState message={(serverTime.error as Error).message} onRetry={()=>void serverTime.refetch()}/>:<div className="settings-time-grid"><Card className="section-summary-metric stat-green"><strong>{serverTime.data?.hora_ecuador?.slice(11,19)??'—'}</strong><span>Hora Ecuador</span><small>{serverTime.data?.fecha_ecuador} · America/Guayaquil</small></Card><Card className="section-summary-metric stat-blue"><strong>{serverTime.data?.hora_utc?.slice(11,19)??'—'}</strong><span>Hora UTC</span><small>Referencia técnica</small></Card></div>}<div className="settings-info"><Clock3 size={19}/><span>Las alertas calculadas se revisan cada {Math.max(1,Math.round((serverTime.data?.intervalo_alertas_ms??3_600_000)/60_000))} minutos. Una fecha que vence a las 00:00 puede notificarse dentro del siguiente intervalo; los recordatorios locales descargados no dependen del servidor.</span></div></div>;
+
   if (section === 'finca') return <div className="settings-page settings-content">
     {sectionHeader('Configuración de la finca', 'Define por propiedad las reglas sanitarias, reproductivas y de ordeño.', canEditAdministration ? <Button loading={saveFarm.isPending} disabled={!farmValuesValid} onClick={() => saveFarm.mutate()}><Save size={18} />Guardar</Button> : undefined)}
     {!canViewAdministration ? <ErrorState message="No tienes permiso para consultar la configuración administrativa." /> : farmQuery.isLoading ? <LoadingState /> : farmQuery.isError ? <ErrorState message={(farmQuery.error as Error).message} onRetry={() => void farmQuery.refetch()} /> : !farmDraft ? <EmptyState icon={Sprout} title="Sin propiedades" description="Registra una propiedad antes de configurar las alertas." /> : <div className="farm-settings-layout">
@@ -386,6 +394,7 @@ export function SettingsPage() {
     ...(hasPermission('DASHBOARD_CONSULTAR') ? [{ label: 'Panel', description: 'Elige las tarjetas que ves al iniciar.', icon: LayoutDashboard, action: () => navigate('/?ajustes_panel=1') }] : []),
     { label: 'Notificaciones', description: 'Configura push, buzón o avisos desactivados.', icon: Bell, action: () => openSection('notificaciones') },
     { label: 'Apariencia', description: 'Tema, color principal y fondo de la aplicación.', icon: Palette, action: () => openSection('apariencia') },
+    { label: 'Resumen de animales', description: 'Configura el animal más viejo manual o automático.', icon: Beef, action: () => openSection('resumen') },
   ];
   const administrationCards: SettingsCardDefinition[] = [
     ...(canViewAdministration ? [
@@ -400,6 +409,8 @@ export function SettingsPage() {
     ...(isAdministrator ? [{ label: 'Enlaces públicos', description: 'Consulta y desactiva fichas compartidas.', icon: Link2, action: () => openSection('enlaces') }] : []),
   ];
   const systemCards: SettingsCardDefinition[] = [
+    { label: 'Tareas y eventos', description: 'Activa o desactiva cada función por separado.', icon: CalendarClock, action: () => openSection('agenda') },
+    { label: 'Hora del servidor', description: 'Comprueba la hora usada para alertas y cálculos.', icon: Clock3, action: () => openSection('hora') },
     { label: 'Actualizar aplicación', description: 'Comprueba, descarga e instala la última versión.', icon: Download, action: () => openSection('actualizacion') },
   ];
 

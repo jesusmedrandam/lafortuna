@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   ArrowLeftRight, Baby, Beef, ChevronRight, Droplets,
   HeartOff, Home, Images, LayoutDashboard, LogOut, MapPinned, Menu, Milk, Moon, ShoppingCart, Sprout, Sun, Syringe,
-  Settings2, UserCircle, Users, Warehouse, Weight, X, Activity, AlertTriangle, PackagePlus, CloudDownload, RefreshCw, Wifi, WifiOff, BarChart3, type LucideIcon,
+  Settings2, UserCircle, Users, Warehouse, Weight, X, Activity, AlertTriangle, PackagePlus, CloudDownload, RefreshCw, Wifi, WifiOff, BarChart3, CalendarClock, type LucideIcon,
 } from 'lucide-react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -52,6 +52,7 @@ const destinations: Destination[] = [
   { to: '/ventas', label: 'Ventas', icon: ShoppingCart, permissions: ['VENTA_CONSULTAR'], section: 'operaciones' },
   { to: '/compras', label: 'Compras y egresos', icon: PackagePlus, permissions: ['COMPRA_CONSULTAR'], section: 'operaciones' },
   { to: '/actividades', label: 'Otras actividades', icon: Activity, permissions: ['ACTIVIDAD_CONSULTAR'], section: 'operaciones' },
+  { to: '/agenda', label: 'Tareas y eventos', icon: CalendarClock, section: 'operaciones' },
   { to: '/configuracion', label: 'Configuración', icon: Settings2, section: 'configuracion' },
 ];
 

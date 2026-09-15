@@ -41,6 +41,7 @@ import { PurchasesPage } from '../pages/purchases/PurchasesPage';
 import { ActivitiesPage } from '../pages/activities/ActivitiesPage';
 import { DownloadsPage } from '../pages/offline/DownloadsPage';
 import { SectionSummaryPage } from '../pages/summary/SectionSummaryPage';
+import { AgendaPage } from '../pages/agenda/AgendaPage';
 
 function ProtectedRoot() {
   const { user, ready } = useAuth();
@@ -107,6 +108,7 @@ export function AppRouter() {
           <Route path="compras" element={<PermissionRoute permissions={['COMPRA_CONSULTAR']}><PurchasesPage /></PermissionRoute>} />
           <Route path="compras/resumen" element={<PermissionRoute permissions={['COMPRA_CONSULTAR']}><SectionSummaryPage section="compras" /></PermissionRoute>} />
           <Route path="actividades" element={<PermissionRoute permissions={['ACTIVIDAD_CONSULTAR']}><ActivitiesPage /></PermissionRoute>} />
+          <Route path="agenda" element={<AgendaPage />} />
           <Route path="catalogos" element={<PermissionRoute permissions={['CATALOGO_CONSULTAR']}><CatalogsPage /></PermissionRoute>} />
           <Route path="configuracion" element={<SettingsPage />} />
           <Route path="marquillas" element={<PermissionRoute permissions={['CATALOGO_CONSULTAR']}><MarksPage /></PermissionRoute>} />

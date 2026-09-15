@@ -350,6 +350,14 @@ async function notifyTreatmentDates(client: PoolClient, today: string) {
   }
 }
 
+async function notifyAgendaReminders(client:PoolClient){
+  const available=(await client.query(`SELECT to_regclass('public.agenda_item') agenda_item`)).rows[0]?.agenda_item;
+  if(!available)return;
+  const enabled=(await client.query(`SELECT tareas_habilitadas,eventos_habilitados FROM configuracion_agenda WHERE id_configuracion=1`)).rows[0]??{tareas_habilitadas:true,eventos_habilitados:true};
+  const rows=(await client.query(`SELECT i.id_agenda_item,i.clase,i.titulo,i.programado_para,i.creado_por,i.visibilidad,COALESCE((SELECT array_agg(au.id_usuario) FROM agenda_usuario au WHERE au.id_agenda_item=i.id_agenda_item),ARRAY[]::uuid[]) usuarios FROM agenda_item i WHERE i.deleted_at IS NULL AND i.estado IN ('PENDIENTE','ACEPTADA') AND i.recordatorio_para IS NOT NULL AND i.recordatorio_para<=NOW() AND i.recordatorio_enviado_at IS NULL AND ((i.clase='TAREA' AND $1::boolean) OR (i.clase='EVENTO' AND $2::boolean)) ORDER BY i.recordatorio_para FOR UPDATE SKIP LOCKED`,[enabled.tareas_habilitadas,enabled.eventos_habilitados])).rows as Array<Row&{usuarios:string[]}>;
+  for(const row of rows){let users=(row.usuarios??[]).map(String);if(row.clase==='EVENTO'&&row.visibilidad==='TODOS')users=(await client.query(`SELECT id_usuario FROM usuario WHERE activo=TRUE AND deleted_at IS NULL`)).rows.map(item=>String(item.id_usuario));if(row.clase==='EVENTO'&&row.visibilidad==='PRIVADO')users=[String(row.creado_por)];await emitNotification(client,{tipo:'RECORDATORIO_AGENDA',categoria:'ACTIVIDADES',prioridad:'URGENTE',titulo:row.clase==='TAREA'?'Recordatorio de tarea':'Recordatorio de evento',mensaje:String(row.titulo),entidadTipo:'AGENDA',entidadId:String(row.id_agenda_item),ruta:`/agenda?item=${row.id_agenda_item}`,usuarios:[...new Set(users)],datos:{programado_para:row.programado_para},claveDedupe:`AGENDA:RECORDATORIO:${row.id_agenda_item}`});await client.query(`UPDATE agenda_item SET recordatorio_enviado_at=NOW(),updated_at=NOW() WHERE id_agenda_item=$1`,[row.id_agenda_item]);}
+}
+
 export async function generateCalculatedNotifications() {
   if (running) return 0;
   running = true;
@@ -363,6 +371,7 @@ export async function generateCalculatedNotifications() {
       await notifyProductionVariation(client, dates.ayer);
       await notifyOverdueCleanings(client, dates.hoy);
       await notifyTreatmentDates(client, dates.hoy);
+      await notifyAgendaReminders(client);
       return 1;
     });
     if(result)scheduleNotificationPushDispatch();
