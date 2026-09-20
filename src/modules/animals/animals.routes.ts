@@ -79,6 +79,7 @@ const conditionActionSchema = z.object({
   id_ubicacion_actual: z.string().uuid().nullable().optional(),
   observaciones: z.string().trim().max(1000).nullable().optional(),
 });
+const shareCreateSchema = z.object({ token: z.string().uuid().optional() });
 
 function conditionActionPayload(body: unknown) {
   if (typeof body === 'object' && body !== null && 'data' in body) {
@@ -1074,6 +1075,7 @@ animalsRouter.get('/:id/compartir', requirePermission('ANIMAL_MODIFICAR'), async
 
 animalsRouter.post('/:id/compartir', requirePermission('ANIMAL_MODIFICAR'), asyncHandler(async (req, res) => {
   const id = routeParam(req.params.id, 'id');
+  const input = shareCreateSchema.parse(req.body ?? {});
   const result = await transaction(async (client) => {
     const animal = (await client.query(
       'SELECT id_animal FROM animal WHERE id_animal=$1 AND deleted_at IS NULL FOR SHARE',
@@ -1086,8 +1088,16 @@ animalsRouter.post('/:id/compartir', requirePermission('ANIMAL_MODIFICAR'), asyn
        ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
       [id],
     )).rows[0];
+    if (current && input.token && current.token !== input.token) {
+      return (await client.query(
+        `UPDATE animal_compartido SET token=$2,updated_at=NOW()
+         WHERE id_animal=$1 AND token=$3 AND activo=TRUE AND revocado_at IS NULL
+         RETURNING token,created_at`,
+        [id, input.token, current.token],
+      )).rows[0];
+    }
     if (current) return current;
-    const token = randomUUID();
+    const token = input.token ?? randomUUID();
     return (await client.query(
       `INSERT INTO animal_compartido(id_animal,token,creado_por)
        VALUES($1,$2,$3) RETURNING token,created_at`,

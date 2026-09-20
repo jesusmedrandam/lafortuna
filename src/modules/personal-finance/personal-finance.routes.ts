@@ -8,23 +8,33 @@ import { pool } from '../../database/pool.js';
 import { transaction } from '../../database/transaction.js';
 import { buildInsert } from '../shared/sql.js';
 
-const accountTypes = ['EFECTIVO', 'BANCO', 'BILLETERA', 'OTRO'] as const;
+const accountTypes = ['EFECTIVO', 'BANCO', 'BILLETERA', 'TARJETA_CREDITO', 'OTRO'] as const;
 const movementTypes = ['INGRESO', 'EGRESO', 'TRANSFERENCIA', 'AJUSTE_ENTRADA', 'AJUSTE_SALIDA'] as const;
 const paymentMethods = ['EFECTIVO', 'TRANSFERENCIA', 'TARJETA_DEBITO', 'TARJETA_CREDITO', 'DEPOSITO', 'OTRO'] as const;
+const scheduleFrequencies = ['UNICA', 'SEMANAL', 'QUINCENAL', 'MENSUAL', 'ANUAL'] as const;
 
 const configurationSchema = z.object({
   habilitadas: z.boolean(),
   permitir_saldo_negativo: z.boolean().default(false),
 });
-const accountSchema = z.object({
+const accountFieldsSchema = z.object({
   nombre: z.string().trim().min(1).max(100),
   tipo: z.enum(accountTypes),
-  saldo_inicial: z.coerce.number().min(0).max(999999999999.99).default(0),
+  saldo_inicial: z.coerce.number().min(-999999999999.99).max(999999999999.99).default(0),
   descripcion: z.string().trim().max(500).nullable().optional(),
   color: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
+  limite_credito: z.coerce.number().positive().max(999999999999.99).nullable().optional(),
+  dia_corte: z.coerce.number().int().min(1).max(31).nullable().optional(),
+  dia_pago: z.coerce.number().int().min(1).max(31).nullable().optional(),
   activa: z.boolean().default(true),
 });
-const accountUpdateSchema = accountSchema.omit({ saldo_inicial: true }).partial()
+function validateAccount(value: z.infer<typeof accountFieldsSchema>, context: z.RefinementCtx) {
+  if (value.tipo === 'TARJETA_CREDITO' && value.saldo_inicial > 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ['saldo_inicial'], message: 'La deuda inicial de una tarjeta no puede ser positiva.' });
+  if (value.tipo !== 'TARJETA_CREDITO' && value.saldo_inicial < 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ['saldo_inicial'], message: 'El saldo inicial no puede ser negativo.' });
+  if (value.tipo === 'TARJETA_CREDITO' && !value.limite_credito) context.addIssue({ code: z.ZodIssueCode.custom, path: ['limite_credito'], message: 'Indica el límite de crédito.' });
+}
+const accountSchema = accountFieldsSchema.superRefine(validateAccount);
+const accountUpdateSchema = accountFieldsSchema.omit({ saldo_inicial: true }).partial()
   .refine((value) => Object.keys(value).length > 0, 'No hay cambios para guardar.');
 const debtFieldsSchema = z.object({
   tipo: z.enum(['A_FAVOR', 'EN_CONTRA']),
@@ -55,6 +65,8 @@ const movementSchema = z.object({
   concepto: z.string().trim().min(1).max(200),
   fecha: z.string().date(),
   observaciones: z.string().trim().max(5000).nullable().optional(),
+  id_programacion: z.string().uuid().nullable().optional(),
+  fecha_programada: z.string().date().nullable().optional(),
 }).superRefine((value, context) => {
   const needsDestination = ['INGRESO', 'AJUSTE_ENTRADA'].includes(value.tipo);
   const needsOrigin = ['EGRESO', 'AJUSTE_SALIDA'].includes(value.tipo);
@@ -64,7 +76,34 @@ const movementSchema = z.object({
   if (needsOrigin && value.id_cuenta_destino) context.addIssue({ code: z.ZodIssueCode.custom, path: ['id_cuenta_destino'], message: 'Un egreso no debe tener cuenta de destino.' });
   if (value.tipo === 'TRANSFERENCIA' && value.id_cuenta_origen === value.id_cuenta_destino) context.addIssue({ code: z.ZodIssueCode.custom, path: ['id_cuenta_destino'], message: 'El destino debe ser diferente del origen.' });
   if (value.tipo === 'TRANSFERENCIA' && value.id_deuda) context.addIssue({ code: z.ZodIssueCode.custom, path: ['id_deuda'], message: 'Una transferencia interna no puede pagar una deuda.' });
+  if (Boolean(value.id_programacion) !== Boolean(value.fecha_programada)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['id_programacion'], message: 'La programación y su fecha deben enviarse juntas.' });
 });
+
+const scheduleFieldsSchema = z.object({
+  tipo: z.enum(['INGRESO', 'EGRESO', 'TRANSFERENCIA']),
+  id_cuenta_origen: z.string().uuid().nullable().optional(),
+  id_cuenta_destino: z.string().uuid().nullable().optional(),
+  monto: z.coerce.number().positive().max(999999999999.99),
+  metodo_pago: z.enum(paymentMethods),
+  categoria: z.string().trim().max(100).nullable().optional(),
+  concepto: z.string().trim().min(1).max(200),
+  observaciones: z.string().trim().max(5000).nullable().optional(),
+  frecuencia: z.enum(scheduleFrequencies),
+  fecha_proxima: z.string().date(),
+  fecha_fin: z.string().date().nullable().optional(),
+  activa: z.boolean().default(true),
+});
+function validateScheduleShape(value: z.infer<typeof scheduleFieldsSchema>, context: z.RefinementCtx) {
+  const needsOrigin = value.tipo === 'EGRESO' || value.tipo === 'TRANSFERENCIA';
+  const needsDestination = value.tipo === 'INGRESO' || value.tipo === 'TRANSFERENCIA';
+  if (needsOrigin && !value.id_cuenta_origen) context.addIssue({ code: z.ZodIssueCode.custom, path: ['id_cuenta_origen'], message: 'Selecciona la cuenta de origen.' });
+  if (needsDestination && !value.id_cuenta_destino) context.addIssue({ code: z.ZodIssueCode.custom, path: ['id_cuenta_destino'], message: 'Selecciona la cuenta de destino.' });
+  if (value.tipo === 'TRANSFERENCIA' && value.id_cuenta_origen === value.id_cuenta_destino) context.addIssue({ code: z.ZodIssueCode.custom, path: ['id_cuenta_destino'], message: 'El destino debe ser diferente del origen.' });
+  if (value.fecha_fin && value.fecha_fin < value.fecha_proxima) context.addIssue({ code: z.ZodIssueCode.custom, path: ['fecha_fin'], message: 'La fecha final no puede ser anterior al próximo movimiento.' });
+}
+const scheduleSchema = scheduleFieldsSchema.superRefine(validateScheduleShape);
+const scheduleUpdateSchema = scheduleFieldsSchema.partial()
+  .refine((value) => Object.keys(value).length > 0, 'No hay cambios para guardar.');
 
 type DbClient = Parameters<Parameters<typeof transaction>[0]>[0];
 type Queryable = Pick<DbClient, 'query'>;
@@ -122,17 +161,60 @@ async function refreshDebtState(client: Queryable, userId: string, debtId: strin
   );
 }
 
+function nextScheduledDate(current: string, frequency: typeof scheduleFrequencies[number]) {
+  if (frequency === 'UNICA') return null;
+  const [year, month, day] = current.split('-').map(Number);
+  if (frequency === 'SEMANAL' || frequency === 'QUINCENAL') {
+    const date = new Date(Date.UTC(year, month - 1, day + (frequency === 'SEMANAL' ? 7 : 15)));
+    return date.toISOString().slice(0, 10);
+  }
+  const targetMonth = frequency === 'MENSUAL' ? month : month + 11;
+  const targetYear = year + Math.floor(targetMonth / 12);
+  const normalizedMonth = targetMonth % 12;
+  const lastDay = new Date(Date.UTC(targetYear, normalizedMonth + 1, 0)).getUTCDate();
+  return `${targetYear}-${String(normalizedMonth + 1).padStart(2, '0')}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
+}
+
+async function validateScheduleAccounts(client: DbClient, userId: string, input: z.infer<typeof scheduleSchema>) {
+  await assertEnabled(client, userId);
+  const origin = input.id_cuenta_origen ? await accountForUser(client, userId, input.id_cuenta_origen) : null;
+  const destination = input.id_cuenta_destino ? await accountForUser(client, userId, input.id_cuenta_destino) : null;
+  const paymentAccount = input.tipo === 'EGRESO' ? origin : input.tipo === 'INGRESO' ? destination : null;
+  if (destination?.tipo === 'TARJETA_CREDITO' && input.tipo !== 'TRANSFERENCIA') throw new ValidationError('Una tarjeta de crédito solo recibe pagos desde otra cuenta.');
+  if (origin?.tipo === 'TARJETA_CREDITO' && input.tipo !== 'EGRESO') throw new ValidationError('La tarjeta de crédito no puede ser el origen de una transferencia programada.');
+  if (paymentAccount?.tipo === 'EFECTIVO' && input.metodo_pago !== 'EFECTIVO') throw new ValidationError('Los movimientos de efectivo deben usar el método Efectivo.');
+  if (paymentAccount && paymentAccount.tipo !== 'EFECTIVO' && input.metodo_pago === 'EFECTIVO') throw new ValidationError('Selecciona un método compatible con la cuenta.');
+  if (input.metodo_pago === 'TARJETA_DEBITO' && (input.tipo !== 'EGRESO' || !origin || !['BANCO', 'BILLETERA'].includes(origin.tipo))) throw new ValidationError('La tarjeta de débito debe descontarse de una cuenta bancaria o billetera.');
+  if (input.metodo_pago === 'TARJETA_CREDITO' && (input.tipo !== 'EGRESO' || origin?.tipo !== 'TARJETA_CREDITO')) throw new ValidationError('Selecciona una tarjeta de crédito como cuenta de origen.');
+  if (origin?.tipo === 'TARJETA_CREDITO' && input.metodo_pago !== 'TARJETA_CREDITO') throw new ValidationError('Las compras de la tarjeta deben usar el método Tarjeta de crédito.');
+  if (input.tipo === 'TRANSFERENCIA' && input.metodo_pago !== 'TRANSFERENCIA') throw new ValidationError('Entre cuentas se utiliza el método Transferencia.');
+}
+
 async function validateMovement(client: DbClient, userId: string, input: z.infer<typeof movementSchema>, excludeId?: string) {
   const config = await assertEnabled(client, userId);
   const origin = input.id_cuenta_origen ? await accountForUser(client, userId, input.id_cuenta_origen, true) : null;
   const destination = input.id_cuenta_destino ? await accountForUser(client, userId, input.id_cuenta_destino) : null;
   const paymentAccount = ['EGRESO', 'AJUSTE_SALIDA'].includes(input.tipo) ? origin : ['INGRESO', 'AJUSTE_ENTRADA'].includes(input.tipo) ? destination : null;
+  if (destination?.tipo === 'TARJETA_CREDITO' && input.tipo !== 'TRANSFERENCIA') throw new ValidationError('Una tarjeta de crédito solo recibe pagos desde otra cuenta.');
+  if (origin?.tipo === 'TARJETA_CREDITO' && input.tipo !== 'EGRESO') throw new ValidationError('La tarjeta de crédito solo puede usarse para compras; para pagarla transfiere desde otra cuenta.');
   if (paymentAccount?.tipo === 'EFECTIVO' && input.metodo_pago !== 'EFECTIVO') throw new ValidationError('Los movimientos de una cuenta de efectivo deben usar el método Efectivo.');
   if (paymentAccount && paymentAccount.tipo !== 'EFECTIVO' && input.metodo_pago === 'EFECTIVO') throw new ValidationError('Para una cuenta no efectiva selecciona Transferencia, Tarjeta, Depósito u Otro.');
+  if (input.metodo_pago === 'TARJETA_DEBITO' && (input.tipo !== 'EGRESO' || !origin || !['BANCO', 'BILLETERA'].includes(origin.tipo))) throw new ValidationError('La tarjeta de débito debe descontarse de una cuenta bancaria o billetera.');
+  if (input.metodo_pago === 'TARJETA_CREDITO' && (input.tipo !== 'EGRESO' || origin?.tipo !== 'TARJETA_CREDITO')) throw new ValidationError('Para pagar con crédito selecciona una tarjeta de crédito como origen.');
+  if (origin?.tipo === 'TARJETA_CREDITO' && input.metodo_pago !== 'TARJETA_CREDITO') throw new ValidationError('Las compras desde una tarjeta deben usar el método Tarjeta de crédito.');
   if (input.tipo === 'TRANSFERENCIA' && input.metodo_pago !== 'TRANSFERENCIA') throw new ValidationError('Entre cuentas se utiliza el método Transferencia.');
-  if (origin && !config.permitir_saldo_negativo) {
+  if (origin?.tipo === 'TARJETA_CREDITO') {
+    const balance = await availableBalance(client, userId, origin.id_cuenta, excludeId);
+    const availableCredit = Number(origin.limite_credito ?? 0) + balance;
+    if (availableCredit + 0.001 < input.monto) throw new ConflictError(`Crédito insuficiente en “${origin.nombre}”. Disponible: $${Math.max(0, availableCredit).toFixed(2)}.`);
+  } else if (origin && !config.permitir_saldo_negativo) {
     const balance = await availableBalance(client, userId, origin.id_cuenta, excludeId);
     if (balance < input.monto) throw new ConflictError(`Saldo insuficiente en “${origin.nombre}”. Disponible: $${balance.toFixed(2)}.`);
+  }
+  if (destination?.tipo === 'TARJETA_CREDITO' && input.tipo === 'TRANSFERENCIA') {
+    const balance = await availableBalance(client, userId, destination.id_cuenta, excludeId);
+    const debt = Math.max(0, -balance);
+    if (input.monto > debt + 0.001) throw new ConflictError(`El pago supera la deuda actual de “${destination.nombre}” ($${debt.toFixed(2)}).`);
   }
   if (input.id_deuda) {
     const debt = (await client.query(
@@ -182,7 +264,11 @@ personalFinanceRouter.post('/cuentas', asyncHandler(async (req, res) => {
   await assertEnabled(pool, req.user!.id);
   try {
     return created(res, (await pool.query(buildInsert('cuenta_financiera', {
-      ...input, descripcion: input.descripcion ?? null, color: input.color ?? null, id_usuario: req.user!.id,
+      ...input, descripcion: input.descripcion ?? null, color: input.color ?? null,
+      limite_credito: input.tipo === 'TARJETA_CREDITO' ? input.limite_credito ?? null : null,
+      dia_corte: input.tipo === 'TARJETA_CREDITO' ? input.dia_corte ?? null : null,
+      dia_pago: input.tipo === 'TARJETA_CREDITO' ? input.dia_pago ?? null : null,
+      id_usuario: req.user!.id,
     }))).rows[0]);
   } catch (error) {
     if ((error as { code?: string }).code === '23505') throw new ConflictError('Ya tienes una cuenta con ese nombre.');
@@ -194,6 +280,12 @@ personalFinanceRouter.patch('/cuentas/:id', asyncHandler(async (req, res) => {
   const id = routeParam(req.params.id, 'id');
   const input = accountUpdateSchema.parse(req.body);
   await assertEnabled(pool, req.user!.id);
+  const current = (await pool.query(
+    `SELECT * FROM cuenta_financiera WHERE id_cuenta=$1 AND id_usuario=$2 AND deleted_at IS NULL`,
+    [id, req.user!.id],
+  )).rows[0];
+  if (!current) throw new NotFoundError('Cuenta no encontrada.');
+  accountSchema.parse({ ...current, ...input, saldo_inicial: Number(current.saldo_inicial) });
   const values = Object.entries(input);
   const sets = values.map(([key], index) => `${key}=$${index + 3}`);
   try {
@@ -214,8 +306,11 @@ personalFinanceRouter.delete('/cuentas/:id', asyncHandler(async (req, res) => {
   const id = routeParam(req.params.id, 'id');
   await assertEnabled(pool, req.user!.id);
   const used = await pool.query(
-    `SELECT 1 FROM movimiento_financiero WHERE id_usuario=$1 AND deleted_at IS NULL
-     AND (id_cuenta_origen=$2 OR id_cuenta_destino=$2) LIMIT 1`, [req.user!.id, id],
+    `SELECT 1 FROM (
+       SELECT id_cuenta_origen,id_cuenta_destino FROM movimiento_financiero WHERE id_usuario=$1 AND deleted_at IS NULL
+       UNION ALL
+       SELECT id_cuenta_origen,id_cuenta_destino FROM movimiento_financiero_programado WHERE id_usuario=$1 AND deleted_at IS NULL
+     ) usados WHERE id_cuenta_origen=$2 OR id_cuenta_destino=$2 LIMIT 1`, [req.user!.id, id],
   );
   if (used.rowCount) throw new ConflictError('La cuenta tiene movimientos. Puedes desactivarla, pero no eliminarla.');
   const result = await pool.query(
@@ -236,14 +331,59 @@ personalFinanceRouter.get('/movimientos', asyncHandler(async (req, res) => ok(re
 )).rows)));
 
 personalFinanceRouter.post('/movimientos', asyncHandler(async (req, res) => {
-  const input = movementSchema.parse(req.body);
+  const requested = movementSchema.parse(req.body);
   const row = await transaction(async (client) => {
+    let input = requested;
+    let schedule: Record<string, unknown> | null = null;
+    if (requested.id_programacion && requested.fecha_programada) {
+      schedule = (await client.query(
+        `SELECT * FROM movimiento_financiero_programado
+         WHERE id_programacion=$1 AND id_usuario=$2 AND deleted_at IS NULL FOR UPDATE`,
+        [requested.id_programacion, req.user!.id],
+      )).rows[0] ?? null;
+      if (!schedule || schedule.activa !== true) throw new ConflictError('Esta programación ya no está activa.');
+      const due = String(schedule.fecha_proxima).slice(0, 10);
+      if (due !== requested.fecha_programada) throw new ConflictError('Esta fecha programada ya fue aplicada o cambió. Actualiza los datos.');
+      const today = String((await client.query(`SELECT (NOW() AT TIME ZONE 'America/Guayaquil')::date::text hoy`)).rows[0]?.hoy ?? '');
+      if (due > today) throw new ConflictError(`Este movimiento se habilitará el ${due}.`);
+      input = movementSchema.parse({
+        tipo: schedule.tipo,
+        id_cuenta_origen: schedule.id_cuenta_origen,
+        id_cuenta_destino: schedule.id_cuenta_destino,
+        id_deuda: null,
+        monto: schedule.monto,
+        metodo_pago: schedule.metodo_pago,
+        categoria: schedule.categoria,
+        concepto: schedule.concepto,
+        fecha: due,
+        observaciones: schedule.observaciones,
+        id_programacion: schedule.id_programacion,
+        fecha_programada: due,
+      });
+    }
     await validateMovement(client, req.user!.id, input);
-    const saved = (await client.query(buildInsert('movimiento_financiero', {
-      ...input, id_cuenta_origen: input.id_cuenta_origen ?? null, id_cuenta_destino: input.id_cuenta_destino ?? null,
-      id_deuda: input.id_deuda ?? null, categoria: input.categoria ?? null, observaciones: input.observaciones ?? null,
-      id_usuario: req.user!.id,
-    }))).rows[0];
+    let saved;
+    try {
+      saved = (await client.query(buildInsert('movimiento_financiero', {
+        ...input, id_cuenta_origen: input.id_cuenta_origen ?? null, id_cuenta_destino: input.id_cuenta_destino ?? null,
+        id_deuda: input.id_deuda ?? null, categoria: input.categoria ?? null, observaciones: input.observaciones ?? null,
+        id_programacion: input.id_programacion ?? null, fecha_programada: input.fecha_programada ?? null,
+        id_usuario: req.user!.id,
+      }))).rows[0];
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505' && input.id_programacion) throw new ConflictError('Este movimiento programado ya fue aplicado.');
+      throw error;
+    }
+    if (schedule) {
+      const due = String(schedule.fecha_proxima).slice(0, 10);
+      const next = nextScheduledDate(due, schedule.frecuencia as typeof scheduleFrequencies[number]);
+      const remainsActive = Boolean(next && (!schedule.fecha_fin || next <= String(schedule.fecha_fin).slice(0, 10)));
+      await client.query(
+        `UPDATE movimiento_financiero_programado SET fecha_proxima=$3,activa=$4,updated_at=NOW()
+         WHERE id_programacion=$1 AND id_usuario=$2`,
+        [schedule.id_programacion, req.user!.id, next ?? due, remainsActive],
+      );
+    }
     if (input.id_deuda) await refreshDebtState(client, req.user!.id, input.id_deuda);
     return saved;
   }, req.user!.id);
@@ -289,6 +429,69 @@ personalFinanceRouter.delete('/movimientos/:id', asyncHandler(async (req, res) =
     if (!row) throw new NotFoundError('Movimiento no encontrado.');
     if (row.id_deuda) await refreshDebtState(client, req.user!.id, row.id_deuda);
   }, req.user!.id);
+  return noContent(res);
+}));
+
+personalFinanceRouter.get('/programaciones', asyncHandler(async (req, res) => ok(res, (await pool.query(
+  `SELECT p.*,o.nombre cuenta_origen,d.nombre cuenta_destino,
+     (p.activa AND p.fecha_proxima<=(NOW() AT TIME ZONE 'America/Guayaquil')::date) aplicable
+   FROM movimiento_financiero_programado p
+   LEFT JOIN cuenta_financiera o ON o.id_cuenta=p.id_cuenta_origen
+   LEFT JOIN cuenta_financiera d ON d.id_cuenta=p.id_cuenta_destino
+   WHERE p.id_usuario=$1 AND p.deleted_at IS NULL
+   ORDER BY p.activa DESC,p.fecha_proxima,p.created_at DESC`,
+  [req.user!.id],
+)).rows)));
+
+personalFinanceRouter.post('/programaciones', asyncHandler(async (req, res) => {
+  const input = scheduleSchema.parse(req.body);
+  const row = await transaction(async (client) => {
+    await validateScheduleAccounts(client, req.user!.id, input);
+    return (await client.query(buildInsert('movimiento_financiero_programado', {
+      ...input,
+      id_cuenta_origen: input.id_cuenta_origen ?? null,
+      id_cuenta_destino: input.id_cuenta_destino ?? null,
+      categoria: input.categoria ?? null,
+      observaciones: input.observaciones ?? null,
+      fecha_fin: input.fecha_fin ?? null,
+      id_usuario: req.user!.id,
+    }))).rows[0];
+  }, req.user!.id);
+  return created(res, row);
+}));
+
+personalFinanceRouter.patch('/programaciones/:id', asyncHandler(async (req, res) => {
+  const id = routeParam(req.params.id, 'id');
+  const changes = scheduleUpdateSchema.parse(req.body);
+  const row = await transaction(async (client) => {
+    const current = (await client.query(
+      `SELECT *,fecha_proxima::text,fecha_fin::text FROM movimiento_financiero_programado
+       WHERE id_programacion=$1 AND id_usuario=$2 AND deleted_at IS NULL FOR UPDATE`,
+      [id, req.user!.id],
+    )).rows[0];
+    if (!current) throw new NotFoundError('Programación no encontrada.');
+    const complete = scheduleSchema.parse({ ...current, ...changes });
+    await validateScheduleAccounts(client, req.user!.id, complete);
+    const values = Object.entries(changes);
+    const sets = values.map(([key], index) => `${key}=$${index + 3}`);
+    return (await client.query(
+      `UPDATE movimiento_financiero_programado SET ${sets.join(',')},updated_at=NOW()
+       WHERE id_programacion=$1 AND id_usuario=$2 RETURNING *`,
+      [id, req.user!.id, ...values.map(([, value]) => value ?? null)],
+    )).rows[0];
+  }, req.user!.id);
+  return ok(res, row);
+}));
+
+personalFinanceRouter.delete('/programaciones/:id', asyncHandler(async (req, res) => {
+  const id = routeParam(req.params.id, 'id');
+  await assertEnabled(pool, req.user!.id);
+  const result = await pool.query(
+    `UPDATE movimiento_financiero_programado SET deleted_at=NOW(),activa=FALSE,updated_at=NOW()
+     WHERE id_programacion=$1 AND id_usuario=$2 AND deleted_at IS NULL`,
+    [id, req.user!.id],
+  );
+  if (!result.rowCount) throw new NotFoundError('Programación no encontrada.');
   return noContent(res);
 }));
 
