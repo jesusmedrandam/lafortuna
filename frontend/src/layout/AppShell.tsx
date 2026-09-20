@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   ArrowLeftRight, Baby, Beef, ChevronRight, Droplets,
   HeartOff, Home, Images, LayoutDashboard, LogOut, MapPinned, Menu, Milk, Moon, ShoppingCart, Sprout, Sun, Syringe,
-  Settings2, UserCircle, Users, Warehouse, Weight, X, Activity, AlertTriangle, PackagePlus, CloudDownload, RefreshCw, Wifi, WifiOff, BarChart3, CalendarClock, type LucideIcon,
+  Settings2, UserCircle, Users, Warehouse, Weight, X, Activity, AlertTriangle, PackagePlus, CloudDownload, RefreshCw, Wifi, WifiOff, BarChart3, CalendarClock, WalletCards, type LucideIcon,
 } from 'lucide-react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -19,9 +19,11 @@ interface Destination {
   icon: LucideIcon;
   permissions?: string[];
   section: 'principal' | 'operaciones' | 'configuracion';
+  personalFinance?: boolean;
 }
 
 interface OperationVisibilityResponse { operaciones: Record<string, boolean> }
+interface PersonalFinanceConfiguration { habilitadas: boolean }
 
 const destinationOperations: Partial<Record<string, string[]>> = {
   '/movimientos': ['MOVIMIENTO_UBICACION', 'MOVIMIENTO_GRUPO', 'MOVIMIENTO_PROPIEDAD'],
@@ -53,6 +55,7 @@ const destinations: Destination[] = [
   { to: '/compras', label: 'Compras y egresos', icon: PackagePlus, permissions: ['COMPRA_CONSULTAR'], section: 'operaciones' },
   { to: '/actividades', label: 'Otras actividades', icon: Activity, permissions: ['ACTIVIDAD_CONSULTAR'], section: 'operaciones' },
   { to: '/agenda', label: 'Tareas y eventos', icon: CalendarClock, section: 'operaciones' },
+  { to: '/mis-finanzas', label: 'Mis finanzas', icon: WalletCards, section: 'principal', personalFinance: true },
   { to: '/configuracion', label: 'Configuración', icon: Settings2, section: 'configuracion' },
 ];
 
@@ -75,12 +78,19 @@ export function AppShell() {
     staleTime: 5 * 60_000,
     retry: 1,
   });
+  const personalFinance = useQuery({
+    queryKey: ['personal-finance-configuration'],
+    queryFn: () => apiRequest<PersonalFinanceConfiguration>('/mis-finanzas/configuracion'),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
   const visible = useMemo(() => destinations.filter((item) => {
     if (item.permissions && !hasPermission(...item.permissions)) return false;
+    if (item.personalFinance && personalFinance.data?.habilitadas !== true) return false;
     const operations = destinationOperations[item.to];
     if (!operations || !operationVisibility.data) return true;
     return operations.some((operation) => operationVisibility.data?.operaciones?.[operation] !== false);
-  }), [hasPermission, operationVisibility.data]);
+  }), [hasPermission, operationVisibility.data, personalFinance.data?.habilitadas]);
   const current = visible.find((item) => item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to));
   const summaryRoute=current?summaryRoutes[current.to]:undefined;
 

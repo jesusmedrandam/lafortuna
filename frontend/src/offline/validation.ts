@@ -87,6 +87,46 @@ function validateCatalog(method: string, value: Record<string, unknown>, errors:
   if ('codigo' in value && (typeof value.codigo !== 'string' || !value.codigo.trim())) errors.push('El código del elemento de catálogo es obligatorio.');
 }
 
+function validatePersonalFinance(path: string, method: string, value: Record<string, unknown>, errors: string[]) {
+  if (method === 'DELETE') return;
+  if (path === '/mis-finanzas/configuracion') {
+    if ('habilitadas' in value && typeof value.habilitadas !== 'boolean') errors.push('El estado de Mis finanzas no es válido.');
+    if ('permitir_saldo_negativo' in value && typeof value.permitir_saldo_negativo !== 'boolean') errors.push('La opción de saldo negativo no es válida.');
+    return;
+  }
+  if (/^\/mis-finanzas\/cuentas(?:\/[^/]+)?$/.test(path)) {
+    if (typeof value.nombre !== 'string' || !value.nombre.trim()) errors.push('El nombre de la cuenta es obligatorio.');
+    if (!['EFECTIVO', 'BANCO', 'BILLETERA', 'OTRO'].includes(String(value.tipo ?? ''))) errors.push('El tipo de cuenta no es válido.');
+    if (method === 'POST' && (!Number.isFinite(Number(value.saldo_inicial)) || Number(value.saldo_inicial) < 0)) errors.push('El saldo inicial debe ser un número igual o mayor a cero.');
+    if (value.color != null && value.color !== '' && !/^#[0-9a-f]{6}$/i.test(String(value.color))) errors.push('El color de la cuenta no es válido.');
+    return;
+  }
+  if (/^\/mis-finanzas\/movimientos(?:\/[^/]+)?$/.test(path)) {
+    const type = String(value.tipo ?? '');
+    const origin = value.id_cuenta_origen == null || value.id_cuenta_origen === '' ? null : String(value.id_cuenta_origen);
+    const destination = value.id_cuenta_destino == null || value.id_cuenta_destino === '' ? null : String(value.id_cuenta_destino);
+    if (!['INGRESO', 'EGRESO', 'TRANSFERENCIA', 'AJUSTE_ENTRADA', 'AJUSTE_SALIDA'].includes(type)) errors.push('El tipo de movimiento financiero no es válido.');
+    if (!Number.isFinite(Number(value.monto)) || Number(value.monto) <= 0) errors.push('El monto debe ser mayor a cero.');
+    if (typeof value.concepto !== 'string' || !value.concepto.trim()) errors.push('El concepto es obligatorio.');
+    if (!validDate(value.fecha)) errors.push('La fecha del movimiento no es válida.');
+    if (!['EFECTIVO', 'TRANSFERENCIA', 'TARJETA_DEBITO', 'TARJETA_CREDITO', 'DEPOSITO', 'OTRO'].includes(String(value.metodo_pago ?? ''))) errors.push('El método de pago no es válido.');
+    if (['EGRESO', 'TRANSFERENCIA', 'AJUSTE_SALIDA'].includes(type) && !isIdentifier(origin)) errors.push('Selecciona la cuenta desde la que sale el dinero.');
+    if (['INGRESO', 'TRANSFERENCIA', 'AJUSTE_ENTRADA'].includes(type) && !isIdentifier(destination)) errors.push('Selecciona la cuenta donde ingresa el dinero.');
+    if (type === 'TRANSFERENCIA' && origin === destination) errors.push('La cuenta de origen y la de destino deben ser diferentes.');
+    if (value.id_deuda != null && value.id_deuda !== '' && !isIdentifier(value.id_deuda)) errors.push('La deuda relacionada no es válida.');
+    return;
+  }
+  if (/^\/mis-finanzas\/deudas(?:\/[^/]+)?$/.test(path)) {
+    if (!['A_FAVOR', 'EN_CONTRA'].includes(String(value.tipo ?? ''))) errors.push('El tipo de deuda no es válido.');
+    if (typeof value.contraparte !== 'string' || !value.contraparte.trim()) errors.push('La persona o entidad es obligatoria.');
+    if (typeof value.concepto !== 'string' || !value.concepto.trim()) errors.push('El concepto de la deuda es obligatorio.');
+    if (!Number.isFinite(Number(value.monto_original)) || Number(value.monto_original) <= 0) errors.push('El monto original debe ser mayor a cero.');
+    if (!validDate(value.fecha_inicio)) errors.push('La fecha inicial de la deuda no es válida.');
+    if (value.fecha_vencimiento && !validDate(value.fecha_vencimiento)) errors.push('La fecha de vencimiento no es válida.');
+    if (validDate(value.fecha_inicio) && validDate(value.fecha_vencimiento) && String(value.fecha_vencimiento) < String(value.fecha_inicio)) errors.push('El vencimiento no puede ser anterior a la fecha inicial.');
+  }
+}
+
 export function validateOfflineMutation(path: string, method: string, body: unknown): OfflineValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -98,6 +138,7 @@ export function validateOfflineMutation(path: string, method: string, body: unkn
     if (/^\/animales(?:\/[^/]+)?$/.test(path)) validateAnimal(path, method, payload, errors);
     if (path === '/movimientos' && method === 'POST') validateMovement(payload, errors);
     if (/^\/catalogos\/[^/]+(?:\/[^/]+)?$/.test(path)) validateCatalog(method, payload, errors);
+    if (/^\/mis-finanzas(?:\/|$)/.test(path)) validatePersonalFinance(path, method, payload, errors);
   }
   if (!errors.length) warnings.push('Se validaron los campos disponibles sin conexión; las reglas que dependen del servidor se comprobarán al sincronizar.');
   return { errors: [...new Set(errors)], warnings };
