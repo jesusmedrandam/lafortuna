@@ -96,9 +96,26 @@ function validatePersonalFinance(path: string, method: string, value: Record<str
   }
   if (/^\/mis-finanzas\/cuentas(?:\/[^/]+)?$/.test(path)) {
     if (typeof value.nombre !== 'string' || !value.nombre.trim()) errors.push('El nombre de la cuenta es obligatorio.');
-    if (!['EFECTIVO', 'BANCO', 'BILLETERA', 'OTRO'].includes(String(value.tipo ?? ''))) errors.push('El tipo de cuenta no es válido.');
-    if (method === 'POST' && (!Number.isFinite(Number(value.saldo_inicial)) || Number(value.saldo_inicial) < 0)) errors.push('El saldo inicial debe ser un número igual o mayor a cero.');
+    const accountType = String(value.tipo ?? '');
+    if (!['EFECTIVO', 'BANCO', 'BILLETERA', 'TARJETA_CREDITO', 'OTRO'].includes(accountType)) errors.push('El tipo de cuenta no es válido.');
+    if (method === 'POST' && !Number.isFinite(Number(value.saldo_inicial))) errors.push('El saldo inicial debe ser un número válido.');
+    if (method === 'POST' && accountType !== 'TARJETA_CREDITO' && Number(value.saldo_inicial) < 0) errors.push('El saldo inicial no puede ser negativo.');
+    if (accountType === 'TARJETA_CREDITO' && (!Number.isFinite(Number(value.limite_credito)) || Number(value.limite_credito) <= 0)) errors.push('El límite de crédito debe ser mayor a cero.');
     if (value.color != null && value.color !== '' && !/^#[0-9a-f]{6}$/i.test(String(value.color))) errors.push('El color de la cuenta no es válido.');
+    return;
+  }
+  if (/^\/mis-finanzas\/programaciones(?:\/[^/]+)?$/.test(path)) {
+    const type = String(value.tipo ?? '');
+    const origin = value.id_cuenta_origen == null || value.id_cuenta_origen === '' ? null : String(value.id_cuenta_origen);
+    const destination = value.id_cuenta_destino == null || value.id_cuenta_destino === '' ? null : String(value.id_cuenta_destino);
+    if (!['INGRESO', 'EGRESO', 'TRANSFERENCIA'].includes(type)) errors.push('El tipo programado no es válido.');
+    if (!Number.isFinite(Number(value.monto)) || Number(value.monto) <= 0) errors.push('El monto debe ser mayor a cero.');
+    if (typeof value.concepto !== 'string' || !value.concepto.trim()) errors.push('El concepto es obligatorio.');
+    if (!validDate(value.fecha_proxima)) errors.push('La próxima fecha no es válida.');
+    if (!['UNICA', 'SEMANAL', 'QUINCENAL', 'MENSUAL', 'ANUAL'].includes(String(value.frecuencia ?? ''))) errors.push('La frecuencia no es válida.');
+    if (type !== 'INGRESO' && !isIdentifier(origin)) errors.push('Selecciona la cuenta desde la que sale el dinero.');
+    if (type !== 'EGRESO' && !isIdentifier(destination)) errors.push('Selecciona la cuenta donde ingresa el dinero.');
+    if (type === 'TRANSFERENCIA' && origin === destination) errors.push('La cuenta de origen y la de destino deben ser diferentes.');
     return;
   }
   if (/^\/mis-finanzas\/movimientos(?:\/[^/]+)?$/.test(path)) {

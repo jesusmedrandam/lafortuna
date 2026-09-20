@@ -36,7 +36,7 @@ export const downloadModules: DownloadModule[] = [
   { id: 'comercio', label: 'Ventas y compras', description: 'Ventas, productos, compradores, egresos y datos relacionados.', permissions: ['VENTA_CONSULTAR', 'COMPRA_CONSULTAR'], endpoints: ['/ventas', '/ventas/productos', '/compras', '/animales?limit=100', '/grupos?limit=100', '/ubicaciones'], catalogs: ['compradores', 'productos-venta', 'unidades', 'tipos-producto-compra', 'categorias-animales', 'especies', 'origenes'] },
   { id: 'actividades', label: 'Otras actividades', description: 'Herrajes, descornes, animales, fierros y fotografías.', permissions: ['ACTIVIDAD_CONSULTAR'], endpoints: ['/actividades', '/marquillas', '/animales?limit=100'], catalogs: ['tipos-actividad'] },
   { id: 'agenda', label: 'Tareas y eventos', description: 'Pendientes, asignaciones, animales y recordatorios para trabajar sin conexión.', permissions: [], endpoints: ['/agenda', '/agenda/opciones'] },
-  { id: 'finanzas', label: 'Mis finanzas', description: 'Cuentas, movimientos y deudas privadas para consultar y registrar sin conexión.', permissions: [], endpoints: ['/mis-finanzas/configuracion', '/mis-finanzas/cuentas', '/mis-finanzas/movimientos', '/mis-finanzas/deudas'] },
+  { id: 'finanzas', label: 'Mis finanzas', description: 'Cuentas, tarjetas, programaciones, movimientos y deudas privadas para trabajar sin conexión.', permissions: [], endpoints: ['/mis-finanzas/configuracion', '/mis-finanzas/cuentas', '/mis-finanzas/movimientos', '/mis-finanzas/programaciones', '/mis-finanzas/deudas'] },
   { id: 'catalogos', label: 'Catálogos', description: 'Opciones necesarias para formularios sin conexión.', permissions: ['CATALOGO_CONSULTAR'], endpoints: [] },
 ];
 

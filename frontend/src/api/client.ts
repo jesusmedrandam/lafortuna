@@ -12,6 +12,7 @@ import { cancelAgendaReminder, scheduleAgendaReminder, showLocalNotification, SY
 import { describeOfflineMutation } from '../offline/descriptions';
 
 export const API_URL = (import.meta.env.VITE_API_URL || 'https://lafortuna.onrender.com/api').replace(/\/$/, '');
+const PUBLIC_APP_URL = (import.meta.env.VITE_PUBLIC_APP_URL || 'https://mm-ganaderia.onrender.com').replace(/\/$/, '');
 
 export class ApiError extends Error {
   constructor(
@@ -355,6 +356,7 @@ function temporaryIdField(path: string) {
   if (path === '/mis-finanzas/cuentas') return 'id_cuenta';
   if (path === '/mis-finanzas/movimientos') return 'id_movimiento_financiero';
   if (path === '/mis-finanzas/deudas') return 'id_deuda';
+  if (path === '/mis-finanzas/programaciones') return 'id_programacion';
   if (path === '/partos') return 'id_parto';
   if (path === '/compras') return 'id_compra';
   if (path === '/ventas') return 'id_venta';
@@ -391,7 +393,7 @@ const catalogIdFields: Record<string, string> = {
   colores: 'id_color',
   razas: 'id_raza',
   'tipos-grupo': 'id_tipo_grupo',
-  pastos: 'id_pasto',
+  pastos: 'id_tipo_pasto',
   'usos-potrero': 'id_tipo_uso_potrero',
   'tipos-corral': 'id_tipo_corral',
   'motivos-movimiento': 'id_motivo_movimiento',
@@ -408,6 +410,11 @@ async function queueOfflineMutation<T>(path: string, options: RequestOptions): P
   const session = loadSession();
   if (!session?.user) throw new ApiError(0, 'OFFLINE_NO_SESSION', 'Inicia sesión con conexión antes de trabajar sin internet.');
   const method = methodOf(options);
+  let offlineShareToken: string | null = null;
+  if (method === 'POST' && /^\/animales\/[^/]+\/compartir$/.test(pathWithoutQuery(path)) && options.body === undefined) {
+    offlineShareToken = crypto.randomUUID();
+    options = { ...options, body: { token: offlineShareToken } };
+  }
   const permission = permissionForMutation(path, method);
   if (!permission) throw new ApiError(0, 'OFFLINE_NOT_SUPPORTED', 'Esta operación necesita conexión a internet.');
   if (!userHasPermission(session.user, permission)) throw new ApiError(403, 'FORBIDDEN', 'Tu usuario no tiene permiso para guardar esta operación.');
@@ -495,6 +502,14 @@ async function queueOfflineMutation<T>(path: string, options: RequestOptions): P
     const selectedUsers=new Set(Array.isArray(optimistic.id_usuarios)?optimistic.id_usuarios.map(String):[]),selectedAnimals=new Set(Array.isArray(optimistic.id_animales)?optimistic.id_animales.map(String):[]);
     optimistic={...optimistic,estado:'PENDIENTE',creado_por:session.user.id,creado_por_nombre:`${session.user.nombres} ${session.user.apellidos}`.trim(),mi_respuesta:selectedUsers.has(session.user.id)?'PENDIENTE':null,usuarios:(cached?.usuarios??[]).filter(item=>selectedUsers.has(String(item.id_usuario??''))).map(item=>({...item,respuesta:'PENDIENTE'})),animales:(cached?.animales??[]).filter(item=>selectedAnimals.has(String(item.id_animal??'')))};
   }
+  if (offlineShareToken) optimistic = {
+    ...optimistic,
+    activo: true,
+    token: offlineShareToken,
+    url: `${PUBLIC_APP_URL}/animal-publico/${offlineShareToken}`,
+    created_at: new Date().toISOString(),
+    pendiente_sincronizacion: true,
+  };
   await applyOptimisticMutation(session.user.id, path, method, optimistic);
   if (pathWithoutQuery(path) === '/mis-finanzas/configuracion' && method === 'PUT') {
     const current = unwrapApiData(await getOfflineCache<unknown>(session.user.id, '/mis-finanzas/configuracion'));
@@ -611,10 +626,12 @@ async function assertOfflinePersonalFinanceAllowed(userId: string, path: string,
   const accounts = dataArray<Record<string, unknown>>(await getOfflineCache<unknown>(userId, '/mis-finanzas/cuentas'));
   const movements = dataArray<Record<string, unknown>>(await getOfflineCache<unknown>(userId, '/mis-finanzas/movimientos'));
   const debts = dataArray<Record<string, unknown>>(await getOfflineCache<unknown>(userId, '/mis-finanzas/deudas'));
+  const schedules = dataArray<Record<string, unknown>>(await getOfflineCache<unknown>(userId, '/mis-finanzas/programaciones'));
   const value = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
   const accountMatch = cleanPath.match(/^\/mis-finanzas\/cuentas\/([^/]+)$/);
   const movementMatch = cleanPath.match(/^\/mis-finanzas\/movimientos\/([^/]+)$/);
   const debtMatch = cleanPath.match(/^\/mis-finanzas\/deudas\/([^/]+)$/);
+  const scheduleMatch = cleanPath.match(/^\/mis-finanzas\/programaciones\/([^/]+)$/);
 
   if (cleanPath === '/mis-finanzas/cuentas' && method === 'POST' || accountMatch && method === 'PATCH') {
     const editingId = accountMatch?.[1] ?? null;
@@ -631,6 +648,22 @@ async function assertOfflinePersonalFinanceAllowed(userId: string, path: string,
     if (movements.some((movement) => movement.id_deuda === debtMatch[1])) throw new ApiError(409, 'FINANCE_DEBT_HAS_PAYMENTS', 'Esta deuda tiene abonos registrados y no se puede eliminar.');
     return;
   }
+  if ((cleanPath === '/mis-finanzas/programaciones' && method === 'POST') || (scheduleMatch && method === 'PATCH')) {
+    const current = scheduleMatch ? schedules.find((item) => String(item.id_programacion ?? '') === scheduleMatch[1]) : null;
+    const schedule = { ...(current ?? {}), ...value };
+    const type = String(schedule.tipo ?? '');
+    const origin = accounts.find((account) => String(account.id_cuenta ?? '') === String(schedule.id_cuenta_origen ?? ''));
+    const destination = accounts.find((account) => String(account.id_cuenta ?? '') === String(schedule.id_cuenta_destino ?? ''));
+    if (type !== 'INGRESO' && (!origin || origin.activa === false)) throw new ApiError(409, 'FINANCE_ORIGIN_UNAVAILABLE', 'La cuenta de origen no está disponible en los datos descargados.');
+    if (type !== 'EGRESO' && (!destination || destination.activa === false)) throw new ApiError(409, 'FINANCE_DESTINATION_UNAVAILABLE', 'La cuenta de destino no está disponible en los datos descargados.');
+    const methodName = String(schedule.metodo_pago ?? '');
+    if (type === 'TRANSFERENCIA' && methodName !== 'TRANSFERENCIA') throw new ApiError(400, 'FINANCE_TRANSFER_METHOD', 'Los traspasos entre cuentas usan el método transferencia.');
+    if (origin?.tipo === 'TARJETA_CREDITO' && (type !== 'EGRESO' || methodName !== 'TARJETA_CREDITO')) throw new ApiError(400, 'FINANCE_CREDIT_CARD_METHOD', 'Las compras de una tarjeta de crédito deben usar el método correspondiente.');
+    if (methodName === 'TARJETA_DEBITO' && (type !== 'EGRESO' || !['BANCO', 'BILLETERA'].includes(String(origin?.tipo ?? '')))) throw new ApiError(400, 'FINANCE_DEBIT_CARD_METHOD', 'La tarjeta de débito debe descontarse de una cuenta bancaria o billetera.');
+    if (destination?.tipo === 'TARJETA_CREDITO' && type !== 'TRANSFERENCIA') throw new ApiError(400, 'FINANCE_CREDIT_CARD_DESTINATION', 'Una tarjeta de crédito solo recibe pagos desde otra cuenta.');
+    return;
+  }
+  if (scheduleMatch && method === 'DELETE') return;
   if (!(cleanPath === '/mis-finanzas/movimientos' && method === 'POST') && !(movementMatch && method === 'PATCH')) {
     if (debtMatch && method === 'PATCH') {
       const paid = movements.filter((movement) => movement.id_deuda === debtMatch[1]).reduce((sum, movement) => sum + Number(movement.monto ?? 0), 0);
@@ -655,8 +688,27 @@ async function assertOfflinePersonalFinanceAllowed(userId: string, path: string,
   if (type === 'TRANSFERENCIA' && paymentMethod !== 'TRANSFERENCIA') throw new ApiError(400, 'FINANCE_TRANSFER_METHOD', 'Los traspasos entre cuentas usan el método transferencia.');
   if (paymentAccount?.tipo === 'EFECTIVO' && paymentMethod !== 'EFECTIVO') throw new ApiError(400, 'FINANCE_CASH_METHOD', 'Los movimientos de una cuenta de efectivo deben usar el método efectivo.');
   if (paymentAccount && paymentAccount.tipo !== 'EFECTIVO' && paymentMethod === 'EFECTIVO') throw new ApiError(400, 'FINANCE_ACCOUNT_METHOD', 'Selecciona transferencia, tarjeta, depósito u otro para esta cuenta.');
+  if (destination?.tipo === 'TARJETA_CREDITO' && type !== 'TRANSFERENCIA') throw new ApiError(400, 'FINANCE_CREDIT_CARD_DESTINATION', 'Una tarjeta de crédito solo recibe pagos desde otra cuenta.');
+  if (origin?.tipo === 'TARJETA_CREDITO' && (type !== 'EGRESO' || paymentMethod !== 'TARJETA_CREDITO')) throw new ApiError(400, 'FINANCE_CREDIT_CARD_METHOD', 'Las compras de una tarjeta de crédito deben usar el método Tarjeta de crédito.');
+  if (paymentMethod === 'TARJETA_DEBITO' && (type !== 'EGRESO' || !['BANCO', 'BILLETERA'].includes(String(origin?.tipo ?? '')))) throw new ApiError(400, 'FINANCE_DEBIT_CARD_METHOD', 'La tarjeta de débito debe descontarse de una cuenta bancaria o billetera.');
 
-  if (origin && configuration.permitir_saldo_negativo !== true) {
+  const scheduleId = value.id_programacion == null ? '' : String(value.id_programacion);
+  const scheduledDate = value.fecha_programada == null ? '' : String(value.fecha_programada).slice(0, 10);
+  if (scheduleId || scheduledDate) {
+    const schedule = schedules.find((item) => String(item.id_programacion ?? '') === scheduleId);
+    if (!schedule || schedule.activa === false) throw new ApiError(409, 'FINANCE_SCHEDULE_INACTIVE', 'Esta programación ya no está activa.');
+    if (!scheduledDate || String(schedule.fecha_proxima ?? '').slice(0, 10) !== scheduledDate) throw new ApiError(409, 'FINANCE_SCHEDULE_CHANGED', 'Esta fecha programada ya fue aplicada o cambió.');
+    if (scheduledDate > dashboardToday()) throw new ApiError(409, 'FINANCE_SCHEDULE_NOT_DUE', `Este movimiento se habilitará el ${scheduledDate}.`);
+    if (movements.some((movement) => movement.id_programacion === scheduleId && String(movement.fecha_programada ?? '').slice(0, 10) === scheduledDate)) throw new ApiError(409, 'FINANCE_SCHEDULE_DUPLICATE', 'Este movimiento programado ya fue aplicado.');
+  }
+
+  if (origin?.tipo === 'TARJETA_CREDITO') {
+    const balance = Number(origin.saldo_inicial ?? 0) + movements
+      .filter((movement) => String(movement.id_movimiento_financiero ?? '') !== editingMovementId)
+      .reduce((sum, movement) => sum + (movement.id_cuenta_destino === originId ? Number(movement.monto ?? 0) : 0) - (movement.id_cuenta_origen === originId ? Number(movement.monto ?? 0) : 0), 0);
+    const availableCredit = Number(origin.limite_credito ?? 0) + balance;
+    if (Number(value.monto ?? 0) > availableCredit + 0.0001) throw new ApiError(409, 'FINANCE_INSUFFICIENT_CREDIT', `El crédito disponible en ${String(origin.nombre ?? 'la tarjeta')} es ${Math.max(0, availableCredit).toFixed(2)}.`);
+  } else if (origin && configuration.permitir_saldo_negativo !== true) {
     const balance = Number(origin.saldo_inicial ?? 0) + movements
       .filter((movement) => String(movement.id_movimiento_financiero ?? '') !== editingMovementId)
       .reduce((sum, movement) => sum
@@ -679,7 +731,7 @@ async function assertOfflinePersonalFinanceAllowed(userId: string, path: string,
 function endpointRoot(path: string) {
   const catalogRoot = path.match(/^\/catalogos\/[^/?]+/)?.[0];
   if (catalogRoot) return catalogRoot;
-  const roots = ['/mis-finanzas/movimientos', '/mis-finanzas/cuentas', '/mis-finanzas/deudas', '/ventas/productos', '/registros/produccion-tanque', '/registros/tratamientos', '/registros/lactancias', '/registros/producciones', '/registros/pesajes', '/registros/muertes', '/registros/abortos', '/reproduccion/celos', '/reproduccion/preneces', '/limpiezas-potrero', '/jornadas-sanitarias', '/condiciones-salud'];
+  const roots = ['/mis-finanzas/programaciones', '/mis-finanzas/movimientos', '/mis-finanzas/cuentas', '/mis-finanzas/deudas', '/ventas/productos', '/registros/produccion-tanque', '/registros/tratamientos', '/registros/lactancias', '/registros/producciones', '/registros/pesajes', '/registros/muertes', '/registros/abortos', '/reproduccion/celos', '/reproduccion/preneces', '/limpiezas-potrero', '/jornadas-sanitarias', '/condiciones-salud'];
   return roots.find((root) => path === root || path.startsWith(`${root}/`)) ?? `/${path.split('/').filter(Boolean)[0] ?? ''}`;
 }
 
@@ -1039,6 +1091,46 @@ async function normalizeOptimisticCleaning(userId: string, value: Record<string,
   };
 }
 
+async function normalizeOptimisticPasture(userId: string, value: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const locations = dataArray<Record<string, unknown>>(await getOfflineCache<unknown>(userId, '/ubicaciones'));
+  const locationInput = value.ubicacion && typeof value.ubicacion === 'object' && !Array.isArray(value.ubicacion)
+    ? value.ubicacion as Record<string, unknown> : {};
+  const selectedPropertyId = locationInput.id_propiedad ?? locationInput.id_propiedad_padre ?? value.id_propiedad ?? null;
+  const propertyLocation = selectedPropertyId
+    ? locations.find((item) => item.id_propiedad === selectedPropertyId || item.id_ubicacion === selectedPropertyId)
+    : locations.find((item) => item.propiedad_es_principal === true);
+  const id = String(value.id_potrero ?? `offline-${crypto.randomUUID()}`);
+  const locationId = String(locationInput.id_ubicacion ?? value.id_ubicacion ?? `${id}-ubicacion`);
+  const rawGrasses = Array.isArray(value.pastos) ? value.pastos.filter((item) => item && typeof item === 'object') as Record<string, unknown>[] : [];
+  const grasses = await Promise.all(rawGrasses.map(async (item, index) => ({
+    ...item,
+    id_potrero_pasto: item.id_potrero_pasto ?? `offline-${id}-pasto-${index}`,
+    pasto: item.pasto ?? await cachedCatalogLabel(userId, 'pastos', item.id_tipo_pasto, 'id_tipo_pasto') ?? 'Pasto pendiente',
+  })));
+  const totalAnimals = Number(value.total_animales ?? 0);
+  return {
+    fecha_estado_desde: value.fecha_ultimo_descanso ?? null,
+    dias_ocupacion: null,
+    dias_descanso: null,
+    ...value,
+    id_potrero: id,
+    id_ubicacion: locationId,
+    nombre: locationInput.nombre ?? value.nombre ?? 'Potrero pendiente',
+    codigo: locationInput.codigo ?? value.codigo ?? null,
+    descripcion: locationInput.descripcion ?? value.descripcion ?? null,
+    activo: locationInput.activo ?? value.activo ?? true,
+    id_propiedad: locationInput.id_propiedad ?? propertyLocation?.id_propiedad ?? value.id_propiedad ?? null,
+    id_propiedad_padre: null,
+    propiedad: propertyLocation?.propiedad ?? propertyLocation?.nombre ?? value.propiedad ?? 'Propiedad principal',
+    propiedad_es_principal: propertyLocation?.propiedad_es_principal ?? value.propiedad_es_principal ?? !selectedPropertyId,
+    tipo_uso: value.tipo_uso ?? await cachedCatalogLabel(userId, 'usos-potrero', value.id_tipo_uso_potrero, 'id_tipo_uso_potrero') ?? 'Uso pendiente',
+    unidad_area: value.unidad_area ?? await cachedCatalogLabel(userId, 'unidades', value.id_unidad_area, 'id_unidad'),
+    total_animales: totalAnimals,
+    estado_ocupacion: totalAnimals > 0 ? 'OCUPADO' : 'DESCANSO',
+    pastos: grasses,
+  };
+}
+
 async function normalizeOperationalRecord(userId: string, root: string, value: Record<string, unknown>): Promise<Record<string, unknown>> {
   const animals = await loadOfflineAnimals(userId);
   const animalId = String(value.id_animal ?? value.id_vaca ?? value.id_madre ?? '');
@@ -1090,6 +1182,7 @@ async function normalizeOptimisticEntity(userId: string, root: string, value: Re
     return animal;
   }
   if (root === '/movimientos') return normalizeMovement(value);
+  if (root === '/potreros') return normalizeOptimisticPasture(userId, value);
   if (root === '/limpiezas-potrero') return normalizeOptimisticCleaning(userId, value);
   if (['/jornadas-sanitarias', '/condiciones-salud', '/registros/tratamientos', '/registros/lactancias', '/registros/producciones', '/registros/produccion-tanque', '/registros/pesajes', '/registros/muertes', '/registros/abortos', '/reproduccion/celos', '/reproduccion/preneces'].includes(root)) {
     return normalizeOperationalRecord(userId, root, value);
@@ -1167,16 +1260,40 @@ async function applyOptimisticMutation(userId: string, path: string, method: str
     const listed=(await loadOfflineAnimals(userId))?.find((item)=>item.id_animal===id) as unknown as Record<string,unknown>|undefined;
     normalized=await normalizeOptimisticEntity(userId,root,{...(listed??{}),...(detail??{}),...optimistic,id_animal:id});
   }
+  else if(root==='/potreros'&&id&&(method==='PATCH'||method==='PUT')){
+    const listed=dataArray<Record<string,unknown>>(await getOfflineCache<unknown>(userId,'/potreros')).find((item)=>item.id_potrero===id);
+    const detail=unwrapApiData(await getOfflineCache<unknown>(userId,`/potreros/${id}/resumen`));
+    normalized=await normalizeOptimisticEntity(userId,root,{...(listed??{}),...(detail&&typeof detail==='object'&&!Array.isArray(detail)?detail as Record<string,unknown>:{}),...optimistic,id_potrero:id});
+  }
   if (root === '/animales' && id) await updateAnimalIdentity(userId, id, method, normalized);
   const optimisticId = typeof normalized[idField] === 'string' ? String(normalized[idField]) : null;
   for (const entry of await listOfflineCacheEntries(userId)) {
     const collection = isEntityCollectionPath(root, entry.path);
     const detailId = entityDetailId(root, entry.path);
-    if (rootCreate ? !collection : !(collection || detailId === id)) continue;
+    const pastureSummary = root === '/potreros' && id && pathWithoutQuery(entry.path) === `/potreros/${id}/resumen`;
+    if (rootCreate ? !collection : !(collection || detailId === id || pastureSummary)) continue;
     const payload = mutateCachedPayload(entry.payload, method, rootCreate, id, idField, normalized);
     await putOfflineCache(userId, entry.path, payload);
   }
   if (rootCreate && optimisticId) await putOfflineCache(userId, `${root}/${optimisticId}`, normalized);
+  if (root === '/potreros' && method !== 'DELETE') {
+    const locationId = String(normalized.id_ubicacion ?? '');
+    if (locationId) {
+      const location = {
+        id_ubicacion: locationId, tipo: 'POTRERO', nombre: normalized.nombre, codigo: normalized.codigo ?? null,
+        descripcion: normalized.descripcion ?? null, activo: normalized.activo !== false,
+        id_categoria_animal: normalized.id_categoria_animal ?? null, id_propiedad: normalized.id_propiedad ?? null,
+        id_propiedad_padre: null, propiedad: normalized.propiedad ?? null,
+        propiedad_es_principal: normalized.propiedad_es_principal === true,
+        total_animales: Number(normalized.total_animales ?? 0),
+        __offline: true, __sync_state: 'PENDING' as const,
+      };
+      for (const entry of await listOfflineCacheEntries(userId)) {
+        if (pathWithoutQuery(entry.path) !== '/ubicaciones') continue;
+        await putOfflineCache(userId, entry.path, mutateCachedPayload(entry.payload, rootCreate ? 'POST' : 'PATCH', rootCreate, locationId, 'id_ubicacion', location));
+      }
+    }
+  }
   await mirrorCatalogCache(userId, root);
 }
 
@@ -1198,8 +1315,40 @@ function updateCachedRecords(value: unknown, idField: string, ids: Set<string>, 
   return value;
 }
 
+function nextOfflineScheduleDate(current: string, frequency: string) {
+  if (frequency === 'UNICA') return null;
+  const [year, month, day] = current.split('-').map(Number);
+  if (frequency === 'SEMANAL' || frequency === 'QUINCENAL') {
+    const date = new Date(Date.UTC(year, month - 1, day + (frequency === 'SEMANAL' ? 7 : 15)));
+    return date.toISOString().slice(0, 10);
+  }
+  const targetMonth = frequency === 'MENSUAL' ? month : month + 11;
+  const targetYear = year + Math.floor(targetMonth / 12);
+  const normalizedMonth = targetMonth % 12;
+  const lastDay = new Date(Date.UTC(targetYear, normalizedMonth + 1, 0)).getUTCDate();
+  return `${targetYear}-${String(normalizedMonth + 1).padStart(2, '0')}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
+}
+
+async function advanceOfflineFinanceSchedule(userId: string, scheduleId: string, appliedDate: string) {
+  const ids = new Set([scheduleId]);
+  for (const entry of await listOfflineCacheEntries(userId)) {
+    if (!entry.path.startsWith('/mis-finanzas/programaciones')) continue;
+    const updated = updateCachedRecords(entry.payload, 'id_programacion', ids, (record) => {
+      if (String(record.fecha_proxima ?? '').slice(0, 10) !== appliedDate) return record;
+      const next = nextOfflineScheduleDate(appliedDate, String(record.frecuencia ?? 'UNICA'));
+      const active = Boolean(next && (!record.fecha_fin || next <= String(record.fecha_fin).slice(0, 10)));
+      return { ...record, fecha_proxima: next ?? appliedDate, activa: active, aplicable: Boolean(active && next && next <= dashboardToday()), __offline: true, __sync_state: 'PENDING' as const };
+    });
+    await putOfflineCache(userId, entry.path, updated);
+  }
+}
+
 async function applyOptimisticAction(userId: string, path: string, method: string,body?:Record<string,unknown>) {
   if (method !== 'POST') return;
+  if (pathWithoutQuery(path) === '/mis-finanzas/movimientos' && body?.id_programacion && body.fecha_programada) {
+    await advanceOfflineFinanceSchedule(userId, String(body.id_programacion), String(body.fecha_programada).slice(0, 10));
+    return;
+  }
   const agenda=pathWithoutQuery(path).match(/^\/agenda\/([^/]+)\/(responder|completar)$/);if(agenda){const[,id,action]=agenda,ids=new Set([id]);for(const entry of await listOfflineCacheEntries(userId)){if(!entry.path.startsWith('/agenda'))continue;await putOfflineCache(userId,entry.path,updateCachedRecords(entry.payload,'id_agenda_item',ids,record=>({...record,estado:action==='completar'?'COMPLETADA':String(body?.respuesta??record.estado),mi_respuesta:action==='responder'?String(body?.respuesta??'PENDIENTE'):record.mi_respuesta,__offline:true,__sync_state:'PENDING' as const})));}return;}
   const match = pathWithoutQuery(path).match(/^\/movimientos\/([^/]+)\/(aplicar|cancelar)$/);
   if (!match) return;
@@ -1262,6 +1411,32 @@ async function applyOptimisticAction(userId: string, path: string, method: strin
   for (const entry of entries) {
     if (!entry.path.startsWith('/animales')) continue;
     await putOfflineCache(userId, entry.path, updateCachedRecords(entry.payload, 'id_animal', selectedIds, patchAnimal));
+  }
+  const projectedAnimals: Record<string, unknown>[] = animalRecords.map((animal) => selectedIds.has(String(animal.id_animal ?? '')) ? patchAnimal(animal) as Record<string, unknown> : animal);
+  const occupancy = new Map<string, number>();
+  for (const animal of projectedAnimals) {
+    const locationId = String(animal.id_ubicacion_actual ?? '');
+    if (locationId && String(animal.estado ?? 'ACTIVO') === 'ACTIVO') occupancy.set(locationId, (occupancy.get(locationId) ?? 0) + 1);
+  }
+  const updateOccupancy = (payload: unknown): unknown => {
+    if (Array.isArray(payload)) return payload.map(updateOccupancy);
+    if (!payload || typeof payload !== 'object') return payload;
+    const record = payload as Record<string, unknown>;
+    if ('ok' in record && 'data' in record) return { ...record, data: updateOccupancy(record.data) };
+    const locationId = String(record.id_ubicacion ?? '');
+    if (!locationId) return record;
+    const total = occupancy.get(locationId) ?? 0;
+    return {
+      ...record,
+      total_animales: total,
+      estado_ocupacion: total > 0 ? 'OCUPADO' : 'DESCANSO',
+      ...(record.ocupacion && typeof record.ocupacion === 'object' ? { ocupacion: { ...(record.ocupacion as Record<string, unknown>), total_animales: total, estado: total > 0 ? 'OCUPADO' : 'DESCANSO' } } : {}),
+      ...marker,
+    };
+  };
+  for (const entry of entries) {
+    if (!(entry.path.startsWith('/potreros') || pathWithoutQuery(entry.path) === '/ubicaciones')) continue;
+    await putOfflineCache(userId, entry.path, updateOccupancy(entry.payload));
   }
   if (String(movement.tipo_movimiento) === 'UBICACION' && movement.id_grupo_filtro && destinationLocationId) {
     const sourceGroupIds = new Set([String(movement.id_grupo_filtro)]);
@@ -1447,7 +1622,7 @@ async function reapplyPendingMutations(userId: string) {
         ...replaceTemporaryIds(optimistic, temporaryIds) as Record<string, unknown>,
       });
     }
-    await applyOptimisticAction(userId, resolvedPath, mutation.method,mutation.jsonBody&&typeof mutation.jsonBody==='object'?mutation.jsonBody as Record<string,unknown>:undefined);
+    await applyOptimisticAction(userId, resolvedPath, mutation.method,mutation.jsonBody&&typeof mutation.jsonBody==='object'?replaceTemporaryIds(mutation.jsonBody,temporaryIds) as Record<string,unknown>:undefined);
     if (mutation.method === 'DELETE') await applyOptimisticMediaDeletion(userId, mutation.path);
     if (mutation.localMediaIds?.length) await applyOptimisticMediaMutation(userId, mutation.path, optimistic, mutation.localMediaIds);
   }
@@ -1780,6 +1955,32 @@ export async function getLocalAnimalOperationAvailability<T>(animalId:string,dat
 }
 
 async function derivedOfflineResponse(userId: string, path: string): Promise<unknown | null> {
+  const pastureSummaryMatch = pathWithoutQuery(path).match(/^\/potreros\/([^/]+)\/resumen$/);
+  if (pastureSummaryMatch) {
+    const pasture = dataArray<Record<string, unknown>>(await getOfflineCache<unknown>(userId, '/potreros'))
+      .find((item) => String(item.id_potrero ?? '') === pastureSummaryMatch[1]);
+    if (!pasture) return null;
+    const occupied = Number(pasture.total_animales ?? 0) > 0;
+    return {
+      ...pasture,
+      ocupacion: {
+        estado: occupied ? 'OCUPADO' : 'DESCANSO',
+        fecha_ocupacion_actual: occupied ? pasture.fecha_estado_desde ?? null : null,
+        dias_ocupacion_actual: occupied ? pasture.dias_ocupacion ?? null : null,
+        fecha_ocupacion_anterior: null,
+        fecha_fin_ocupacion_anterior: null,
+        dias_ocupacion_anterior: null,
+        carga_anterior: null,
+        fecha_ultima_ocupacion: null,
+        dias_ultima_ocupacion: null,
+        fecha_ultimo_descanso: occupied ? pasture.fecha_ultimo_descanso ?? null : pasture.fecha_estado_desde ?? pasture.fecha_ultimo_descanso ?? null,
+        dias_descanso: occupied ? pasture.dias_descanso ?? null : pasture.dias_descanso ?? null,
+        total_animales: Number(pasture.total_animales ?? 0),
+      },
+      historial_ocupaciones: [],
+      historial_limpiezas: [],
+    };
+  }
   if (path.startsWith('/registros/producciones/vacas-activas?')) {
     const cachedLactations = await getOfflineCache<unknown>(userId, '/registros/lactancias');
     if (cachedLactations === null) return null;

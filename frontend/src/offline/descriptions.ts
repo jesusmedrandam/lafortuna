@@ -69,6 +69,7 @@ export async function describeOfflineMutation(userId: string, path: string, meth
   if (path === '/mis-finanzas/configuracion') return 'Actualización de Mis finanzas';
   if (/^\/mis-finanzas\/cuentas/.test(path)) return `${action} de cuenta financiera${quoted(body.nombre)}`;
   if (/^\/mis-finanzas\/movimientos/.test(path)) return `${action} de movimiento financiero${quoted(body.concepto)}`;
+  if (/^\/mis-finanzas\/programaciones/.test(path)) return `${action} de pago o ingreso programado${quoted(body.concepto)}`;
   if (/^\/mis-finanzas\/deudas/.test(path)) return `${action} de deuda personal${quoted(body.concepto)}`;
   if (/^\/limpiezas-potrero\/imagenes\//.test(path)) return 'Eliminación de fotografía de limpieza de potrero';
   if (/^\/limpiezas-potrero/.test(path)) return `${path.includes('/imagenes') ? 'Carga de fotografía' : action} de limpieza de potrero`;
