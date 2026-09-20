@@ -23,6 +23,7 @@ const rules: Rule[] = [
   { pattern: /^\/compras(?:\/|$)/, permission: 'COMPRA_ADMINISTRAR' },
   { pattern: /^\/actividades(?:\/|$)/, permission: 'ACTIVIDAD_ADMINISTRAR' },
   { pattern: /^\/agenda(?:\/|$)/, permission: 'USUARIO_AUTENTICADO' },
+  { pattern: /^\/mis-finanzas(?:\/|$)/, permission: 'USUARIO_AUTENTICADO' },
   { pattern: /^\/(catalogos|marquillas|configuracion)(?:\/|$)/, permission: 'CATALOGO_ADMINISTRAR' },
   { pattern: /^\/usuarios(?:\/|$)/, permission: 'USUARIO_ADMINISTRAR' },
   { pattern: /^\/roles(?:\/|$)/, permission: 'ROL_ADMINISTRAR' },

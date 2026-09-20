@@ -34,6 +34,7 @@ import { healthRouter } from './modules/health/health.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
 import { publicAnimalsRouter } from './modules/animals/public-animals.routes.js';
 import { agendaRouter } from './modules/agenda/agenda.routes.js';
+import { personalFinanceRouter } from './modules/personal-finance/personal-finance.routes.js';
 
 export const app=express();
 app.set('trust proxy',1);
@@ -80,6 +81,7 @@ api.use('/condiciones-salud',healthRouter);
 api.use('/configuracion',settingsRouter);
 api.use('/notificaciones',notificationsRouter);
 api.use('/agenda',agendaRouter);
+api.use('/mis-finanzas',personalFinanceRouter);
 app.use(env.API_PREFIX,api);
 app.use(notFoundHandler);
 app.use(errorHandler);

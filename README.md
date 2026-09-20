@@ -61,4 +61,5 @@ El archivo `render.yaml` crea el Web Service. Configura manualmente las variable
 - La versión 18 no requiere una migración adicional; corrige el alta de grupos y mejora los mensajes de error de PostgreSQL.
 - Para la versión 19 aplica `migrations/20260821_movimientos_borradores_flexibles.sql` después de la migración de la versión 16. La versión 19 restaura el traslado exclusivo del grupo completo y permite guardar borradores incompletos.
 - Para habilitar Tareas y eventos aplica `migrations/20260919_agenda_tareas_eventos.sql` después de las migraciones anteriores. La API conserva el resto de las alertas calculadas si esta tabla todavía no ha sido instalada.
+- Para habilitar Mis finanzas aplica `migrations/20260920_mis_finanzas_privadas.sql`. Las cuentas, movimientos, saldos y deudas quedan aislados por usuario y la función inicia desactivada.
 - La versión 20 no agrega otra migración; restaura Propiedad de origen, filtra grupos y destinos por propiedad y aplica los movimientos sin depender de la función heredada de PostgreSQL.

@@ -352,6 +352,9 @@ function temporaryIdField(path: string) {
   if (path === '/limpiezas-potrero') return 'id_limpieza';
   if (path === '/actividades') return 'id_actividad';
   if (path === '/agenda') return 'id_agenda_item';
+  if (path === '/mis-finanzas/cuentas') return 'id_cuenta';
+  if (path === '/mis-finanzas/movimientos') return 'id_movimiento_financiero';
+  if (path === '/mis-finanzas/deudas') return 'id_deuda';
   if (path === '/partos') return 'id_parto';
   if (path === '/compras') return 'id_compra';
   if (path === '/ventas') return 'id_venta';
@@ -417,6 +420,7 @@ async function queueOfflineMutation<T>(path: string, options: RequestOptions): P
   await assertOfflineMovementActionAllowed(session.user.id, path, method);
   await assertOfflineAgendaCreateAllowed(session.user.id,path,method,options.body);
   await assertOfflineAgendaActionAllowed(session.user.id,path,method);
+  await assertOfflinePersonalFinanceAllowed(session.user.id, path, method, options.body);
 
   const idField = method === 'POST' ? temporaryIdField(path) : null;
   const temporaryId = idField ? `offline-${crypto.randomUUID()}` : undefined;
@@ -492,6 +496,13 @@ async function queueOfflineMutation<T>(path: string, options: RequestOptions): P
     optimistic={...optimistic,estado:'PENDIENTE',creado_por:session.user.id,creado_por_nombre:`${session.user.nombres} ${session.user.apellidos}`.trim(),mi_respuesta:selectedUsers.has(session.user.id)?'PENDIENTE':null,usuarios:(cached?.usuarios??[]).filter(item=>selectedUsers.has(String(item.id_usuario??''))).map(item=>({...item,respuesta:'PENDIENTE'})),animales:(cached?.animales??[]).filter(item=>selectedAnimals.has(String(item.id_animal??'')))};
   }
   await applyOptimisticMutation(session.user.id, path, method, optimistic);
+  if (pathWithoutQuery(path) === '/mis-finanzas/configuracion' && method === 'PUT') {
+    const current = unwrapApiData(await getOfflineCache<unknown>(session.user.id, '/mis-finanzas/configuracion'));
+    await putOfflineCache(session.user.id, '/mis-finanzas/configuracion', {
+      ...(current && typeof current === 'object' && !Array.isArray(current) ? current as Record<string, unknown> : {}),
+      ...optimistic,
+    });
+  }
   await applyOptimisticAction(session.user.id, path, method,optimistic);
   if (method === 'DELETE') await applyOptimisticMediaDeletion(session.user.id, path);
   const optimisticMedia = storedForm?.localMediaIds.length
@@ -585,10 +596,90 @@ async function assertOfflineAgendaCreateAllowed(userId:string,path:string,method
   }
 }
 
+async function assertOfflinePersonalFinanceAllowed(userId: string, path: string, method: string, body: unknown) {
+  const cleanPath = pathWithoutQuery(path);
+  if (!cleanPath.startsWith('/mis-finanzas') || cleanPath === '/mis-finanzas/configuracion') return;
+  if (!body || typeof body !== 'object' || body instanceof FormData) {
+    if (method !== 'DELETE') return;
+  }
+  const rawConfiguration = unwrapApiData(await getOfflineCache<unknown>(userId, '/mis-finanzas/configuracion'));
+  const configuration = rawConfiguration && typeof rawConfiguration === 'object' && !Array.isArray(rawConfiguration)
+    ? rawConfiguration as Record<string, unknown> : null;
+  if (!configuration) throw new ApiError(0, 'OFFLINE_FINANCE_NOT_DOWNLOADED', 'Descarga Mis finanzas antes de modificarla sin conexión.');
+  if (configuration.habilitadas !== true) throw new ApiError(409, 'PERSONAL_FINANCE_DISABLED', 'Mis finanzas está desactivado en Configuración.');
+
+  const accounts = dataArray<Record<string, unknown>>(await getOfflineCache<unknown>(userId, '/mis-finanzas/cuentas'));
+  const movements = dataArray<Record<string, unknown>>(await getOfflineCache<unknown>(userId, '/mis-finanzas/movimientos'));
+  const debts = dataArray<Record<string, unknown>>(await getOfflineCache<unknown>(userId, '/mis-finanzas/deudas'));
+  const value = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  const accountMatch = cleanPath.match(/^\/mis-finanzas\/cuentas\/([^/]+)$/);
+  const movementMatch = cleanPath.match(/^\/mis-finanzas\/movimientos\/([^/]+)$/);
+  const debtMatch = cleanPath.match(/^\/mis-finanzas\/deudas\/([^/]+)$/);
+
+  if (cleanPath === '/mis-finanzas/cuentas' && method === 'POST' || accountMatch && method === 'PATCH') {
+    const editingId = accountMatch?.[1] ?? null;
+    const duplicated = accounts.some((account) => String(account.id_cuenta ?? '') !== editingId
+      && String(account.nombre ?? '').trim().toLocaleLowerCase('es') === String(value.nombre ?? '').trim().toLocaleLowerCase('es'));
+    if (duplicated) throw new ApiError(409, 'FINANCE_ACCOUNT_NAME_EXISTS', 'Ya existe una cuenta con ese nombre en tus datos descargados.');
+  }
+  if (accountMatch && method === 'DELETE') {
+    const used = movements.some((movement) => movement.id_cuenta_origen === accountMatch[1] || movement.id_cuenta_destino === accountMatch[1]);
+    if (used) throw new ApiError(409, 'FINANCE_ACCOUNT_HAS_MOVEMENTS', 'Esta cuenta tiene movimientos. Desactívala para conservar su historial.');
+    return;
+  }
+  if (debtMatch && method === 'DELETE') {
+    if (movements.some((movement) => movement.id_deuda === debtMatch[1])) throw new ApiError(409, 'FINANCE_DEBT_HAS_PAYMENTS', 'Esta deuda tiene abonos registrados y no se puede eliminar.');
+    return;
+  }
+  if (!(cleanPath === '/mis-finanzas/movimientos' && method === 'POST') && !(movementMatch && method === 'PATCH')) {
+    if (debtMatch && method === 'PATCH') {
+      const paid = movements.filter((movement) => movement.id_deuda === debtMatch[1]).reduce((sum, movement) => sum + Number(movement.monto ?? 0), 0);
+      if (Number(value.monto_original ?? 0) + 0.0001 < paid) throw new ApiError(409, 'FINANCE_DEBT_BELOW_PAID', `El monto no puede ser menor a los abonos ya registrados (${paid.toFixed(2)}).`);
+      const incompatible = movements.some((movement) => movement.id_deuda === debtMatch[1]
+        && (value.tipo === 'A_FAVOR' ? movement.tipo !== 'INGRESO' : movement.tipo !== 'EGRESO'));
+      if (incompatible) throw new ApiError(409, 'FINANCE_DEBT_TYPE_LOCKED', 'No puedes cambiar el tipo de una deuda que ya tiene abonos.');
+    }
+    return;
+  }
+
+  const editingMovementId = movementMatch?.[1] ?? null;
+  const originId = value.id_cuenta_origen == null ? '' : String(value.id_cuenta_origen);
+  const destinationId = value.id_cuenta_destino == null ? '' : String(value.id_cuenta_destino);
+  const origin = accounts.find((account) => String(account.id_cuenta ?? '') === originId);
+  const destination = accounts.find((account) => String(account.id_cuenta ?? '') === destinationId);
+  if (originId && (!origin || origin.activa === false)) throw new ApiError(409, 'FINANCE_ORIGIN_UNAVAILABLE', 'La cuenta de origen no está disponible en los datos descargados.');
+  if (destinationId && (!destination || destination.activa === false)) throw new ApiError(409, 'FINANCE_DESTINATION_UNAVAILABLE', 'La cuenta de destino no está disponible en los datos descargados.');
+  const paymentMethod = String(value.metodo_pago ?? '');
+  const type = String(value.tipo ?? '');
+  const paymentAccount = ['EGRESO', 'AJUSTE_SALIDA'].includes(type) ? origin : ['INGRESO', 'AJUSTE_ENTRADA'].includes(type) ? destination : null;
+  if (type === 'TRANSFERENCIA' && paymentMethod !== 'TRANSFERENCIA') throw new ApiError(400, 'FINANCE_TRANSFER_METHOD', 'Los traspasos entre cuentas usan el método transferencia.');
+  if (paymentAccount?.tipo === 'EFECTIVO' && paymentMethod !== 'EFECTIVO') throw new ApiError(400, 'FINANCE_CASH_METHOD', 'Los movimientos de una cuenta de efectivo deben usar el método efectivo.');
+  if (paymentAccount && paymentAccount.tipo !== 'EFECTIVO' && paymentMethod === 'EFECTIVO') throw new ApiError(400, 'FINANCE_ACCOUNT_METHOD', 'Selecciona transferencia, tarjeta, depósito u otro para esta cuenta.');
+
+  if (origin && configuration.permitir_saldo_negativo !== true) {
+    const balance = Number(origin.saldo_inicial ?? 0) + movements
+      .filter((movement) => String(movement.id_movimiento_financiero ?? '') !== editingMovementId)
+      .reduce((sum, movement) => sum
+        + (movement.id_cuenta_destino === originId ? Number(movement.monto ?? 0) : 0)
+        - (movement.id_cuenta_origen === originId ? Number(movement.monto ?? 0) : 0), 0);
+    if (Number(value.monto ?? 0) > balance + 0.0001) throw new ApiError(409, 'FINANCE_INSUFFICIENT_BALANCE', `El saldo disponible en ${String(origin.nombre ?? 'la cuenta')} es ${balance.toFixed(2)}.`);
+  }
+
+  const debtId = value.id_deuda == null ? '' : String(value.id_deuda);
+  if (!debtId) return;
+  const debt = debts.find((item) => String(item.id_deuda ?? '') === debtId);
+  if (!debt) throw new ApiError(409, 'FINANCE_DEBT_UNAVAILABLE', 'La deuda relacionada no está disponible en los datos descargados.');
+  if ((debt.tipo === 'A_FAVOR' && type !== 'INGRESO') || (debt.tipo === 'EN_CONTRA' && type !== 'EGRESO')) throw new ApiError(400, 'FINANCE_DEBT_MOVEMENT_TYPE', 'El abono no coincide con el tipo de deuda.');
+  const paid = movements.filter((movement) => movement.id_deuda === debtId && String(movement.id_movimiento_financiero ?? '') !== editingMovementId)
+    .reduce((sum, movement) => sum + Number(movement.monto ?? 0), 0);
+  const outstanding = Math.max(0, Number(debt.monto_original ?? 0) - paid);
+  if (Number(value.monto ?? 0) > outstanding + 0.0001) throw new ApiError(409, 'FINANCE_DEBT_OVERPAYMENT', `El abono supera el saldo pendiente de ${outstanding.toFixed(2)}.`);
+}
+
 function endpointRoot(path: string) {
   const catalogRoot = path.match(/^\/catalogos\/[^/?]+/)?.[0];
   if (catalogRoot) return catalogRoot;
-  const roots = ['/ventas/productos', '/registros/produccion-tanque', '/registros/tratamientos', '/registros/lactancias', '/registros/producciones', '/registros/pesajes', '/registros/muertes', '/registros/abortos', '/reproduccion/celos', '/reproduccion/preneces', '/limpiezas-potrero', '/jornadas-sanitarias', '/condiciones-salud'];
+  const roots = ['/mis-finanzas/movimientos', '/mis-finanzas/cuentas', '/mis-finanzas/deudas', '/ventas/productos', '/registros/produccion-tanque', '/registros/tratamientos', '/registros/lactancias', '/registros/producciones', '/registros/pesajes', '/registros/muertes', '/registros/abortos', '/reproduccion/celos', '/reproduccion/preneces', '/limpiezas-potrero', '/jornadas-sanitarias', '/condiciones-salud'];
   return roots.find((root) => path === root || path.startsWith(`${root}/`)) ?? `/${path.split('/').filter(Boolean)[0] ?? ''}`;
 }
 
@@ -1349,6 +1440,13 @@ async function reapplyPendingMutations(userId: string) {
     const optimistic = optimisticFromMutation(mutation);
     const resolvedPath = Object.entries(temporaryIds).reduce((result, [temporary, actual]) => result.replaceAll(temporary, actual), mutation.path);
     await applyOptimisticMutation(userId, resolvedPath, mutation.method, replaceTemporaryIds(optimistic, temporaryIds) as Record<string, unknown>);
+    if (pathWithoutQuery(resolvedPath) === '/mis-finanzas/configuracion' && mutation.method === 'PUT') {
+      const current = unwrapApiData(await getOfflineCache<unknown>(userId, '/mis-finanzas/configuracion'));
+      await putOfflineCache(userId, '/mis-finanzas/configuracion', {
+        ...(current && typeof current === 'object' && !Array.isArray(current) ? current as Record<string, unknown> : {}),
+        ...replaceTemporaryIds(optimistic, temporaryIds) as Record<string, unknown>,
+      });
+    }
     await applyOptimisticAction(userId, resolvedPath, mutation.method,mutation.jsonBody&&typeof mutation.jsonBody==='object'?mutation.jsonBody as Record<string,unknown>:undefined);
     if (mutation.method === 'DELETE') await applyOptimisticMediaDeletion(userId, mutation.path);
     if (mutation.localMediaIds?.length) await applyOptimisticMediaMutation(userId, mutation.path, optimistic, mutation.localMediaIds);
