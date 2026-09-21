@@ -511,6 +511,7 @@ async function queueOfflineMutation<T>(path: string, options: RequestOptions): P
     pendiente_sincronizacion: true,
   };
   await applyOptimisticMutation(session.user.id, path, method, optimistic);
+  if (offlineShareToken) await putOfflineCache(session.user.id, pathWithoutQuery(path), optimistic);
   if (pathWithoutQuery(path) === '/mis-finanzas/configuracion' && method === 'PUT') {
     const current = unwrapApiData(await getOfflineCache<unknown>(session.user.id, '/mis-finanzas/configuracion'));
     await putOfflineCache(session.user.id, '/mis-finanzas/configuracion', {
@@ -1374,8 +1375,7 @@ async function applyOptimisticAction(userId: string, path: string, method: strin
   }
   if (action !== 'aplicar') return;
 
-  const animalsEntry = entries.find((entry) => entry.path === '/animales?limit=100');
-  const animalRecords = cachedRecords(animalsEntry?.payload);
+  const animalRecords = ((await loadOfflineAnimals(userId)) ?? []) as unknown as Record<string, unknown>[];
   const selectedIds = new Set(
     (Array.isArray(movement.detalles) ? movement.detalles : [])
       .filter((detail) => (detail as Record<string, unknown>).seleccionado !== false)
@@ -1387,7 +1387,7 @@ async function applyOptimisticAction(userId: string, path: string, method: strin
   }
   if (!selectedIds.size) return;
 
-  const groups = cachedRecords(entries.find((entry) => entry.path === '/grupos?limit=100')?.payload);
+  const groups = cachedRecords(entries.find((entry) => pathWithoutQuery(entry.path) === '/grupos')?.payload);
   const locations = cachedRecords(entries.find((entry) => entry.path === '/ubicaciones')?.payload);
   const destinationGroup = groups.find((group) => group.id_grupo === movement!.id_grupo_destino);
   const destinationLocationId = String(movement.id_ubicacion_destino ?? destinationGroup?.id_ubicacion_actual ?? '') || null;
@@ -1413,11 +1413,31 @@ async function applyOptimisticAction(userId: string, path: string, method: strin
     await putOfflineCache(userId, entry.path, updateCachedRecords(entry.payload, 'id_animal', selectedIds, patchAnimal));
   }
   const projectedAnimals: Record<string, unknown>[] = animalRecords.map((animal) => selectedIds.has(String(animal.id_animal ?? '')) ? patchAnimal(animal) as Record<string, unknown> : animal);
+  const previousOccupancy = new Map<string, number>();
+  for (const animal of animalRecords) {
+    const locationId = String(animal.id_ubicacion_actual ?? '');
+    if (locationId && String(animal.estado ?? 'ACTIVO') === 'ACTIVO') previousOccupancy.set(locationId, (previousOccupancy.get(locationId) ?? 0) + 1);
+  }
   const occupancy = new Map<string, number>();
   for (const animal of projectedAnimals) {
     const locationId = String(animal.id_ubicacion_actual ?? '');
     if (locationId && String(animal.estado ?? 'ACTIVO') === 'ACTIVO') occupancy.set(locationId, (occupancy.get(locationId) ?? 0) + 1);
   }
+  const movementDate = String(movement.fecha_movimiento ?? dashboardToday()).slice(0, 10);
+  const today = dashboardToday();
+  const elapsedDays = (start: unknown, end = today) => {
+    const startValue = String(start ?? '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startValue) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
+    return Math.max(0, Math.floor((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${startValue}T00:00:00Z`)) / 86_400_000));
+  };
+  const animalsInLocation = (locationId: string) => projectedAnimals
+    .filter((animal) => String(animal.id_ubicacion_actual ?? '') === locationId && String(animal.estado ?? 'ACTIVO') === 'ACTIVO')
+    .map((animal) => ({
+      id_animal: animal.id_animal,
+      nombre: animal.nombre ?? 'Animal',
+      codigo_arete: animal.codigo_arete ?? null,
+      foto_perfil: animal.foto_perfil ?? null,
+    }));
   const updateOccupancy = (payload: unknown): unknown => {
     if (Array.isArray(payload)) return payload.map(updateOccupancy);
     if (!payload || typeof payload !== 'object') return payload;
@@ -1425,12 +1445,76 @@ async function applyOptimisticAction(userId: string, path: string, method: strin
     if ('ok' in record && 'data' in record) return { ...record, data: updateOccupancy(record.data) };
     const locationId = String(record.id_ubicacion ?? '');
     if (!locationId) return record;
+    const previousTotal = previousOccupancy.get(locationId) ?? 0;
     const total = occupancy.get(locationId) ?? 0;
+    const occupied = total > 0;
+    const wasOccupied = previousTotal > 0;
+    const currentOccupation = record.ocupacion && typeof record.ocupacion === 'object'
+      ? record.ocupacion as Record<string, unknown> : null;
+    const priorHistory = Array.isArray(record.historial_ocupaciones)
+      ? record.historial_ocupaciones.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+      : [];
+    let history = priorHistory.map((item) => ({ ...item }));
+    let occupationStart = occupied
+      ? String((wasOccupied ? currentOccupation?.fecha_ocupacion_actual ?? record.fecha_estado_desde : movementDate) ?? movementDate).slice(0, 10)
+      : null;
+    let restStart = occupied
+      ? currentOccupation?.fecha_ultimo_descanso ?? record.fecha_ultimo_descanso ?? null
+      : (wasOccupied ? movementDate : currentOccupation?.fecha_ultimo_descanso ?? record.fecha_estado_desde ?? record.fecha_ultimo_descanso ?? movementDate);
+    const openIndex = history.findIndex((period) => period.fin == null);
+    if (occupied) {
+      const animals = animalsInLocation(locationId);
+      if (!wasOccupied) {
+        const maxPeriod = history.reduce((maximum, period) => Math.max(maximum, Number(period.periodo ?? 0)), 0);
+        history = [{
+          periodo: maxPeriod + 1,
+          inicio: occupationStart,
+          fin: null,
+          total_animales: total,
+          descanso_previo_desde: restStart,
+          dias_ocupacion: elapsedDays(occupationStart) ?? 0,
+          dias_descanso_previo: restStart ? elapsedDays(restStart, occupationStart!) : null,
+          animales: animals,
+        }, ...history];
+      } else if (openIndex >= 0) {
+        history[openIndex] = { ...history[openIndex], total_animales: total, dias_ocupacion: elapsedDays(history[openIndex].inicio) ?? history[openIndex].dias_ocupacion, animales: animals };
+        occupationStart = String(history[openIndex].inicio ?? occupationStart).slice(0, 10);
+      }
+    } else if (wasOccupied) {
+      const start = String(currentOccupation?.fecha_ocupacion_actual ?? record.fecha_estado_desde ?? movementDate).slice(0, 10);
+      if (openIndex >= 0) history[openIndex] = { ...history[openIndex], fin: movementDate, dias_ocupacion: elapsedDays(history[openIndex].inicio, movementDate) ?? history[openIndex].dias_ocupacion };
+      else history = [{ periodo: history.reduce((maximum, period) => Math.max(maximum, Number(period.periodo ?? 0)), 0) + 1, inicio: start, fin: movementDate, total_animales: previousTotal, descanso_previo_desde: currentOccupation?.fecha_ultimo_descanso ?? null, dias_ocupacion: elapsedDays(start, movementDate) ?? 0, dias_descanso_previo: currentOccupation?.dias_descanso ?? null, animales: [] }, ...history];
+      restStart = movementDate;
+    }
+    const openPeriod = occupied ? history.find((period) => period.fin == null) : null;
+    const previousPeriod = history.find((period) => period.fin != null) ?? null;
+    const statusFields = {
+      total_animales: total,
+      estado_ocupacion: occupied ? 'OCUPADO' : 'DESCANSO',
+      fecha_estado_desde: occupied ? occupationStart : restStart,
+      dias_ocupacion: occupied ? elapsedDays(occupationStart) : null,
+      dias_descanso: occupied ? null : elapsedDays(restStart),
+      fecha_ultimo_descanso: restStart,
+    };
     return {
       ...record,
-      total_animales: total,
-      estado_ocupacion: total > 0 ? 'OCUPADO' : 'DESCANSO',
-      ...(record.ocupacion && typeof record.ocupacion === 'object' ? { ocupacion: { ...(record.ocupacion as Record<string, unknown>), total_animales: total, estado: total > 0 ? 'OCUPADO' : 'DESCANSO' } } : {}),
+      ...statusFields,
+      ...(currentOccupation ? { ocupacion: {
+        ...currentOccupation,
+        estado: occupied ? 'OCUPADO' : 'DESCANSO',
+        fecha_ocupacion_actual: occupied ? occupationStart : null,
+        dias_ocupacion_actual: occupied ? elapsedDays(occupationStart) : null,
+        fecha_ocupacion_anterior: previousPeriod?.inicio ?? null,
+        fecha_fin_ocupacion_anterior: previousPeriod?.fin ?? null,
+        dias_ocupacion_anterior: previousPeriod?.dias_ocupacion ?? null,
+        carga_anterior: previousPeriod?.total_animales ?? null,
+        fecha_ultima_ocupacion: previousPeriod?.inicio ?? null,
+        dias_ultima_ocupacion: previousPeriod?.dias_ocupacion ?? null,
+        fecha_ultimo_descanso: occupied ? openPeriod?.descanso_previo_desde ?? restStart : restStart,
+        dias_descanso: occupied ? openPeriod?.dias_descanso_previo ?? null : elapsedDays(restStart),
+        total_animales: total,
+      } } : {}),
+      ...(Array.isArray(record.historial_ocupaciones) ? { historial_ocupaciones: history } : {}),
       ...marker,
     };
   };
@@ -2499,6 +2583,12 @@ export async function syncOfflineMutations(force = false): Promise<{ synced: num
           break;
         }
         const payload = await parseResponse<unknown>(response);
+        if (mutation.method === 'POST' && /^\/animales\/[^/]+\/compartir$/.test(pathWithoutQuery(path)) && payload?.data && typeof payload.data === 'object') {
+          await putOfflineCache(session.user.id, pathWithoutQuery(path), {
+            ...(payload.data as Record<string, unknown>),
+            pendiente_sincronizacion: false,
+          });
+        }
         const createdId = findCreatedId(payload?.data, temporaryIdField(mutation.path));
         if (mutation.temporaryId && createdId) {
           temporaryIds[mutation.temporaryId] = createdId;
