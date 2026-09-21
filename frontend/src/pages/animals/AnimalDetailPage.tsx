@@ -315,6 +315,21 @@ export function AnimalDetailPage() {
     };
   }, [uploadDraft?.previewUrl]);
 
+  useEffect(() => {
+    if (!shareOpen || !shareInfo?.pendiente_sincronizacion) return;
+    let active = true;
+    const refreshShare = () => {
+      void apiRequest<AnimalShare>(`/animales/${id}/compartir`).then((fresh) => {
+        if (active && fresh.activo && fresh.token === shareInfo.token) setShareInfo(fresh);
+      }).catch(() => undefined);
+    };
+    window.addEventListener('sgb-sync-complete', refreshShare);
+    return () => {
+      active = false;
+      window.removeEventListener('sgb-sync-complete', refreshShare);
+    };
+  }, [id, shareInfo?.pendiente_sincronizacion, shareInfo?.token, shareOpen]);
+
   if (query.isLoading) return <LoadingState />;
   if (query.isError) return <ErrorState message={(query.error as Error).message} onRetry={() => void query.refetch()} />;
 
@@ -379,7 +394,7 @@ export function AnimalDetailPage() {
     setConditionAction(action);
   }
   function openShare(){setShareOpen(true);setShareInfo(null);createShare.mutate();}
-  async function copyShareLink(){if(!shareInfo)return;try{await navigator.clipboard.writeText(shareInfo.url);toast.show('Enlace copiado.');}catch{toast.show('No se pudo copiar el enlace.','error');}}
+  async function copyShareLink(){if(!shareInfo)return;if(shareInfo.pendiente_sincronizacion){toast.show('Conecta y sincroniza antes de compartir el enlace.','error');return;}try{await navigator.clipboard.writeText(shareInfo.url);toast.show('Enlace copiado.');}catch{toast.show('No se pudo copiar el enlace.','error');}}
   async function shareAnimal(){
     if(!shareInfo)return;
     const title=`Ficha de ${animal.nombre}`;const text=`Mira la ficha de ${animal.nombre} en SGB.`;
@@ -547,7 +562,7 @@ export function AnimalDetailPage() {
     </Modal>:null}
 
     {shareOpen?<Modal title={`Compartir a ${animal.nombre}`} onClose={()=>setShareOpen(false)} footer={<Button variant="ghost" onClick={()=>setShareOpen(false)}>Cerrar</Button>}>
-      {createShare.isPending?<LoadingState text="Creando enlace seguro…"/>:shareInfo?<div className="animal-share-dialog"><div className="form-alert">{shareInfo.pendiente_sincronizacion?'El enlace ya está listo para copiar, pero empezará a mostrar la ficha cuando el dispositivo sincronice con internet.':'Quien tenga este enlace podrá ver la ficha básica sin iniciar sesión. No se mostrarán movimientos, potreros, grupos, propietarios ni tratamientos.'}</div><Field label="Enlace público"><div className="share-link-field"><Input value={shareInfo.url} readOnly/><IconButton label="Copiar enlace" onClick={()=>void copyShareLink()}><Copy size={18}/></IconButton></div></Field><div className="share-dialog-actions"><Button onClick={()=>void shareAnimal()}><Share2 size={17}/>Compartir por aplicaciones</Button><Button variant="secondary" onClick={()=>void copyShareLink()}><Copy size={17}/>Copiar enlace</Button></div><Button variant="danger" loading={revokeShare.isPending} onClick={()=>revokeShare.mutate()}>Desactivar enlace público</Button></div>:<ErrorState message="No se pudo preparar el enlace." onRetry={()=>createShare.mutate()}/>}
+      {createShare.isPending?<LoadingState text="Creando enlace seguro…"/>:shareInfo?<div className="animal-share-dialog"><div className="form-alert">{shareInfo.pendiente_sincronizacion?'Enlace guardado en el teléfono. Para evitar enviar una ficha vacía, podrás copiarlo cuando termine la sincronización con internet.':'Quien tenga este enlace podrá ver la ficha básica sin iniciar sesión. No se mostrarán movimientos, potreros, grupos, propietarios ni tratamientos.'}</div><Field label="Enlace público"><div className="share-link-field"><Input value={shareInfo.url} readOnly/><IconButton disabled={shareInfo.pendiente_sincronizacion} label="Copiar enlace" onClick={()=>void copyShareLink()}><Copy size={18}/></IconButton></div></Field><div className="share-dialog-actions"><Button disabled={shareInfo.pendiente_sincronizacion} onClick={()=>void shareAnimal()}><Share2 size={17}/>{shareInfo.pendiente_sincronizacion?'Pendiente de sincronización':'Compartir por aplicaciones'}</Button><Button disabled={shareInfo.pendiente_sincronizacion} variant="secondary" onClick={()=>void copyShareLink()}><Copy size={17}/>Copiar enlace</Button></div><Button variant="danger" loading={revokeShare.isPending} onClick={()=>revokeShare.mutate()}>Desactivar enlace público</Button></div>:<ErrorState message="No se pudo preparar el enlace." onRetry={()=>createShare.mutate()}/>}
     </Modal>:null}
 
     {downloadOpen?<Modal title="Descargar ficha del animal" onClose={()=>setDownloadOpen(false)} footer={<Button variant="ghost" onClick={()=>setDownloadOpen(false)}>Cancelar</Button>}><div className="animal-ficha-options"><p>La ficha incluye la foto de perfil, la última foto de portada, identificación, edad, raza, colores, peso, padres y resumen reproductivo.</p><button type="button" disabled={Boolean(downloading)} onClick={()=>void downloadFicha('png')}><FileImage size={28}/><span><strong>Imagen PNG</strong><small>Ideal para enviar por WhatsApp o redes sociales.</small></span>{downloading==='png'?<span className="spin">↻</span>:null}</button><button type="button" disabled={Boolean(downloading)} onClick={()=>void downloadFicha('pdf')}><FileText size={28}/><span><strong>Documento PDF</strong><small>Ideal para imprimir, archivar o enviar formalmente.</small></span>{downloading==='pdf'?<span className="spin">↻</span>:null}</button></div></Modal>:null}
