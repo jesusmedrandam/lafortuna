@@ -61,17 +61,45 @@ async function downloadMedia(item:LightboxMedia) {
 export function ImageLightbox({items,initialIndex,onClose,actions,minimalControls=false}:ImageLightboxProps) {
   const [index,setIndex]=useState(initialIndex);
   const stageRef=useRef<HTMLDivElement|null>(null);
+  const transitionTimer=useRef<number|null>(null);
+  const transitionActive=useRef(false);
   const onCloseRef=useRef(onClose);
   const historyEntryActive=useRef(false);
   const historyMarker=useRef(`sgb-lightbox-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const [view,setView]=useState({scale:1,x:0,y:0});
+  const [slide,setSlide]=useState({offset:0,animated:false});
   const touchStart=useRef<{x:number;y:number;view:{scale:number;x:number;y:number}}|null>(null);
   const pinchStart=useRef<{distance:number;midX:number;midY:number;view:{scale:number;x:number;y:number}}|null>(null);
   const dragStart=useRef<{pointerId:number;x:number;y:number;view:{scale:number;x:number;y:number}}|null>(null);
   const current=items[index];
-  const displayUrl=current?(window.SGBAndroid?current.url:optimizedCloudinaryMediaUrl(current.url,current.type??'IMAGEN','display')):'';
-  const previous=()=>setIndex((value)=>(value-1+items.length)%items.length);
-  const next=()=>setIndex((value)=>(value+1)%items.length);
+  const previousItem=items.length>1?items[(index-1+items.length)%items.length]:current;
+  const nextItem=items.length>1?items[(index+1)%items.length]:current;
+  const displayUrl=(item:LightboxMedia)=>window.SGBAndroid?item.url:optimizedCloudinaryMediaUrl(item.url,item.type??'IMAGEN','display');
+  const finishSlide=(direction:-1|1)=>{
+    setIndex((value)=>(value+direction+items.length)%items.length);
+    setSlide({offset:0,animated:false});
+    transitionActive.current=false;
+    transitionTimer.current=null;
+  };
+  const navigateSlide=(direction:-1|1)=>{
+    if(items.length<=1||transitionActive.current||view.scale>1)return;
+    transitionActive.current=true;
+    const distance=stageRef.current?.clientWidth||window.innerWidth;
+    setSlide({offset:direction===1?-distance:distance,animated:true});
+    transitionTimer.current=window.setTimeout(()=>finishSlide(direction),260);
+  };
+  const snapSlideBack=()=>{
+    if(slide.offset===0)return;
+    transitionActive.current=true;
+    setSlide({offset:0,animated:true});
+    transitionTimer.current=window.setTimeout(()=>{
+      transitionActive.current=false;
+      transitionTimer.current=null;
+      setSlide({offset:0,animated:false});
+    },260);
+  };
+  const previous=()=>navigateSlide(-1);
+  const next=()=>navigateSlide(1);
 
   const constrained=(candidate:{scale:number;x:number;y:number})=>{
     const scale=Math.min(5,Math.max(1,candidate.scale));
@@ -96,8 +124,13 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
     });
   });
 
-  useEffect(()=>setIndex(Math.min(Math.max(initialIndex,0),Math.max(items.length-1,0))),[initialIndex,items.length]);
+  useEffect(()=>{
+    if(transitionTimer.current!==null)window.clearTimeout(transitionTimer.current);
+    transitionTimer.current=null;transitionActive.current=false;setSlide({offset:0,animated:false});
+    setIndex(Math.min(Math.max(initialIndex,0),Math.max(items.length-1,0)));
+  },[initialIndex,items.length]);
   useEffect(()=>setView({scale:1,x:0,y:0}),[index]);
+  useEffect(()=>()=>{if(transitionTimer.current!==null)window.clearTimeout(transitionTimer.current);},[]);
   useEffect(()=>{onCloseRef.current=onClose;},[onClose]);
   useEffect(()=>{
     const root=document.documentElement;
@@ -130,8 +163,8 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
   useEffect(()=>{
     const onKey=(event:KeyboardEvent)=>{
       if(event.key==='Escape')onClose();
-      if(view.scale===1&&items.length>1&&event.key==='ArrowLeft')setIndex((value)=>(value-1+items.length)%items.length);
-      if(view.scale===1&&items.length>1&&event.key==='ArrowRight')setIndex((value)=>(value+1)%items.length);
+      if(view.scale===1&&items.length>1&&event.key==='ArrowLeft')previous();
+      if(view.scale===1&&items.length>1&&event.key==='ArrowRight')next();
     };
     window.addEventListener('keydown',onKey);
     return()=>window.removeEventListener('keydown',onKey);
@@ -144,7 +177,7 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
     aria-modal="true"
     onMouseDown={(event)=>{if(event.target===event.currentTarget)onClose();}}
     onTouchStart={(event)=>{
-      if(current.type==='VIDEO')return;
+      if(current.type==='VIDEO'||transitionActive.current)return;
       if(event.touches.length===2){
         const [first,second]=[event.touches[0],event.touches[1]];
         pinchStart.current={
@@ -154,7 +187,7 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
           view,
         };
         touchStart.current=null;
-      }else if(event.touches[0])touchStart.current={x:event.touches[0].clientX,y:event.touches[0].clientY,view};
+      }else if(event.touches[0]){setSlide({offset:0,animated:false});touchStart.current={x:event.touches[0].clientX,y:event.touches[0].clientY,view};}
     }}
     onTouchMove={(event)=>{
       if(current.type==='VIDEO')return;
@@ -181,6 +214,10 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
         const touch=event.touches[0];
         const start=touchStart.current;
         setView(constrained({...start.view,x:start.view.x+touch.clientX-start.x,y:start.view.y+touch.clientY-start.y}));
+      }else if(event.touches.length===1&&touchStart.current&&items.length>1){
+        const touch=event.touches[0];const start=touchStart.current;
+        const deltaX=touch.clientX-start.x;const deltaY=touch.clientY-start.y;
+        if(Math.abs(deltaX)>Math.abs(deltaY)){event.preventDefault();setSlide({offset:deltaX,animated:false});}
       }
     }}
     onTouchEnd={(event)=>{
@@ -191,8 +228,9 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
       }
       if(!touchStart.current)return;
       const delta=(event.changedTouches[0]?.clientX??touchStart.current.x)-touchStart.current.x;
-      if(view.scale===1&&items.length>1&&delta>45)previous();
-      if(view.scale===1&&items.length>1&&delta<-45)next();
+      if(view.scale===1&&items.length>1&&delta>45)navigateSlide(-1);
+      else if(view.scale===1&&items.length>1&&delta<-45)navigateSlide(1);
+      else snapSlideBack();
       touchStart.current=null;
     }}
   >
@@ -210,7 +248,11 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
         onPointerUp={(event)=>{if(dragStart.current?.pointerId===event.pointerId){dragStart.current=null;event.currentTarget.releasePointerCapture(event.pointerId);}}}
         onPointerCancel={()=>{dragStart.current=null;}}
       >
-        {current.type==='VIDEO'?<video src={displayUrl} controls autoPlay/>:<img draggable={false} src={displayUrl} alt={current.title} style={{transform:`translate3d(${view.x}px,${view.y}px,0) scale(${view.scale})`}}/>}
+        <div className={`lightbox-swipe-track ${slide.animated?'animated':''}`} style={{transform:items.length>1?`translate3d(calc(-100% + ${slide.offset}px),0,0)`:'translate3d(0,0,0)'}}>
+          {items.length>1?<div className="lightbox-swipe-slide" aria-hidden="true">{previousItem.type==='VIDEO'?<video src={displayUrl(previousItem)} preload="metadata"/>:<img draggable={false} src={displayUrl(previousItem)} alt=""/>}</div>:null}
+          <div className="lightbox-swipe-slide">{current.type==='VIDEO'?<video src={displayUrl(current)} controls autoPlay/>:<img draggable={false} src={displayUrl(current)} alt={current.title} style={{transform:`translate3d(${view.x}px,${view.y}px,0) scale(${view.scale})`}}/>}</div>
+          {items.length>1?<div className="lightbox-swipe-slide" aria-hidden="true">{nextItem.type==='VIDEO'?<video src={displayUrl(nextItem)} preload="metadata"/>:<img draggable={false} src={displayUrl(nextItem)} alt=""/>}</div>:null}
+        </div>
         {minimalControls?<IconButton className="lightbox-download-overlay" label="Descargar archivo" onClick={(event)=>{event.stopPropagation();void downloadMedia(current);}}><Download size={22}/></IconButton>:null}
       </div>
       <div className="image-lightbox-details">

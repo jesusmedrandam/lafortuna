@@ -1,13 +1,13 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  ArrowLeft, ArrowRight, ArrowRightLeft, Baby, Beef, CalendarDays, CircleDollarSign,
+  ArrowRight, ArrowRightLeft, Baby, Beef, CalendarDays, CircleDollarSign,
   HeartOff, Milk, PackagePlus, Sprout, Stethoscope, Weight, type LucideIcon,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { apiRequest, apiRequestAllPages } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
-import { Badge, Button, Card, ErrorState, LoadingState } from '../../components/ui';
+import { Button, Card, ErrorState, LoadingState } from '../../components/ui';
 import type { Animal } from '../../types/api';
 import { currentDateInput, formatDate, formatNumber, humanizeCode } from '../../utils';
 
@@ -104,11 +104,21 @@ function buildAnimalModel(data:SummaryData,preference=animalSummaryPreference())
   const production=new Map<string,{name:string;value:number}>();productionTotals.forEach((item,id)=>production.set(id,{name:item.name,value:item.value/item.days}));
   const heats=new Map<string,{name:string;value:number}>();(data.collections['/reproduccion/celos']??[]).filter(valid).forEach((row)=>add(heats,row.id_vaca,row.vaca));
   const offspring=new Map<string,Set<string>>();animals.forEach(animal=>{if(!animal.id_madre)return;const children=offspring.get(animal.id_madre)??new Set<string>();children.add(animal.id_animal);offspring.set(animal.id_madre,children);});
-  const birthDates=new Map<string,{name:string;dates:string[]}>();const births=(data.collections['/partos']??[]).filter(valid);
+  const birthDates=new Map<string,{name:string;dates:string[]}>();
+  animals.forEach((animal)=>{const id=String(animal.id_madre??'');const date=localDate(animal.fecha_nacimiento);if(!id||!date)return;const old=birthDates.get(id)??{name:directory.get(id)?.nombre??'Animal',dates:[]};old.dates.push(date);birthDates.set(id,old);});
+  const births=(data.collections['/partos']??[]).filter(valid);
   births.forEach(row=>{const id=String(row.id_madre??'');if(id&&Array.isArray(row.crias)){const children=offspring.get(id)??new Set<string>();row.crias.forEach((child,index)=>{if(child&&typeof child==='object'){const item=child as Record<string,unknown>;children.add(String(item.id_cria??item.id_animal??item.id_parto_cria??`${row.id_parto}:${index}`));}});offspring.set(id,children);}const date=localDate(row.fecha_parto);if(id&&date){const old=birthDates.get(id)??{name:String(row.madre??'Animal'),dates:[]};old.dates.push(date);birthDates.set(id,old);}});
   const calves=new Map<string,{name:string;value:number}>();offspring.forEach((children,id)=>calves.set(id,{name:directory.get(id)?.nombre??birthDates.get(id)?.name??'Animal',value:children.size}));
-  const intervals=new Map<string,{name:string;value:number}>();const longIntervals=new Map<string,{name:string;value:number}>();
-  birthDates.forEach((item,id)=>{const dates=[...new Set(item.dates)].sort();for(let index=1;index<dates.length;index+=1){const days=daysBetween(dates[index-1],dates[index]);const shortest=intervals.get(id);const longest=longIntervals.get(id);if(!shortest||days<shortest.value)intervals.set(id,{name:item.name,value:days});if(!longest||days>longest.value)longIntervals.set(id,{name:item.name,value:days});}});
+  const quickBirthIntervals=new Map<string,{name:string;value:number}>();const slowBirthIntervals=new Map<string,{name:string;value:number}>();
+  birthDates.forEach((item,id)=>{
+    const dates=[...new Set(item.dates)].filter((date)=>date<=currentDateInput()).sort();
+    if(dates.length>=2){const firstInterval=daysBetween(dates[0],dates[1]);if(firstInterval>=0)quickBirthIntervals.set(id,{name:item.name,value:firstInterval});}
+    if(!dates.length)return;
+    const intervals:number[]=[daysBetween(dates[dates.length-1],currentDateInput())];
+    for(let index=1;index<dates.length;index+=1)intervals.push(daysBetween(dates[index-1],dates[index]));
+    const longest=Math.max(...intervals.filter((days)=>days>=0));
+    if(Number.isFinite(longest))slowBirthIntervals.set(id,{name:item.name,value:longest});
+  });
   const automaticOldest=born[0];const manualOldest=directory.get(preference.manualOldestId);const oldest=preference.oldestMode==='AUTOMATIC'?automaticOldest:preference.oldestMode==='MANUAL'?manualOldest:undefined;
   const highlights=[
     oldest?{label:'Animal más viejo',id:oldest.id_animal,name:oldest.nombre,photo:oldest.foto_perfil,subtitle:oldest.fecha_nacimiento?`Nació ${formatDate(oldest.fecha_nacimiento)}`:'Seleccionado manualmente',value:preference.oldestMode==='MANUAL'?'Selección manual':'Cálculo automático'}:null,
@@ -116,8 +126,8 @@ function buildAnimalModel(data:SummaryData,preference=animalSummaryPreference())
     animalHighlight('Menor producción promedio',topEntry(production,true),directory,'promedio por día ordeñado',value=>`${formatNumber(value,2)} L/día`),
     animalHighlight('Más celos registrados',topEntry(heats),directory,'historial reproductivo',value=>`${formatNumber(value)} celos`),
     animalHighlight('Más crías registradas',topEntry(calves),directory,'partos registrados',value=>`${formatNumber(value)} crías`),
-    animalHighlight('Intervalo más corto entre partos',topEntry(intervals,true),directory,'entre dos partos',value=>`${formatNumber(value)} días`),
-    animalHighlight('Intervalo más largo entre partos',topEntry(longIntervals),directory,'entre dos partos',value=>`${formatNumber(value)} días`),
+    animalHighlight('Vaca más rápida en parir',topEntry(quickBirthIntervals,true),directory,'de su primera a su segunda cría',value=>`${formatNumber(value)} días`),
+    animalHighlight('Vaca más lenta en parir',topEntry(slowBirthIntervals),directory,'mayor espera registrada o desde su última cría',value=>`${formatNumber(value)} días`),
   ].filter((item):item is SummaryHighlight=>Boolean(item));
   const principal=active.filter((item)=>item.categoria_codigo==='EN_PROPIEDAD');
   return {metrics:[
@@ -133,7 +143,7 @@ function buildAnimalModel(data:SummaryData,preference=animalSummaryPreference())
     {label:'Toros y toretes',value:formatNumber(principal.filter((item)=>item.clasificacion_codigo==='TORO'||item.clasificacion_codigo==='TORETE').length)},
     {label:'Terneros',value:formatNumber(principal.filter((item)=>item.clasificacion_codigo==='TERNERO').length)},
     {label:'Hembras / machos',value:`${formatNumber(principal.filter((item)=>item.sexo==='HEMBRA').length)} / ${formatNumber(principal.filter((item)=>item.sexo==='MACHO').length)}`},
-  ],note:'La producción suma los turnos del mismo día y calcula el promedio diario independiente de cada vaca. La descendencia se cuenta por hijos e hijas relacionados. Los destacados usan el historial disponible en este dispositivo.'};
+  ],note:'La producción suma los turnos del mismo día y calcula el promedio diario independiente de cada vaca. La descendencia se cuenta por hijos e hijas relacionados. La rapidez compara la primera y segunda cría registradas; la demora considera el mayor intervalo y también el tiempo desde la última cría hasta hoy. Los destacados usan el historial disponible en este dispositivo.'};
 }
 
 function buildMovementModel(data:SummaryData):SummaryModel{
@@ -203,12 +213,11 @@ function buildModel(section:SummarySection,data:SummaryData):SummaryModel{
 export function SectionSummaryPage({section}:{section:SummarySection}){
   const navigate=useNavigate();const {hasPermission}=useAuth();const definition=sections[section];
   const query=useQuery({queryKey:['section-summary',section],queryFn:()=>loadSummaryData(section),staleTime:60_000});
-  const model=useMemo(()=>query.data?buildModel(section,query.data):null,[query.data,section]);const Icon=definition.icon;
+  const model=useMemo(()=>query.data?buildModel(section,query.data):null,[query.data,section]);
   if(query.isLoading)return <LoadingState text={`Preparando el resumen de ${definition.label.toLocaleLowerCase('es')}…`}/>;
   if(query.isError)return <ErrorState message={(query.error as Error).message} onRetry={()=>void query.refetch()}/>;
   if(!model)return null;
   return <div className="section-summary-page">
-    <header className="section-summary-heading"><Button variant="ghost" onClick={()=>navigate(definition.route)}><ArrowLeft size={18}/>Volver</Button><span className="section-summary-icon"><Icon size={25}/></span><div><span className="eyebrow">Resumen</span><h1>{definition.label}</h1><p>{definition.description}</p></div><Badge tone="success">Disponible sin conexión</Badge></header>
     <div className="section-summary-metrics">{model.metrics.map((metric)=><Card className={`section-summary-metric stat-${metric.tone??'green'}`} key={metric.label}><strong>{metric.value}</strong><span>{metric.label}</span>{metric.detail?<small>{metric.detail}</small>:null}</Card>)}</div>
     {model.highlights.length?<section className="section-summary-block"><div className="section-summary-title"><div><h2>Animales destacados</h2><p>Selecciona un animal para abrir su perfil.</p></div></div><div className="summary-animal-list">{model.highlights.map((item)=><button type="button" key={`${item.label}-${item.id}`} onClick={()=>navigate(`/animales/${item.id}`)}><span className="summary-animal-photo">{item.photo?<img src={item.photo} alt=""/>:<Beef size={23}/>}</span><span><small>{item.label}</small><strong>{item.name}</strong><em>{item.subtitle}</em></span><b>{item.value}</b><ArrowRight size={18}/></button>)}</div></section>:null}
     <section className="section-summary-block"><div className="section-summary-title"><div><h2>Lectura detallada</h2><p>Indicadores calculados con la información disponible.</p></div><CalendarDays size={21}/></div><div className="section-summary-lines">{model.lines.map((line)=><div key={line.label}><span><small>{line.label}</small><strong>{line.value}</strong></span>{line.detail?<em>{line.detail}</em>:null}</div>)}</div></section>
