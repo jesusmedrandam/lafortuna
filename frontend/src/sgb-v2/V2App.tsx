@@ -1,7 +1,7 @@
 import {useMemo,useState,type ReactNode} from 'react';
 import {Baby,Beef,ChevronRight,Droplets,HeartPulse,Home,Images,LayoutDashboard,LogOut,
   Menu,Moon,Settings2,ShieldCheck,SlidersHorizontal,Sun,Users,Warehouse,ArrowLeftRight,
-  Activity,Sprout,Milk,UserCircle,Weight,X} from 'lucide-react';
+  Activity,ClipboardList,Sprout,Milk,UserCircle,Weight,X} from 'lucide-react';
 import {BrowserRouter,Link,NavLink,Navigate,Outlet,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
 import {AuthLayout} from '../pages/auth/AuthLayout';
 import {IconButton,LoadingState} from '../components/ui';
@@ -24,6 +24,7 @@ import {V2Login,V2Recovery,V2Register,V2Verify} from './AuthPages';
 import {V2AnimalsPage} from './V2AnimalsPage';
 import {V2AnimalDetail} from './V2AnimalDetail';
 import {V2WeighingsPage} from './V2WeighingsPage';
+import {V2AuditPage} from './V2AuditPage';
 import {V2SessionProvider,useV2Session} from './V2Session';
 import type {SessionOverview} from './api';
 
@@ -45,6 +46,7 @@ const destinations:Destination[]=[
   {to:'/actividades',label:'Actividades',icon:Activity,section:'operaciones',permission:'ACTIVITY_VIEW',module:'TASKS'},
   {to:'/catalogos',label:'Catálogos',icon:SlidersHorizontal,section:'configuracion',permission:'CATALOG_VIEW'},
   {to:'/equipo',label:'Equipo y roles',icon:Users,section:'configuracion',permission:'MEMBERSHIP_VIEW'},
+  {to:'/auditoria',label:'Auditoría',icon:ClipboardList,section:'configuracion',permission:'AUDIT_VIEW'},
   {to:'/configuracion',label:'Configuración',icon:Settings2,section:'configuracion',permission:'MODULE_VIEW'},
   {to:'/administracion',label:'Administración',icon:ShieldCheck,section:'configuracion',admin:true},
 ];
@@ -229,6 +231,7 @@ function V2Routes(){
       <Route path="multimedia" element={<Feature permission="MEDIA_VIEW" module="MULTIMEDIA"><Panel kind="media"/></Feature>}/>
       <Route path="catalogos" element={<Feature permission="CATALOG_VIEW"><Panel kind="catalogs"/></Feature>}/>
       <Route path="equipo" element={<Feature permission="MEMBERSHIP_VIEW"><Panel kind="team"/></Feature>}/>
+      <Route path="auditoria" element={<Feature permission="AUDIT_VIEW"><V2AuditPage/></Feature>}/>
       <Route path="configuracion" element={<Feature permission="MODULE_VIEW"><Panel kind="settings"/></Feature>}/>
       <Route path="administracion" element={session?.overview.user.isSuperadmin?<Panel kind="admin"/>:<Navigate to="/" replace/>}/>
       <Route path="*" element={<Navigate to="/" replace/>}/>

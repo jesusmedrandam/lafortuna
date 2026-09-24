@@ -385,6 +385,16 @@ export interface WeighingRecord {
   weighedOn:string;weight:number;unitCode:'KILOGRAM'|'POUND';weightKg:number;
   method:string|null;notes:string|null;version:number;voidedAt:string|null;createdAt:string;
 }
+export interface AuditRecord {
+  id:string;occurredAt:string;action:string;entityType:string;entityId:string|null;
+  reason:string|null;beforeData:unknown;afterData:unknown;ipAddress:string|null;
+  userAgent:string|null;actorName:string|null;
+}
+export interface AuditPage {items:AuditRecord[];page:number;hasMore:boolean}
+export function getAudit(token:string,page=1,action=''){
+  const query=new URLSearchParams({page:String(page)});if(action)query.set('action',action);
+  return request<AuditPage>(`/audit?${query}`,{headers:bearer(token)});
+}
 export interface WeighingInput {
   animalId:string;weighedOn:string;weight:number;unitCode:'KILOGRAM'|'POUND';
   method:string|null;notes:string|null;expectedVersion?:number;
