@@ -43,7 +43,7 @@ con una cuenta de prueba. El sitio anterior `medranda.onrender.com` sigue en `ma
 | Propiedad activa, rol, visibilidad del menú | Integrado |
 | Animales | Listado, filtros y vista de ficha con el diseño anterior; edición y creación mediante el panel de SGB 2 |
 | Grupos, potreros, corrales | Listas, búsqueda, filtros, detalles y formularios separados con la presentación anterior; datos de la API nueva |
-| Movimientos | Conectado a la API nueva; las asignaciones de ubicación se gestionan solo aquí |
+| Movimientos | Listado, búsqueda, filtros de orden y acceso a detalles con el diseño anterior; las asignaciones de ubicación se gestionan solo aquí |
 | Reproducción, producción, sanidad, limpiezas, actividades | Conectados a los paneles y API nueva |
 | Multimedia, catálogos, equipo, configuración, superadministración | Conectados a los paneles y API nueva |
 | Historial y acciones adicionales de la ficha antigua | Pendientes de trasladar al modelo nuevo |

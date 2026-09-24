@@ -1,4 +1,8 @@
 import {type FormEvent,useEffect,useMemo,useState} from 'react';
+import {ArrowLeftRight,ArrowUpDown,ChevronRight,Plus} from 'lucide-react';
+import {Badge,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,IconButton,
+  LoadingState} from '../components/ui';
+import {formatDate} from '../utils';
 import {ApiRequestError,applyMovement,cancelMovement,createMovement,getMovementOptions,
   getMovements,listCatalogItems,updateMovement,type CatalogItem,type MovementInput,type MovementOptions,type MovementRecord} from './api';
 
@@ -111,18 +115,15 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
       ...(editing?{expectedVersion:editing.version}:{})};
     void run(()=>editing?updateMovement(accessToken,editing.id,input):createMovement(accessToken,input),reset);
   }
-  return <section className="movements-panel">
-    <div className="movement-toolbar"><label className="movement-search"><span className="sr-only">Buscar movimiento</span>
-      <span aria-hidden="true">⌕</span><input type="search" placeholder="Buscar movimiento…"
-        value={search} onChange={event=>setSearch(event.target.value)}/></label>
-      <span className="movement-count" title="Movimientos encontrados">{visible.length}</span>
-      <button type="button" className="movement-sort" aria-label="Cambiar orden" title={order==='NEWEST'?'Más recientes':order==='OLDEST'?'Más antiguos':order==='AZ'?'Motivo A–Z':'Motivo Z–A'}
-        onClick={()=>setOrder(value=>value==='NEWEST'?'OLDEST':value==='OLDEST'?'AZ':value==='AZ'?'ZA':'NEWEST')}>↕</button>
-      {canManage&&<button className="movement-add primary-button compact" type="button"
-        onClick={()=>{reset();setFormOpen(true);}}>+ Movimiento</button>}
-    </div>
+  return <section className="module-no-header movements-panel">
+    <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar movimiento…"
+      count={visible.length} actions={<IconButton label={order==='NEWEST'?'Más recientes':order==='OLDEST'
+        ?'Más antiguos':order==='AZ'?'Motivo A–Z':'Motivo Z–A'}
+        onClick={()=>setOrder(value=>value==='NEWEST'?'OLDEST':value==='OLDEST'?'AZ':value==='AZ'?'ZA':'NEWEST')}>
+        <ArrowUpDown size={19}/></IconButton>}/>
     {error&&<div role="alert" className="form-error admin-error">{error}</div>}
-    {!records&&!error&&<p className="muted">Cargando movimientos…</p>}
+    {!records&&!error&&<LoadingState/>}
+    {!records&&error&&<ErrorState message={error} onRetry={()=>setRevision(value=>value+1)}/>}
     {canManage&&formOpen&&options&&<div className="movement-overlay" role="presentation"
       onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)reset();}}>
       <div className="movement-dialog" role="dialog" aria-modal="true" aria-label={editing?'Editar borrador':'Nuevo movimiento'}>
@@ -201,22 +202,23 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
         {editing&&<button type="button" className="secondary-button compact" onClick={reset}>Cancelar edición</button>}
       </div>
       </form></div></div>}
-    {records&&<div className="movement-record-list">
-      <div className="movement-list-head" aria-hidden="true"><span>Movimiento</span><span>Fecha</span>
+    {records&&(visible.length?<Card className="record-list movements-record-list">
+      <div className="record-list-head"><span>Movimiento</span><span>Fecha</span>
         <span>Origen y destino</span><span>Estado</span><span/></div>
-      {visible.map(movement=><button type="button" className="movement-list-row" key={movement.id}
-        onClick={()=>setViewingId(movement.id)}>
-        <span className="movement-list-title"><strong>{movement.reason||kinds[movement.kind]}</strong>
+      {visible.map(movement=><button type="button" className="record-list-row movement-compact-route"
+        key={movement.id} onClick={()=>setViewingId(movement.id)}>
+        <span><strong>{movement.reason||kinds[movement.kind]}</strong>
           <small>{movement.animals.length} {movement.animals.length===1?'animal':'animales'} · {kinds[movement.kind]}</small></span>
-        <span>{movement.movementOn}</span>
-        <span className="movement-list-route">↔ {routeSide(movement,'source')} → {routeSide(movement,'destination')}</span>
-        <span><span className={`movement-status status-${movement.status.toLowerCase()}`}>
-          {movement.status==='BORRADOR'?'Borrador':movement.status==='COMPLETADO'?'Completado':'Cancelado'}</span></span>
-        <span className="movement-list-chevron" aria-hidden="true">›</span>
-      </button>)}
-      {!visible.length&&<div className="movement-list-empty">{records.length
-        ?'No hay movimientos con esa búsqueda.':'Aún no hay movimientos en esta propiedad.'}</div>}
-    </div>}
+        <span><strong>{formatDate(movement.movementOn)}</strong></span>
+        <span><strong className="route-summary"><ArrowLeftRight size={16}/>
+          {routeSide(movement,'source')} → {routeSide(movement,'destination')}</strong></span>
+        <span className="record-status-with-sync"><Badge tone={movement.status==='COMPLETADO'?'success'
+          :movement.status==='CANCELADO'?'danger':'warning'}>
+          {movement.status==='BORRADOR'?'Borrador':movement.status==='COMPLETADO'?'Completado':'Cancelado'}
+        </Badge></span><span className="record-row-actions"><ChevronRight size={18}/></span>
+      </button>)}</Card>:<EmptyState icon={ArrowLeftRight} title="Sin movimientos"
+      description={records.length?'No hay movimientos con esa búsqueda.':
+        'Registra un cambio de grupo, potrero, corral u otra propiedad.'}/>)}
     {viewing&&<div className="movement-overlay" role="presentation"
       onMouseDown={event=>{if(event.target===event.currentTarget)setViewingId(null);}}>
       <div className="movement-dialog" role="dialog" aria-modal="true" aria-labelledby="movement-detail-title">
@@ -248,7 +250,7 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
         </div>
       </div>
     </div>}
-    {canManage&&<button type="button" className="movement-fab" aria-label="Nuevo movimiento"
-      onClick={()=>{reset();setFormOpen(true);}}>＋</button>}
+    {canManage&&<FloatingActionDock><IconButton label="Nuevo movimiento"
+      onClick={()=>{reset();setFormOpen(true);}}><Plus size={23}/></IconButton></FloatingActionDock>}
   </section>;
 }
