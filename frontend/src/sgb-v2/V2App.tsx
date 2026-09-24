@@ -176,7 +176,9 @@ function Panel({kind}:{kind:'animals'|'movements'|'reproduction'|'production'|'h
     case 'cleanings':return <CleaningPanel accessToken={token}
       canManage={hasPermission('CLEANING_MANAGE')} canViewMedia={hasPermission('MEDIA_VIEW')}
       canManageMedia={hasPermission('MEDIA_MANAGE')}/>;
-    case 'activities':return <ActivityPanel accessToken={token} canManage={hasPermission('ACTIVITY_MANAGE')}/>;
+    case 'activities':return <ActivityPanel accessToken={token} canManage={hasPermission('ACTIVITY_MANAGE')}
+      canViewMedia={hasPermission('MEDIA_VIEW')&&modules.includes('MULTIMEDIA')}
+      canManageMedia={hasPermission('MEDIA_MANAGE')&&modules.includes('MULTIMEDIA')}/>;
     case 'media':return <MediaPanel accessToken={token}
       permissions={property?.roles.find(role=>role.id===overview.activeContext?.roleId)?.permissions??[]}/>;
     case 'catalogs':return <CatalogPanel accessToken={token} canManage={hasPermission('CATALOG_MANAGE')}/>;

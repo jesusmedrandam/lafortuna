@@ -31,9 +31,10 @@ VITE_API_URL=https://appsgb.onrender.com
 
 La API debe permitir `https://montes.onrender.com` como `FRONTEND_URL` y usar una
 cookie de renovación válida para ese origen. El migrador de SGB aplica los SQL
-versionados; no se pegan migraciones manualmente. Antes de cambiar el Static Site
-hay que completar los módulos pendientes y comprobar inicio de sesión y datos
-con una cuenta de prueba. El sitio anterior `medranda.onrender.com` sigue en `main`.
+versionados; no se pegan migraciones manualmente. Montes es el entorno de prueba
+autorizado para esta integración todavía parcial; comprobar allí el inicio de
+sesión y las operaciones habilitadas con una cuenta de prueba. El sitio anterior
+`medranda.onrender.com` sigue en `main`.
 
 ## Estado de integración
 
@@ -46,7 +47,8 @@ con una cuenta de prueba. El sitio anterior `medranda.onrender.com` sigue en `ma
 | Movimientos | Listado, búsqueda, filtros de orden y acceso a detalles con el diseño anterior; las asignaciones de ubicación se gestionan solo aquí |
 | Pesajes | Pantalla, filtros, ficha, registro y anulación integrados; requieren la migración y API de la rama `feature/sgb-v2-pesajes` del repositorio `SGB` |
 | Auditoría | Tabla, filtros, paginación y detalles con el diseño anterior; requiere la ruta `/audit` en la rama `feature/sgb-v2-pesajes` de `SGB` |
-| Reproducción, producción, sanidad, limpiezas, actividades | Conectados a los paneles y API nueva |
+| Reproducción, producción, sanidad, limpiezas | Conectados a los paneles y API nueva; resta adaptar sus vistas originales |
+| Actividades | Lista, filtros, detalle, edición separada y fotografías con la presentación anterior y la API nueva |
 | Multimedia, catálogos, equipo, configuración, superadministración | Conectados a los paneles y API nueva |
 | Historial y acciones adicionales de la ficha antigua | Pendientes de trasladar al modelo nuevo |
 | Bajas, ventas, compras, agenda, finanzas y notificaciones | Pantallas antiguas presentes como referencia; faltan entidades y rutas equivalentes en la API nueva |
