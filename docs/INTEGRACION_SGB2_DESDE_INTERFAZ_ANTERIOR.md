@@ -47,7 +47,8 @@ sesión y las operaciones habilitadas con una cuenta de prueba. El sitio anterio
 | Movimientos | Listado, búsqueda, filtros de orden y acceso a detalles con el diseño anterior; las asignaciones de ubicación se gestionan solo aquí |
 | Pesajes | Pantalla, filtros, ficha, registro y anulación integrados; requieren la migración y API de la rama `feature/sgb-v2-pesajes` del repositorio `SGB` |
 | Auditoría | Tabla, filtros, paginación y detalles con el diseño anterior; requiere la ruta `/audit` en la rama `feature/sgb-v2-pesajes` de `SGB` |
-| Reproducción, producción, sanidad, limpiezas | Conectados a los paneles y API nueva; resta adaptar sus vistas originales |
+| Reproducción | Lista, filtros, detalle y formularios separados con la presentación anterior y la API nueva |
+| Producción, sanidad, limpiezas | Conectados a los paneles y API nueva; resta adaptar sus vistas originales |
 | Actividades | Lista, filtros, detalle, edición separada y fotografías con la presentación anterior y la API nueva |
 | Multimedia, catálogos, equipo, configuración, superadministración | Conectados a los paneles y API nueva |
 | Historial y acciones adicionales de la ficha antigua | Pendientes de trasladar al modelo nuevo |

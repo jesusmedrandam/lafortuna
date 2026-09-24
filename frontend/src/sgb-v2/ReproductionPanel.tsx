@@ -1,4 +1,8 @@
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import {ArrowUpDown,Baby,ChevronRight,Plus,Settings2} from 'lucide-react';
+import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
+  IconButton,LoadingState,Modal} from '../components/ui';
+import {formatDate} from '../utils';
 import {
   ApiRequestError, cancelHeat, cancelPregnancy, cancelService, createHeat, createPregnancy, createService,
   getReproduction, getReproductionCandidates, getReproductionSettings,
@@ -13,6 +17,11 @@ function localDate() {
 const errorMessage = (error: unknown) => error instanceof ApiRequestError
   ? error.message : error instanceof Error ? error.message : 'No fue posible guardar el evento.';
 const optional = (form: FormData, name: string) => String(form.get(name) || '').trim() || null;
+type ReproductionKind='HEAT'|'SERVICE'|'PREGNANCY'|'BIRTH'|'LOSS';
+const categories:Record<ReproductionKind,string>={HEAT:'Celos',SERVICE:'Servicios',
+  PREGNANCY:'Preñeces',BIRTH:'Partos',LOSS:'Pérdidas'};
+interface ReproductionRow {id:string;kind:ReproductionKind;name:string;date:string;
+  summary:string;notes:string|null;status:string;canCancel:boolean;}
 
 export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
   accessToken: string; canManage: boolean; initialAnimalId?:string|undefined;
@@ -26,6 +35,11 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeForm, setActiveForm] = useState<'HEAT'|'PREGNANCY'|'SERVICE'|'BIRTH'|'LOSS'|null>(null);
+  const [settingsOpen,setSettingsOpen]=useState(false);
+  const [selectedCategory,setSelectedCategory]=useState<ReproductionKind|null>(null);
+  const [selectedRecord,setSelectedRecord]=useState<string|null>(null);
+  const [search,setSearch]=useState('');
+  const [newest,setNewest]=useState(true);
   const females = candidates.filter((animal) => animal.sex === 'FEMALE');
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
   useEffect(()=>{if(!initialAnimalId||initialAnimalId===prefilledAnimalId||!canManage||
@@ -34,6 +48,29 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
   },[initialAnimalId,prefilledAnimalId,candidates,canManage]);
   const males = candidates.filter((animal) => animal.sex === 'MALE');
   const confirmed = records?.pregnancies.filter((pregnancy) => pregnancy.status === 'CONFIRMED') ?? [];
+  const rows=useMemo<ReproductionRow[]>(()=>records?[
+    ...records.heats.map(item=>({id:item.id,kind:'HEAT' as const,name:item.cowName,
+      date:item.startsOn,summary:`${item.isFalse?'Celo aparente':'Celo'}${item.endsOn?` · Fin ${formatDate(item.endsOn)}`:''}`,
+      notes:item.notes,status:item.cancelled?'Cancelado':'Registrado',canCancel:!item.cancelled})),
+    ...records.services.map(item=>({id:item.id,kind:'SERVICE' as const,name:item.cowName,
+      date:item.occurredOn,summary:item.kind==='INSEMINATION'?'Inseminación artificial':'Transferencia de embriones',
+      notes:item.notes,status:item.cancelled?'Cancelado':item.hasPregnancy?'Con preñez':'Registrado',
+      canCancel:!item.cancelled&&!item.hasPregnancy})),
+    ...records.pregnancies.map(item=>({id:item.id,kind:'PREGNANCY' as const,name:item.cowName,
+      date:item.confirmedOn,summary:`Parto estimado: ${item.expectedBirthOn?formatDate(item.expectedBirthOn):'sin estimación'}`,
+      notes:item.notes,status:item.status==='CONFIRMED'?'Confirmada':item.status==='BORN'?'Parto registrado':
+        item.status==='LOST'?'Pérdida':'Cancelada',canCancel:item.status==='CONFIRMED'})),
+    ...records.births.map(item=>({id:item.id,kind:'BIRTH' as const,name:item.motherName,
+      date:item.occurredOn,summary:`${item.liveCount} vivas · ${item.stillbornCount} nacidas muertas${
+        item.calves.length?` · ${item.calves.map(calf=>calf.name).join(', ')}`:''}`,
+      notes:item.notes,status:'Registrado',canCancel:false})),
+    ...records.losses.map(item=>({id:item.id,kind:'LOSS' as const,name:item.cowName,
+      date:item.occurredOn,summary:'Pérdida de preñez',notes:item.notes,status:'Registrado',canCancel:false})),
+  ]:[],[records]);
+  const visible=useMemo(()=>rows.filter(item=>(!selectedCategory||selectedCategory===item.kind)&&
+    `${item.name} ${item.summary} ${item.notes??''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
+    .sort((a,b)=>(newest?-1:1)*a.date.localeCompare(b.date)),[rows,selectedCategory,search,newest]);
+  const viewing=rows.find(item=>`${item.kind}:${item.id}`===selectedRecord);
 
   useEffect(() => {
     let active = true;
@@ -48,7 +85,8 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
 
   async function run(operation: () => Promise<unknown>, form?: HTMLFormElement) {
     setBusy(true); setError(null);
-    try { await operation(); form?.reset(); setRevision((value) => value + 1); }
+    try { await operation(); form?.reset();setActiveForm(null);setSettingsOpen(false);
+      setSelectedRecord(null);setRevision((value) => value + 1); }
     catch (failure) { setError(errorMessage(failure)); }
     finally { setBusy(false); }
   }
@@ -141,14 +179,23 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
     }));
   }
 
-  return <section className="section-block reproduction-panel">
-    <div className="section-heading"><div><span className="eyebrow">Núcleo ganadero</span>
-      <h2>Reproducción</h2><p className="muted">Celos, preñeces, partos y pérdidas de la propiedad activa.</p>
-    </div></div>
+  return <section className="module-no-header reproduction-panel">
+    <div className="activity-type-strip"><button type="button" className={!selectedCategory?'selected':''}
+      onClick={()=>setSelectedCategory(null)}><span><Baby size={20}/></span><small>Todos</small></button>
+      {(Object.keys(categories) as ReproductionKind[]).map(kind=><button type="button" key={kind}
+        className={selectedCategory===kind?'selected':''} onClick={()=>setSelectedCategory(kind)}>
+        <span>{categories[kind].slice(0,1)}</span><small>{categories[kind]}</small></button>)}</div>
+    <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar animal o evento…"
+      count={visible.length} actions={<><IconButton label={newest?'Más recientes':'Más antiguos'}
+        onClick={()=>setNewest(value=>!value)}><ArrowUpDown size={18}/></IconButton>
+        {canManage&&<IconButton label="Reglas de reproducción" onClick={()=>setSettingsOpen(true)}>
+          <Settings2 size={18}/></IconButton>}</>}/>
     {error && <div role="alert" className="form-error admin-error">{error}</div>}
-    {!records && !error && <p className="muted">Cargando historial…</p>}
-    {canManage && settings && <details className="reproduction-settings">
-      <summary>Reglas de reproducción de esta propiedad</summary>
+    {!records && !error && <LoadingState/>}
+    {!records && error && <ErrorState message={error} onRetry={()=>setRevision(value=>value+1)}/>}
+    {canManage && settings && settingsOpen && <Modal title="Reglas de reproducción" wide
+      onClose={()=>setSettingsOpen(false)} footer={<Button variant="ghost"
+        onClick={()=>setSettingsOpen(false)}>Cerrar</Button>}>
       <form className="group-new-form" onSubmit={saveSettings} key={revision}>
         <p className="muted">Los cambios rigen los próximos registros; el historial conserva sus datos.</p>
         {([
@@ -171,15 +218,18 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
         </label>)}
         <button className="primary-button compact" disabled={busy}>Guardar reglas</button>
       </form>
-    </details>}
-    {canManage && <div className="form-toolbar" aria-label="Registrar evento reproductivo">
+    </Modal>}
+    {canManage && activeForm && <Modal title="Registrar evento reproductivo" wide
+      onClose={()=>setActiveForm(null)} footer={<Button variant="ghost"
+        onClick={()=>setActiveForm(null)}>Cerrar</Button>}>
+      <div className="form-toolbar" aria-label="Tipo de evento">
       {([['HEAT','Celo'],['SERVICE','Servicio'],['PREGNANCY','Preñez'],
         ['BIRTH','Parto'],['LOSS','Pérdida']] as const).map(([id,label])=><button
           key={id} type="button" className={activeForm===id?'active':''}
-          aria-pressed={activeForm===id} onClick={()=>setActiveForm(activeForm===id?null:id)}>
+          aria-pressed={activeForm===id} onClick={()=>setActiveForm(id)}>
           {label}</button>)}
-    </div>}
-    {canManage && activeForm && <div className="reproduction-forms">
+      </div>
+      <div className="reproduction-forms">
       <form className="group-new-form" onSubmit={heat} hidden={activeForm!=='HEAT'}>
         <h3>Registrar celo</h3>
         <label><span>Vaca *</span><select name="cowId" required defaultValue={initialAnimalId??''}>
@@ -313,55 +363,43 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
         <button className="secondary-button compact" disabled={busy || !confirmed.length}>
           Registrar pérdida</button>
       </form>
-    </div>}
+    </div></Modal>}
 
-    {records && <div className="reproduction-records">
-      <div><h3>Servicios asistidos</h3>
-        {records.services.length === 0 && <p className="muted">Sin servicios registrados.</p>}
-        {records.services.map((item) => <details key={item.id} className="group-location-item record-line">
-          <summary><strong>{item.cowName} · {item.occurredOn}</strong></summary>
-          <small>{item.kind === 'INSEMINATION' ? 'Inseminación' : 'Transferencia'}
-            {item.cancelled ? ' · Cancelado' : ''}{item.hasPregnancy ? ' · Con preñez' : ''}</small>
-          {canManage && !item.cancelled && !item.hasPregnancy &&
-            <button className="secondary-button compact" disabled={busy}
-              onClick={() => { if (window.confirm('¿Cancelar este servicio? Se conservará en el historial.'))
-                void run(() => cancelService(accessToken, item.id)); }}>Cancelar servicio</button>}
-        </details>)}</div>
-      <div><h3>Preñeces y próximos partos</h3>
-        {records.pregnancies.length === 0 && <p className="muted">Sin preñeces registradas.</p>}
-        {records.pregnancies.map((item) => <details key={item.id} className="group-location-item record-line">
-          <summary><strong>{item.cowName} · {item.status === 'CONFIRMED' ? 'Confirmada'
-            : item.status === 'BORN' ? 'Parto registrado'
-              : item.status === 'LOST' ? 'Pérdida' : 'Cancelada'}</strong></summary>
-          <small>Confirmada {item.confirmedOn} · Parto estimado {item.expectedBirthOn || 'sin estimación'}</small>
-          {canManage && item.status === 'CONFIRMED' && <button className="secondary-button compact"
-            disabled={busy} onClick={() => {
-              if (window.confirm('¿Cancelar esta preñez? Se conservará en el historial.'))
-                void run(() => cancelPregnancy(accessToken, item.id));
-            }}>Cancelar preñez</button>}
-        </details>)}</div>
-      <div><h3>Celos</h3>
-        {records.heats.length === 0 && <p className="muted">Sin celos registrados.</p>}
-        {records.heats.map((item) => <details key={item.id} className="group-location-item record-line">
-          <summary><strong>{item.cowName} · {item.startsOn}</strong></summary>
-          <small>{item.isFalse ? 'Celo falso' : 'Celo'}{item.cancelled ? ' · Cancelado' : ''}
-            {item.endsOn ? ` · Fin: ${item.endsOn}` : ''}</small>
-          {canManage && !item.cancelled && <button className="secondary-button compact" disabled={busy}
-            onClick={() => { if (window.confirm('¿Cancelar este celo? Se conservará en el historial.'))
-              void run(() => cancelHeat(accessToken, item.id)); }}>Cancelar celo</button>}
-        </details>)}</div>
-      <div><h3>Partos</h3>
-        {records.births.length === 0 && <p className="muted">Sin partos registrados.</p>}
-        {records.births.map((item) => <details key={item.id} className="group-location-item record-line">
-          <summary><strong>{item.motherName} · {item.occurredOn}</strong></summary>
-          <small>{item.liveCount} vivas · {item.stillbornCount} nacidas muertas
-            {item.calves.length ? ` · ${item.calves.map((calf) => calf.name).join(', ')}` : ''}</small>
-        </details>)}</div>
-      <div><h3>Pérdidas</h3>
-        {records.losses.length === 0 && <p className="muted">Sin pérdidas registradas.</p>}
-        {records.losses.map((item) => <details key={item.id} className="group-location-item record-line">
-          <summary><strong>{item.cowName} · {item.occurredOn}</strong></summary><small>{item.notes}</small>
-        </details>)}</div>
-    </div>}
+    {records && (visible.length?<Card className="record-list">
+      <div className="record-list-head"><span>Animal</span><span>Fecha</span>
+        <span>Evento</span><span>Estado</span><span/><span/></div>
+      {visible.map(item=><button type="button" className="record-list-row" key={`${item.kind}:${item.id}`}
+        onClick={()=>setSelectedRecord(`${item.kind}:${item.id}`)}>
+        <span><strong>{item.name}</strong><small>{categories[item.kind]}</small></span>
+        <span><strong>{formatDate(item.date)}</strong></span>
+        <span><strong>{item.summary}</strong></span>
+        <span><Badge tone={item.status==='Cancelado'?'danger':item.status==='Registrado'||
+          item.status==='Confirmada'?'success':'neutral'}>{item.status}</Badge></span>
+        <span/><span className="record-row-actions"><ChevronRight size={18}/></span>
+      </button>)}</Card>:<EmptyState icon={Baby} title="Sin eventos reproductivos"
+      description={rows.length?'Prueba con otra búsqueda o categoría.':
+        'Registra celos, preñeces, servicios y partos de la propiedad.'}/>)}
+    {viewing&&<Modal title="Detalle reproductivo" wide onClose={()=>setSelectedRecord(null)}
+      footer={<><Button variant="ghost" onClick={()=>setSelectedRecord(null)}>Cerrar</Button>
+        {canManage&&viewing.canCancel&&<Button variant="secondary" disabled={busy}
+          onClick={()=>{if(!window.confirm('¿Cancelar este evento? Se conservará en el historial.'))return;
+            void run(()=>viewing.kind==='HEAT'?cancelHeat(accessToken,viewing.id):
+              viewing.kind==='SERVICE'?cancelService(accessToken,viewing.id):
+                cancelPregnancy(accessToken,viewing.id));}}>Cancelar evento</Button>}</>}>
+      <div className="record-detail"><div className="record-detail-heading"><div className="record-icon">
+        <Baby size={22}/></div><div><h2>{viewing.name}</h2><p>{categories[viewing.kind]} · {formatDate(viewing.date)}</p></div>
+        <Badge tone={viewing.status==='Cancelado'?'danger':'success'}>{viewing.status}</Badge></div>
+        <section><h3>Información</h3><div className="detail-grid"><div><small>Tipo de evento</small>
+          <strong>{categories[viewing.kind]}</strong></div><div><small>Fecha</small>
+          <strong>{formatDate(viewing.date)}</strong></div></div><p>{viewing.summary}</p></section>
+        {viewing.kind==='BIRTH'&&records?.births.find(item=>item.id===viewing.id)?.calves.length
+          ?<section><h3>Crías</h3><div className="detail-lines compact">{records.births.find(
+            item=>item.id===viewing.id)?.calves.map(calf=><div key={calf.id}><span>
+              <strong>{calf.name}</strong><small>{calf.sex==='FEMALE'?'Hembra':'Macho'}</small>
+            </span></div>)}</div></section>:null}
+        {viewing.notes&&<section><h3>Observaciones</h3><p>{viewing.notes}</p></section>}
+      </div></Modal>}
+    {canManage&&<FloatingActionDock><IconButton label="Nuevo evento reproductivo" onClick={()=>
+      setActiveForm(selectedCategory??'HEAT')}><Plus size={22}/></IconButton></FloatingActionDock>}
   </section>;
 }
