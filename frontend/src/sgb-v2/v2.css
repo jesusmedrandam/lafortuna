@@ -1,0 +1,48 @@
+/* El contenedor principal reutiliza las medidas, fondos y navegación de la interfaz anterior. */
+.sgb-v2-shell .v2-property-picker { display:grid;gap:6px;margin:10px 12px 4px;padding:12px;
+  border:1px solid rgba(255,255,255,.12);border-radius:13px;color:var(--sidebar-text);
+  background:rgba(255,255,255,.045); }
+.sgb-v2-shell .v2-property-picker label,.sgb-v2-shell .v2-property-picker small {
+  color:var(--sidebar-muted);font-size:.73rem; }
+.sgb-v2-shell .v2-property-picker select { min-width:0;width:100%;min-height:35px;padding:5px 8px;
+  color:var(--sidebar-text);border:1px solid rgba(255,255,255,.2);border-radius:7px;
+  background:var(--sidebar-bg); }
+.sgb-v2-shell .v2-property-picker option { color:var(--text);background:var(--surface); }
+.sgb-v2-shell .v2-current-property { color:var(--muted);font-size:.77rem;font-weight:700; }
+.sgb-v2-shell .page-content { min-width:0; }
+.sgb-v2-shell .section-block { min-width:0;max-width:100%; }
+.sgb-v2-shell .section-heading { display:flex;align-items:center;justify-content:space-between;gap:14px; }
+.sgb-v2-shell .section-heading h2 { margin:3px 0; }
+.sgb-v2-shell .animal-panel .animal-list { margin-top:12px; }
+.sgb-v2-shell .animal-panel .animal-row { width:100%; }
+.sgb-v2-shell .animal-panel .animal-row-content { min-width:0; }
+.sgb-v2-shell .animal-panel .animal-create input,
+.sgb-v2-shell .animal-panel .animal-create select { width:100%; }
+.sgb-v2-shell .animal-pages { display:flex;justify-content:center;align-items:center;gap:12px;margin:18px 0; }
+.sgb-v2-shell .welcome-card { margin-bottom:17px; }
+.sgb-v2-animal-detail .animal-back { display:inline-flex;align-items:center;gap:6px;margin-bottom:14px;
+  border:0;color:var(--primary);background:transparent;font-weight:800;cursor:pointer; }
+.sgb-v2-animal-detail .animal-profile-action-strip { display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  margin:0 0 18px;padding:2px 0 7px; }
+.sgb-v2-animal-detail .animal-compact-info-grid>div { min-width:0;display:flex;align-items:center;
+  gap:10px;padding:13px 10px;border-bottom:1px solid var(--border); }
+.sgb-v2-animal-detail .animal-compact-info-grid>div>svg { flex:0 0 auto;color:var(--primary); }
+.sgb-v2-animal-detail .animal-compact-info-grid>div>span { display:grid;gap:3px;min-width:0; }
+.sgb-v2-animal-detail .animal-compact-info-grid small { color:var(--muted); }
+.sgb-v2-animal-detail .animal-compact-info-grid strong { overflow-wrap:anywhere; }
+.v2-animal-gallery { margin:18px 0; }
+.v2-animal-gallery h2 { font-size:1.08rem; }
+.v2-animal-gallery>div { display:grid;grid-template-columns:repeat(auto-fill,minmax(115px,1fr));gap:9px; }
+.v2-animal-gallery button { aspect-ratio:1;overflow:hidden;padding:0;border:1px solid var(--border);
+  border-radius:13px;background:var(--surface);cursor:pointer; }
+.v2-animal-gallery img { width:100%;height:100%;object-fit:cover; }
+.v2-media-viewer { position:fixed;inset:0;z-index:150;display:grid;place-items:center;padding:30px;
+  background:rgba(0,0,0,.92); }
+.v2-media-viewer>img { max-width:100%;max-height:100%;object-fit:contain; }
+.v2-media-viewer>button { position:absolute;right:17px;top:12px;color:#fff;background:transparent;
+  border:0;font-size:2rem;cursor:pointer; }
+@media (max-width:760px) {
+  .sgb-v2-shell .v2-current-property { display:none; }
+  .sgb-v2-shell .section-heading { align-items:flex-start; }
+  .sgb-v2-shell .animal-panel .animal-create { grid-template-columns:1fr; }
+}
