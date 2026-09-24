@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
-import {ArrowLeft,ArrowLeftRight,Baby,Beef,Camera,Droplets,Edit3,MapPin,Milk,Users} from 'lucide-react';
+import {ArrowLeft,ArrowLeftRight,Baby,Beef,Camera,Droplets,Edit3,MapPin,Milk,Users,Weight} from 'lucide-react';
 import {useNavigate,useParams} from 'react-router-dom';
 import {Badge,Card,IconButton,LoadingState,ErrorState} from '../components/ui';
 import {formatDate} from '../utils';
@@ -62,6 +62,8 @@ export function V2AnimalDetail(){
         <Edit3 size={19}/></IconButton>}
       {usable&&hasPermission('MOVEMENT_VIEW')&&modules.includes('MOVEMENTS')&&<IconButton label="Movimientos"
         onClick={()=>go('/movimientos')}><ArrowLeftRight size={19}/></IconButton>}
+      {usable&&hasPermission('WEIGHING_VIEW')&&modules.includes('WEIGHING')&&<IconButton label="Pesajes"
+        onClick={()=>go('/pesajes')}><Weight size={19}/></IconButton>}
       {usable&&hasPermission('HEALTH_VIEW')&&modules.includes('HEALTH')&&<IconButton label="Sanidad"
         onClick={()=>go('/sanidad')}><Droplets size={19}/></IconButton>}
       {usable&&animal.sex==='FEMALE'&&hasPermission('REPRODUCTION_VIEW')&&modules.includes('REPRODUCTION')&&

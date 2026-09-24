@@ -380,6 +380,34 @@ export function getAnimals(accessToken: string, page = 1, search = '',classifica
   for(const [key,value] of Object.entries(filters))if(value)query.set(key,value);
   return request<AnimalList>(`/animals?${query}`, { headers: bearer(accessToken) });
 }
+export interface WeighingRecord {
+  id:string;animalId:string;animalName:string;earTagCode:string|null;
+  weighedOn:string;weight:number;unitCode:'KILOGRAM'|'POUND';weightKg:number;
+  method:string|null;notes:string|null;version:number;voidedAt:string|null;createdAt:string;
+}
+export interface WeighingInput {
+  animalId:string;weighedOn:string;weight:number;unitCode:'KILOGRAM'|'POUND';
+  method:string|null;notes:string|null;expectedVersion?:number;
+}
+export function getWeighings(token:string,animalId?:string){
+  const query=animalId?`?animalId=${encodeURIComponent(animalId)}`:'';
+  return request<WeighingRecord[]>(`/weighings${query}`,{headers:bearer(token)});
+}
+export function getWeighingOptions(token:string){
+  return request<Array<{id:string;name:string;earTagCode:string|null}>>('/weighings/options',
+    {headers:bearer(token)});
+}
+export function createWeighing(token:string,input:WeighingInput){
+  return request<WeighingRecord>('/weighings',{method:'POST',headers:bearer(token),body:JSON.stringify(input)});
+}
+export function updateWeighing(token:string,id:string,input:WeighingInput){
+  return request<WeighingRecord>(`/weighings/${encodeURIComponent(id)}`,
+    {method:'PUT',headers:bearer(token),body:JSON.stringify(input)});
+}
+export function voidWeighing(token:string,id:string,expectedVersion:number){
+  return request<WeighingRecord>(`/weighings/${encodeURIComponent(id)}/void`,
+    {method:'POST',headers:bearer(token),body:JSON.stringify({expectedVersion})});
+}
 export function getAnimalSummary(accessToken:string){return request<AnimalSummary>('/animals/summary',{
   headers:bearer(accessToken)});}
 export function getAnimalClassificationPolicy(accessToken:string){

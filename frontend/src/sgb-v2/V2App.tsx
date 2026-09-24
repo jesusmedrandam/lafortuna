@@ -1,7 +1,7 @@
 import {useMemo,useState,type ReactNode} from 'react';
 import {Baby,Beef,ChevronRight,Droplets,HeartPulse,Home,Images,LayoutDashboard,LogOut,
   Menu,Moon,Settings2,ShieldCheck,SlidersHorizontal,Sun,Users,Warehouse,ArrowLeftRight,
-  Activity,Sprout,Milk,UserCircle,X} from 'lucide-react';
+  Activity,Sprout,Milk,UserCircle,Weight,X} from 'lucide-react';
 import {BrowserRouter,Link,NavLink,Navigate,Outlet,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
 import {AuthLayout} from '../pages/auth/AuthLayout';
 import {IconButton,LoadingState} from '../components/ui';
@@ -23,6 +23,7 @@ import {SuperadminPanel} from './SuperadminPanel';
 import {V2Login,V2Recovery,V2Register,V2Verify} from './AuthPages';
 import {V2AnimalsPage} from './V2AnimalsPage';
 import {V2AnimalDetail} from './V2AnimalDetail';
+import {V2WeighingsPage} from './V2WeighingsPage';
 import {V2SessionProvider,useV2Session} from './V2Session';
 import type {SessionOverview} from './api';
 
@@ -36,6 +37,7 @@ const destinations:Destination[]=[
   {to:'/potreros',label:'Potreros',icon:Sprout,section:'principal',permission:'LOCATION_VIEW',module:'PASTURES'},
   {to:'/corrales',label:'Corrales',icon:Warehouse,section:'principal',permission:'LOCATION_VIEW',module:'CORRALS'},
   {to:'/movimientos',label:'Movimientos',icon:ArrowLeftRight,section:'operaciones',permission:'MOVEMENT_VIEW',module:'MOVEMENTS'},
+  {to:'/pesajes',label:'Pesajes',icon:Weight,section:'operaciones',permission:'WEIGHING_VIEW',module:'WEIGHING'},
   {to:'/sanidad',label:'Sanidad',icon:HeartPulse,section:'operaciones',permission:'HEALTH_VIEW',module:'HEALTH'},
   {to:'/limpiezas',label:'Limpieza potreros',icon:Droplets,section:'operaciones',permission:'CLEANING_VIEW',module:'PASTURE_CLEANING'},
   {to:'/reproduccion',label:'Reproducción',icon:Baby,section:'operaciones',permission:'REPRODUCTION_VIEW',module:'REPRODUCTION'},
@@ -218,6 +220,7 @@ function V2Routes(){
       <Route path="potreros" element={<Feature permission="LOCATION_VIEW" module="PASTURES"><V2LocationsPage kind="PASTURE"/></Feature>}/>
       <Route path="corrales" element={<Feature permission="LOCATION_VIEW" module="CORRALS"><V2LocationsPage kind="CORRAL"/></Feature>}/>
       <Route path="movimientos" element={<Feature permission="MOVEMENT_VIEW" module="MOVEMENTS"><Panel kind="movements"/></Feature>}/>
+      <Route path="pesajes" element={<Feature permission="WEIGHING_VIEW" module="WEIGHING"><V2WeighingsPage/></Feature>}/>
       <Route path="reproduccion" element={<Feature permission="REPRODUCTION_VIEW" module="REPRODUCTION"><Panel kind="reproduction"/></Feature>}/>
       <Route path="produccion" element={<Feature permission="PRODUCTION_VIEW" module="PRODUCTION"><Panel kind="production"/></Feature>}/>
       <Route path="sanidad" element={<Feature permission="HEALTH_VIEW" module="HEALTH"><Panel kind="health"/></Feature>}/>

@@ -44,10 +44,11 @@ con una cuenta de prueba. El sitio anterior `medranda.onrender.com` sigue en `ma
 | Animales | Listado, filtros y vista de ficha con el diseño anterior; edición y creación mediante el panel de SGB 2 |
 | Grupos, potreros, corrales | Listas, búsqueda, filtros, detalles y formularios separados con la presentación anterior; datos de la API nueva |
 | Movimientos | Listado, búsqueda, filtros de orden y acceso a detalles con el diseño anterior; las asignaciones de ubicación se gestionan solo aquí |
+| Pesajes | Pantalla, filtros, ficha, registro y anulación integrados; requieren la migración y API de la rama `feature/sgb-v2-pesajes` del repositorio `SGB` |
 | Reproducción, producción, sanidad, limpiezas, actividades | Conectados a los paneles y API nueva |
 | Multimedia, catálogos, equipo, configuración, superadministración | Conectados a los paneles y API nueva |
 | Historial y acciones adicionales de la ficha antigua | Pendientes de trasladar al modelo nuevo |
-| Pesajes, bajas, ventas, compras, agenda, finanzas, auditoría y notificaciones | Pantallas antiguas presentes como referencia; faltan entidades y rutas equivalentes en la API nueva |
+| Bajas, ventas, compras, agenda, finanzas, auditoría y notificaciones | Pantallas antiguas presentes como referencia; faltan entidades y rutas equivalentes en la API nueva |
 | Android y sincronización sin conexión | Pendiente de un contrato con la API nueva |
 
 No habilitar pantallas del sistema anterior que todavía enviarían datos al
