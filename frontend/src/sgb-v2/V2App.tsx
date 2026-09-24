@@ -10,7 +10,7 @@ import {ActivityPanel} from './ActivityPanel';
 import {AnimalPanel} from './AnimalPanel';
 import {CatalogPanel} from './CatalogPanel';
 import {CleaningPanel} from './CleaningPanel';
-import {GroupPanel} from './GroupPanel';
+import {V2GroupsPage,V2LocationsPage} from './V2GroupsLocations';
 import {HealthPanel} from './HealthPanel';
 import {HomeSummary} from './HomeSummary';
 import {MediaPanel} from './MediaPanel';
@@ -137,10 +137,12 @@ function Feature({permission,module,children}:{permission?:string;module?:string
   const {session,hasPermission}=useV2Session();const property=activeProperty(session!.overview);
   if(!property||permission&&!hasPermission(permission)||module&&!property.enabledModules.includes(module))
     return <Navigate to="/" replace/>;
+  if(permission==='GROUP_VIEW'&&!property.enabledModules.some(code=>code==='PASTURES'||code==='CORRALS'))
+    return <Navigate to="/" replace/>;
   return <>{children}</>;
 }
 
-function Panel({kind}:{kind:'animals'|'groups'|'movements'|'reproduction'|'production'|'health'|
+function Panel({kind}:{kind:'animals'|'movements'|'reproduction'|'production'|'health'|
   'cleanings'|'activities'|'media'|'catalogs'|'team'|'settings'|'admin'}){
   const {session,hasPermission,reloadOverview,selectContext}=useV2Session();const navigate=useNavigate();
   const {id}=useParams();
@@ -158,9 +160,6 @@ function Panel({kind}:{kind:'animals'|'groups'|'movements'|'reproduction'|'produ
       initialAnimalId={id??new URLSearchParams(window.location.search).get('animal')??undefined}
       initialCreate={new URLSearchParams(window.location.search).get('create')==='1'}
       onBack={()=>navigate('/animales')}/>;
-    case 'groups':return <GroupPanel accessToken={token} modules={modules}
-      canManage={hasPermission('GROUP_MANAGE')} canViewLocations={hasPermission('LOCATION_VIEW')}
-      canManageLocations={hasPermission('LOCATION_MANAGE')}/>;
     case 'movements':return <MovementPanel accessToken={token} propertyId={property!.id}
       canManage={hasPermission('MOVEMENT_MANAGE')} canCancel={hasPermission('MOVEMENT_CANCEL')}
       canChangeLocation={hasPermission('LOCATION_MANAGE')} initialAnimalId={initialAnimalId}/>;
@@ -215,9 +214,9 @@ function V2Routes(){
       <Route path="animales" element={<Feature permission="ANIMAL_VIEW"><V2AnimalsPage/></Feature>}/>
       <Route path="animales/:id" element={<Feature permission="ANIMAL_VIEW"><V2AnimalDetail/></Feature>}/>
       <Route path="animales/gestionar" element={<Feature permission="ANIMAL_VIEW"><Panel kind="animals"/></Feature>}/>
-      <Route path="grupos" element={<Feature permission="GROUP_VIEW"><Panel kind="groups"/></Feature>}/>
-      <Route path="potreros" element={<Feature permission="LOCATION_VIEW" module="PASTURES"><Panel kind="groups"/></Feature>}/>
-      <Route path="corrales" element={<Feature permission="LOCATION_VIEW" module="CORRALS"><Panel kind="groups"/></Feature>}/>
+      <Route path="grupos" element={<Feature permission="GROUP_VIEW"><V2GroupsPage/></Feature>}/>
+      <Route path="potreros" element={<Feature permission="LOCATION_VIEW" module="PASTURES"><V2LocationsPage kind="PASTURE"/></Feature>}/>
+      <Route path="corrales" element={<Feature permission="LOCATION_VIEW" module="CORRALS"><V2LocationsPage kind="CORRAL"/></Feature>}/>
       <Route path="movimientos" element={<Feature permission="MOVEMENT_VIEW" module="MOVEMENTS"><Panel kind="movements"/></Feature>}/>
       <Route path="reproduccion" element={<Feature permission="REPRODUCTION_VIEW" module="REPRODUCTION"><Panel kind="reproduction"/></Feature>}/>
       <Route path="produccion" element={<Feature permission="PRODUCTION_VIEW" module="PRODUCTION"><Panel kind="production"/></Feature>}/>

@@ -9,7 +9,7 @@ const label = (place: { kind: 'PASTURE' | 'CORRAL'; name: string }) =>
   `${place.kind === 'PASTURE' ? 'Potrero' : 'Corral'}: ${place.name}`;
 const message = (error: unknown) => error instanceof ApiRequestError
   ? error.message : 'No fue posible completar la operación.';
-function locationInput(data: FormData, kind: PhysicalLocation['kind'],catalog:CatalogItem[]): LocationInput {
+export function locationInput(data: FormData, kind: PhysicalLocation['kind'],catalog:CatalogItem[]): LocationInput {
   const optional = (key: string) => String(data.get(key) || '').trim() || null;
   const number = (key: string) => optional(key) === null ? null : Number(optional(key));
   const grasses = data.getAll('grassName').map(String).map((name, index) => ({
@@ -32,9 +32,9 @@ function locationInput(data: FormData, kind: PhysicalLocation['kind'],catalog:Ca
       floorMaterial: optional('floorMaterial'), covered: data.get('covered') === 'on' }),
   };
 }
-function LocationFields({ place,grassCatalog }: { place?: PhysicalLocation | undefined;
+export function LocationFields({ place,grassCatalog }: { place?: PhysicalLocation | undefined;
   grassCatalog:CatalogItem[] }) {
-  const [grassCount, setGrassCount] = useState(place?.grasses.length ?? 0);
+  const [grassCount, setGrassCount] = useState(place?.grasses?.length ?? 0);
   const pasture = (place?.kind ?? 'PASTURE') === 'PASTURE';
   return <>
     <label><span>Área</span><input type="number" name="area" step="0.0001" min="0.0001"
@@ -58,26 +58,26 @@ function LocationFields({ place,grassCatalog }: { place?: PhysicalLocation | und
       <fieldset className="animal-colors"><legend>Pastos</legend>
         {Array.from({ length: grassCount }, (_, index) => <div key={index} className="group-inline-form">
           <label><span>Pasto</span><select name="grassName"
-            defaultValue={place?.grasses[index]?.name ?? ''}>
+            defaultValue={place?.grasses?.[index]?.name ?? ''}>
             <option value="">Selecciona</option>
-            {place?.grasses[index]?.name&&!grassCatalog.some(item=>item.name===place.grasses[index]?.name)
+            {place?.grasses?.[index]?.name&&!grassCatalog.some(item=>item.name===place.grasses[index]?.name)
               && <option value={place.grasses[index]?.name}>{place.grasses[index]?.name} (anterior)</option>}
             {grassCatalog.filter(item=>item.active).map(item=><option key={item.id}
               value={item.name}>{item.name}</option>)}
           </select></label>
           <label><span>% estimado</span><input type="number" name="grassPercent" min="0"
-            max="100" step="0.01" defaultValue={place?.grasses[index]?.percent ?? ''} /></label>
+            max="100" step="0.01" defaultValue={place?.grasses?.[index]?.percent ?? ''} /></label>
           <label><span>Área estimada</span><input type="number" name="grassArea" min="0.0001"
-            step="0.0001" defaultValue={place?.grasses[index]?.area ?? ''} /></label>
+            step="0.0001" defaultValue={place?.grasses?.[index]?.area ?? ''} /></label>
           <label><span>Unidad</span><select name="grassAreaUnit"
-            defaultValue={place?.grasses[index]?.areaUnitCode ?? ''}>
+            defaultValue={place?.grasses?.[index]?.areaUnitCode ?? ''}>
             <option value="">Sin área</option><option value="HECTARE">ha</option>
             <option value="SQUARE_METER">m²</option>
           </select></label>
           <label><span>Siembra</span><input type="date" name="grassSowing"
-            defaultValue={place?.grasses[index]?.sowingDate ?? ''} /></label>
+            defaultValue={place?.grasses?.[index]?.sowingDate ?? ''} /></label>
           <label><span>Observaciones</span><input name="grassNotes" maxLength={300}
-            defaultValue={place?.grasses[index]?.notes ?? ''} /></label>
+            defaultValue={place?.grasses?.[index]?.notes ?? ''} /></label>
         </div>)}
         <button type="button" className="secondary-button compact"
           onClick={() => setGrassCount((count) => Math.min(count + 1, 30))}>+ Pasto</button>
