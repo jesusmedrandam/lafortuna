@@ -21,9 +21,11 @@ sincronización móvil habrá que diseñar su contrato y pruebas específicos.
 
 ## Despliegue de la vista previa
 
-Configurar `montes.onrender.com` como Static Site del repositorio `lafortuna`,
-rama `feature/sgb-v2-interfaz`, directorio raíz `frontend`, comando de compilación
-`npm ci && npm run build` y directorio público `dist`. Configurar:
+`montes.onrender.com` es un Static Site del repositorio `lafortuna`, rama
+`feature/sgb-v2-interfaz`, sin directorio raíz adicional, con comando de
+compilación `cd frontend && npm ci && npm run build` y directorio público
+`frontend/dist`. El frontend usa por defecto `https://appsgb.onrender.com`
+en producción; también admite la variable explícita:
 
 ```text
 VITE_API_URL=https://appsgb.onrender.com
@@ -34,7 +36,8 @@ cookie de renovación válida para ese origen. El migrador de SGB aplica los SQL
 versionados; no se pegan migraciones manualmente. Montes es el entorno de prueba
 autorizado para esta integración todavía parcial; comprobar allí el inicio de
 sesión y las operaciones habilitadas con una cuenta de prueba. El sitio anterior
-`medranda.onrender.com` sigue en `main`.
+`medranda.onrender.com` sigue en `main`. En Render, `appsgb.onrender.com`
+continúa desplegándose desde `SGB/foundation/sgb-v2`.
 
 ## Estado de integración
 
