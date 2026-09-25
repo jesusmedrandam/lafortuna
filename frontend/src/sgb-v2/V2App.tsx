@@ -1,7 +1,7 @@
 import {useMemo,useState,type ReactNode} from 'react';
 import {Baby,Beef,ChevronRight,Droplets,HeartPulse,Home,Images,LayoutDashboard,LogOut,
   Menu,Moon,Settings2,ShieldCheck,SlidersHorizontal,Sun,Users,Warehouse,ArrowLeftRight,
-  Activity,ClipboardList,Sprout,Milk,UserCircle,Weight,X} from 'lucide-react';
+  Activity,ClipboardList,Sprout,Milk,UserCircle,Weight,HeartCrack,ShoppingCart,ShoppingBag,CalendarDays,WalletCards,X} from 'lucide-react';
 import {BrowserRouter,Link,NavLink,Navigate,Outlet,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
 import {AuthLayout} from '../pages/auth/AuthLayout';
 import {IconButton,LoadingState} from '../components/ui';
@@ -25,6 +25,11 @@ import {V2AnimalsPage} from './V2AnimalsPage';
 import {V2AnimalDetail} from './V2AnimalDetail';
 import {V2WeighingsPage} from './V2WeighingsPage';
 import {V2AuditPage} from './V2AuditPage';
+import {V2AnimalStatusPage} from './V2AnimalStatusPage';
+import {V2CommercePage} from './V2CommercePage';
+import {V2AgendaPage} from './V2AgendaPage';
+import {V2FinancesPage} from './V2FinancesPage';
+import {V2NotificationCenter} from './V2NotificationCenter';
 import {V2SessionProvider,useV2Session} from './V2Session';
 import type {SessionOverview} from './api';
 
@@ -39,6 +44,12 @@ const destinations:Destination[]=[
   {to:'/corrales',label:'Corrales',icon:Warehouse,section:'principal',permission:'LOCATION_VIEW',module:'CORRALS'},
   {to:'/movimientos',label:'Movimientos',icon:ArrowLeftRight,section:'operaciones',permission:'MOVEMENT_VIEW',module:'MOVEMENTS'},
   {to:'/pesajes',label:'Pesajes',icon:Weight,section:'operaciones',permission:'WEIGHING_VIEW',module:'WEIGHING'},
+  {to:'/bajas',label:'Bajas y novedades',icon:HeartCrack,section:'operaciones',permission:'ANIMAL_VIEW'},
+  {to:'/ventas',label:'Ventas',icon:ShoppingCart,section:'operaciones',permission:'COMMERCE_VIEW',module:'SALES_PURCHASES'},
+  {to:'/compras',label:'Compras',icon:ShoppingBag,section:'operaciones',permission:'COMMERCE_VIEW',module:'SALES_PURCHASES'},
+  {to:'/agenda',label:'Agenda',icon:CalendarDays,section:'operaciones'},
+  {to:'/finanzas',label:'Ingresos y egresos',icon:WalletCards,section:'operaciones',permission:'FINANCE_VIEW',module:'PROPERTY_FINANCE'},
+  {to:'/mis-finanzas',label:'Mis finanzas',icon:WalletCards,section:'configuracion'},
   {to:'/sanidad',label:'Sanidad',icon:HeartPulse,section:'operaciones',permission:'HEALTH_VIEW',module:'HEALTH'},
   {to:'/limpiezas',label:'Limpieza potreros',icon:Droplets,section:'operaciones',permission:'CLEANING_VIEW',module:'PASTURE_CLEANING'},
   {to:'/reproduccion',label:'Reproducción',icon:Baby,section:'operaciones',permission:'REPRODUCTION_VIEW',module:'REPRODUCTION'},
@@ -72,7 +83,10 @@ function V2Shell(){
   const visible=useMemo(()=>destinations.filter(item=>{
     if(item.admin)return overview.user.isSuperadmin;
     if(item.to==='/')return true;
+    if(item.to==='/mis-finanzas')return overview.enabledUserModules.includes('PERSONAL_FINANCE');
     if(!property||item.permission&&!hasPermission(item.permission))return false;
+    if(item.to==='/agenda'&&!((hasPermission('AGENDA_TASK_VIEW')&&property.enabledModules.includes('TASKS'))||
+      (hasPermission('AGENDA_EVENT_VIEW')&&property.enabledModules.includes('EVENTS'))))return false;
     if(item.module&&!property.enabledModules.includes(item.module))return false;
     if(item.to==='/grupos'&&!property.enabledModules.some(code=>code==='PASTURES'||code==='CORRALS'))return false;
     if(item.to==='/limpiezas'&&!property.enabledModules.includes('PASTURES'))return false;
@@ -127,6 +141,7 @@ function V2Shell(){
       <IconButton label="Abrir menú" className="mobile-menu-button" onClick={()=>setOpen(true)}><Menu size={22}/></IconButton>
       <div><span className="breadcrumb">Sistema de Gestión Bovina</span><h2>{current?.label??'Gestión ganadera'}</h2></div>
     </div><div className="topbar-actions"><span className="v2-current-property">{property?.name??'Sin propiedad'}</span>
+      <V2NotificationCenter/>
       <IconButton label={theme==='dark'?'Usar tema claro':'Usar tema oscuro'} onClick={toggleTheme}>
         {theme==='dark'?<Sun size={19}/>:<Moon size={19}/>}</IconButton>
       <span className="profile-link"><UserCircle size={21}/><span>{overview.user.displayName}</span></span>
@@ -143,6 +158,9 @@ function Feature({permission,module,children}:{permission?:string;module?:string
     return <Navigate to="/" replace/>;
   if(permission==='GROUP_VIEW'&&!property.enabledModules.some(code=>code==='PASTURES'||code==='CORRALS'))
     return <Navigate to="/" replace/>;
+  if(!permission&&!module&&!property.enabledModules.some(code=>
+    code==='TASKS'&&hasPermission('AGENDA_TASK_VIEW')||
+    code==='EVENTS'&&hasPermission('AGENDA_EVENT_VIEW')))return <Navigate to="/" replace/>;
   return <>{children}</>;
 }
 
@@ -225,6 +243,13 @@ function V2Routes(){
       <Route path="corrales" element={<Feature permission="LOCATION_VIEW" module="CORRALS"><V2LocationsPage kind="CORRAL"/></Feature>}/>
       <Route path="movimientos" element={<Feature permission="MOVEMENT_VIEW" module="MOVEMENTS"><Panel kind="movements"/></Feature>}/>
       <Route path="pesajes" element={<Feature permission="WEIGHING_VIEW" module="WEIGHING"><V2WeighingsPage/></Feature>}/>
+      <Route path="bajas" element={<Feature permission="ANIMAL_VIEW"><V2AnimalStatusPage/></Feature>}/>
+      <Route path="ventas" element={<Feature permission="COMMERCE_VIEW" module="SALES_PURCHASES"><V2CommercePage kind="SALE"/></Feature>}/>
+      <Route path="compras" element={<Feature permission="COMMERCE_VIEW" module="SALES_PURCHASES"><V2CommercePage kind="PURCHASE"/></Feature>}/>
+      <Route path="agenda" element={<Feature><V2AgendaPage/></Feature>}/>
+      <Route path="finanzas" element={<Feature permission="FINANCE_VIEW" module="PROPERTY_FINANCE"><V2FinancesPage scope="property"/></Feature>}/>
+      <Route path="mis-finanzas" element={session?.overview.enabledUserModules.includes('PERSONAL_FINANCE')
+        ?<V2FinancesPage scope="personal"/>:<Navigate to="/" replace/>}/>
       <Route path="reproduccion" element={<Feature permission="REPRODUCTION_VIEW" module="REPRODUCTION"><Panel kind="reproduction"/></Feature>}/>
       <Route path="produccion" element={<Feature permission="PRODUCTION_VIEW" module="PRODUCTION"><Panel kind="production"/></Feature>}/>
       <Route path="sanidad" element={<Feature permission="HEALTH_VIEW" module="HEALTH"><Panel kind="health"/></Feature>}/>

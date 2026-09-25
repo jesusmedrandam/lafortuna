@@ -57,8 +57,13 @@ Auditoría y Pesajes y aplicó automáticamente la migración `0025`.
 | Limpiezas | Lista y filtros con el diseño anterior, detalle y edición separados; fotografías al crear y en el detalle conectadas a la API nueva |
 | Actividades | Lista, filtros, detalle, edición separada y fotografías con la presentación anterior y la API nueva |
 | Multimedia, catálogos, equipo, configuración, superadministración | Conectados a los paneles y API nueva |
+| Bajas y novedades | Historial inmutable y registro de desaparición, recuperación, muerte y salida con la transición de estado del servidor |
+| Ventas y compras | Registro de animales y productos, detalle y anulación auditada; la salida por venta y su reversión son transaccionales. Para asociar una compra de animal se registra primero el animal en su grupo |
+| Agenda | Tareas y eventos con usuarios y animales, aceptación, rechazo, realización y cancelación; falta la creación automática de tratamientos y avisos externos |
+| Ingresos y egresos / Mis finanzas | Cuentas, movimientos, transferencias, saldo y anulación; el ámbito personal queda separado por usuario. Faltan deudas, programaciones y conciliación automática con ventas y compras |
 | Historial y acciones adicionales de la ficha antigua | Pendientes de trasladar al modelo nuevo |
-| Bajas, ventas, compras, agenda, finanzas y notificaciones | Pantallas antiguas presentes como referencia; faltan entidades y rutas equivalentes en la API nueva |
+| Notificaciones | Buzón de asignaciones, realización y cancelación de agenda con lectura individual o general; faltan recordatorios programados, push y dispositivos Android |
+| Sincronización Android sin conexión | Pendiente de contrato de sincronización, cola y resolución de conflictos en la API nueva |
 | Android y sincronización sin conexión | Pendiente de un contrato con la API nueva |
 
 No habilitar pantallas del sistema anterior que todavía enviarían datos al

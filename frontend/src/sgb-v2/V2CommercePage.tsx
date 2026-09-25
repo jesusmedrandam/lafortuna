@@ -1,0 +1,165 @@
+import {useEffect,useMemo,useState,type FormEvent} from 'react';
+import {Ban,ChevronRight,Plus,ShoppingCart,ShoppingBag,Trash2} from 'lucide-react';
+import {useNavigate,useSearchParams} from 'react-router-dom';
+import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,Field,FloatingActionDock,
+  IconButton,Input,LoadingState,Modal,Select,Textarea} from '../components/ui';
+import {formatDate} from '../utils';
+import {cancelCommerce,createCommerce,getCommerce,getCommerceAnimals,
+  type CommerceInput,type CommerceLine,type CommerceRecord} from './api';
+import {useV2Session} from './V2Session';
+
+type DraftLine={key:number;type:'ANIMAL'|'PRODUCT';animalId:string;productName:string;
+  quantity:string;unit:string;unitPrice:string;animalEffect:'KEEP_CURRENT_PROPERTY'|'EXIT_CURRENT_PROPERTY'};
+let nextKey=1;
+function freshLine():DraftLine{return {key:nextKey++,type:'PRODUCT',animalId:'',productName:'',
+  quantity:'1',unit:'UNIDAD',unitPrice:'',animalEffect:'KEEP_CURRENT_PROPERTY'};}
+function today(){return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil',year:'numeric',
+  month:'2-digit',day:'2-digit'}).format(new Date());}
+function money(value:number){return new Intl.NumberFormat('es-EC',{style:'currency',currency:'USD'}).format(value);}
+function summary(line:CommerceLine){return line.animalName??`${line.quantity} ${line.unit} ${line.productName}`;}
+
+export function V2CommercePage({kind}:{kind:'SALE'|'PURCHASE'}){
+  const {session,hasPermission}=useV2Session();const token=session!.accessToken;const navigate=useNavigate();
+  const [params]=useSearchParams();const initialAnimal=params.get('animal')??'';
+  const [rows,setRows]=useState<CommerceRecord[]|null>(null);
+  const [animals,setAnimals]=useState<Array<{id:string;name:string;earTagCode:string|null}>>([]);
+  const [query,setQuery]=useState('');const [detail,setDetail]=useState<CommerceRecord|null>(null);
+  const [open,setOpen]=useState(false);const [cancelling,setCancelling]=useState(false);
+  const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [revision,setRevision]=useState(0);
+  const [draft,setDraft]=useState<DraftLine[]>([freshLine()]);
+  const canManage=hasPermission('COMMERCE_MANAGE');
+  useEffect(()=>{let active=true;setRows(null);setError('');
+    void getCommerce(token).then(data=>{if(active)setRows(data);}).catch(reason=>{
+      if(active)setError(reason instanceof Error?reason.message:'No se pudieron cargar las operaciones.');});
+    if(canManage)void getCommerceAnimals(token).then(data=>{if(active)setAnimals(data);})
+      .catch(reason=>{if(active)setError(reason instanceof Error?reason.message:'No se pudieron cargar los animales.');});
+    return()=>{active=false;};},[token,canManage,revision]);
+  const visible=useMemo(()=>rows?.filter(row=>row.kind===kind&&
+    (!initialAnimal||row.lines.some(line=>line.animalId===initialAnimal))&&
+    `${row.counterpartyName} ${row.destination??''} ${row.lines.map(summary).join(' ')}`
+      .toLowerCase().includes(query.trim().toLowerCase()))??[],[rows,kind,query,initialAnimal]);
+  function update(key:number,patch:Partial<DraftLine>){
+    setDraft(lines=>lines.map(line=>line.key===key?{...line,...patch}:line));}
+  function start(){setDraft([{...freshLine(),...(initialAnimal?{type:'ANIMAL' as const,
+    animalId:initialAnimal,unit:'ANIMAL'}:{})}]);setError('');setOpen(true);}
+  async function save(event:FormEvent<HTMLFormElement>){event.preventDefault();const data=new FormData(event.currentTarget);
+    const lines:CommerceInput['lines']=draft.map(line=>line.type==='ANIMAL'?{
+      animalId:line.animalId,quantity:1,unit:'ANIMAL',unitPrice:Number(line.unitPrice),
+      ...(kind==='SALE'?{animalEffect:line.animalEffect}:{})}:{
+      productName:line.productName.trim(),quantity:Number(line.quantity),unit:line.unit.trim(),
+      unitPrice:Number(line.unitPrice)});
+    const input:CommerceInput={kind,tradedOn:String(data.get('tradedOn')),
+      counterpartyName:String(data.get('counterpartyName')).trim(),
+      counterpartyContact:String(data.get('counterpartyContact')??'').trim()||null,
+      destination:String(data.get('destination')??'').trim()||null,
+      notes:String(data.get('notes')??'').trim()||null,lines};
+    if(lines.some(line=>line.animalId&&!animals.some(animal=>animal.id===line.animalId))){
+      setError('Selecciona animales activos de esta propiedad.');return;}
+    setBusy(true);setError('');try{await createCommerce(token,input);setOpen(false);
+      setRevision(value=>value+1);}catch(reason){setError(reason instanceof Error?reason.message:'No se pudo guardar.');}
+    finally{setBusy(false);}
+  }
+  async function confirmCancel(event:FormEvent<HTMLFormElement>){event.preventDefault();if(!detail)return;
+    const reason=String(new FormData(event.currentTarget).get('reason')??'').trim();
+    setBusy(true);setError('');try{await cancelCommerce(token,detail.id,reason);
+      setCancelling(false);setDetail(null);setRevision(value=>value+1);
+    }catch(cause){setError(cause instanceof Error?cause.message:'No se pudo anular.');}
+    finally{setBusy(false);}
+  }
+  const title=kind==='SALE'?'Ventas':'Compras';
+  return <div className="module-no-header">
+    <CompactToolbar search={query} onSearch={setQuery} placeholder={`Buscar ${title.toLowerCase()}…`}
+      count={visible.length}/>
+    {error&&!open&&!cancelling&&<div className="form-error admin-error" role="alert">{error}</div>}
+    {rows===null&&!error?<LoadingState/>:rows===null?<ErrorState message={error}
+      onRetry={()=>setRevision(value=>value+1)}/>:visible.length?<Card className="commerce-list">
+      {visible.map(row=><button type="button" className="commerce-row" key={row.id}
+        onClick={()=>setDetail(row)}><span className="commerce-main">
+          <strong>{row.lines.map(summary).join(', ')}</strong>
+          <small>{row.counterpartyName} · {formatDate(row.tradedOn)}</small></span>
+          <span className="commerce-price"><strong>{money(row.total)}</strong>
+            <Badge tone={row.status==='ACTIVE'?'success':'danger'}>
+              {row.status==='ACTIVE'?'Registrada':'Anulada'}</Badge></span>
+          <ChevronRight size={18}/></button>)}
+    </Card>:<EmptyState icon={kind==='SALE'?ShoppingCart:ShoppingBag}
+      title={`Sin ${title.toLowerCase()}`} description={rows.length?
+        'No hay resultados para esta búsqueda.':'Registra una operación de la propiedad.'}/>}
+    {detail&&!cancelling&&<Modal title={`Detalle de ${kind==='SALE'?'venta':'compra'}`}
+      onClose={()=>setDetail(null)} footer={<><Button variant="ghost" onClick={()=>setDetail(null)}>Cerrar</Button>
+        {canManage&&detail.status==='ACTIVE'&&<Button variant="secondary"
+          onClick={()=>{setError('');setCancelling(true);}}><Ban size={16}/>Anular</Button>}</>}>
+      <div className="record-detail"><div className="detail-grid">
+        <div><small>{kind==='SALE'?'Comprador':'Vendedor'}</small><strong>{detail.counterpartyName}</strong></div>
+        <div><small>Fecha</small><strong>{formatDate(detail.tradedOn)}</strong></div>
+        <div><small>Total</small><strong>{money(detail.total)}</strong></div>
+        <div><small>Contacto</small><strong>{detail.counterpartyContact??'Sin registrar'}</strong></div>
+        <div><small>Destino</small><strong>{detail.destination??'Sin registrar'}</strong></div>
+        <div><small>Registrado por</small><strong>{detail.registeredBy}</strong></div></div>
+        <section><h3>Detalle</h3><div className="detail-lines">{detail.lines.map(line=><div key={line.id}>
+          <span><strong>{summary(line)}</strong><small>{line.quantity} {line.unit} × {money(line.unitPrice)}
+            {line.animalEffect==='EXIT_CURRENT_PROPERTY'?' · Salió de la propiedad':''}</small></span>
+          <strong>{money(line.quantity*line.unitPrice)}</strong>
+          {line.animalId&&<Button variant="ghost" onClick={()=>navigate(`/animales/${line.animalId}`)}>
+            Ver animal</Button>}</div>)}</div></section>
+        {detail.notes&&<section><h3>Observaciones</h3><p>{detail.notes}</p></section>}
+        {detail.cancellationReason&&<p>Motivo de anulación: {detail.cancellationReason}</p>}
+      </div></Modal>}
+    {detail&&cancelling&&<Modal title="Anular operación" onClose={()=>setCancelling(false)}
+      footer={<><Button variant="ghost" onClick={()=>setCancelling(false)}>Volver</Button>
+        <Button type="submit" form="commerce-cancel" loading={busy}>Confirmar anulación</Button></>}>
+      <form id="commerce-cancel" className="form-stack" onSubmit={event=>void confirmCancel(event)}>
+        <p>Se conservará la operación y su historial. Si la venta sacó animales, se intentará revertir su salida.</p>
+        {error&&<div className="form-error admin-error" role="alert">{error}</div>}
+        <Field label="Motivo" required><Textarea name="reason" required minLength={3} maxLength={3000}/></Field>
+      </form></Modal>}
+    {open&&<Modal title={`Nueva ${kind==='SALE'?'venta':'compra'}`} wide
+      onClose={()=>setOpen(false)} footer={<><Button variant="ghost" onClick={()=>setOpen(false)}>Cancelar</Button>
+        <Button type="submit" form="commerce-form" loading={busy}>Guardar</Button></>}>
+      <form id="commerce-form" className="form-stack" onSubmit={event=>void save(event)}>
+        {error&&<div className="form-error admin-error" role="alert">{error}</div>}
+        <div className="form-grid"><Field label="Fecha" required><Input name="tradedOn" type="date"
+          max={today()} defaultValue={today()} required/></Field>
+          <Field label={kind==='SALE'?'Comprador':'Vendedor'} required><Input name="counterpartyName"
+            required maxLength={180}/></Field>
+          <Field label="Contacto"><Input name="counterpartyContact" maxLength={180}/></Field>
+          <Field label="Destino"><Input name="destination" maxLength={240}/></Field></div>
+        <h3>Animales y productos</h3>
+        {draft.map(line=><div key={line.key} className="form-section">
+          <div className="form-grid"><Field label="Tipo"><Select value={line.type}
+            onChange={event=>update(line.key,{type:event.target.value as DraftLine['type'],
+              animalId:'',productName:'',quantity:'1',unit:event.target.value==='ANIMAL'?'ANIMAL':'UNIDAD'})}>
+              <option value="PRODUCT">Producto</option><option value="ANIMAL">Animal</option>
+            </Select></Field>
+            {line.type==='ANIMAL'?<Field label="Animal" required><Select required value={line.animalId}
+              onChange={event=>update(line.key,{animalId:event.target.value})}>
+              <option value="">Selecciona</option>{animals.map(animal=><option key={animal.id} value={animal.id}>
+                {animal.name}{animal.earTagCode?` · ${animal.earTagCode}`:''}</option>)}</Select></Field>
+              :<Field label="Producto" required><Input required maxLength={180}
+                value={line.productName} onChange={event=>update(line.key,{productName:event.target.value})}/></Field>}
+            {line.type==='PRODUCT'&&<><Field label="Cantidad" required><Input type="number" min="0.001"
+              step="0.001" required value={line.quantity} onChange={event=>update(line.key,{quantity:event.target.value})}/></Field>
+              <Field label="Unidad" required><Input required maxLength={40} value={line.unit}
+                onChange={event=>update(line.key,{unit:event.target.value})}/></Field></>}
+            <Field label={line.type==='ANIMAL'?'Precio del animal (USD)':'Precio unitario (USD)'} required>
+              <Input type="number" min="0" step="0.01" required value={line.unitPrice}
+                onChange={event=>update(line.key,{unitPrice:event.target.value})}/></Field>
+            {kind==='SALE'&&line.type==='ANIMAL'&&<Field label="Después de la venta">
+              <Select value={line.animalEffect} onChange={event=>update(line.key,{
+                animalEffect:event.target.value as DraftLine['animalEffect']})}>
+                <option value="KEEP_CURRENT_PROPERTY">Permanece en la propiedad</option>
+                <option value="EXIT_CURRENT_PROPERTY">Sale de la propiedad</option></Select></Field>}
+          </div>{draft.length>1&&<Button variant="ghost" type="button" onClick={()=>setDraft(items=>
+            items.filter(item=>item.key!==line.key))}><Trash2 size={16}/>Quitar</Button>}
+        </div>)}
+        {kind==='PURCHASE'&&draft.some(line=>line.type==='ANIMAL')&&
+          <p className="muted">Primero registra el animal y asígnalo a su grupo; después selecciónalo aquí para asociar la compra.</p>}
+        <Button variant="secondary" type="button" onClick={()=>setDraft(items=>[...items,freshLine()])}>
+          <Plus size={16}/>Añadir producto o animal</Button>
+        <strong>Total: {money(draft.reduce((sum,line)=>sum+(Number(line.quantity)||0)*
+          (Number(line.unitPrice)||0),0))}</strong>
+        <Field label="Observaciones"><Textarea name="notes" maxLength={3000} rows={3}/></Field>
+      </form></Modal>}
+    {canManage&&<FloatingActionDock><IconButton label={`Nueva ${kind==='SALE'?'venta':'compra'}`}
+      onClick={start}><Plus size={23}/></IconButton></FloatingActionDock>}
+  </div>;
+}

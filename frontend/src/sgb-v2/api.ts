@@ -421,6 +421,106 @@ export interface WeighingRecord {
   weighedOn:string;weight:number;unitCode:'KILOGRAM'|'POUND';weightKg:number;
   method:string|null;notes:string|null;version:number;voidedAt:string|null;createdAt:string;
 }
+export interface AnimalStatusEvent {
+  id:string;animalId:string;animalName:string;earTagCode:string|null;
+  fromStatus:string;toStatus:string;action:'REPORT_MISSING'|'MARK_FOUND'|'RECORD_DEATH'|'RECORD_EXIT';
+  reason:string|null;exitReasonCode:string|null;occurredAt:string;createdAt:string;
+  registeredBy:string;
+}
+export interface CommerceLine {id:string;animalId:string|null;animalName:string|null;
+  productName:string|null;quantity:number;unit:string;unitPrice:number;
+  animalEffect:string|null}
+export interface CommerceRecord {id:string;kind:'SALE'|'PURCHASE';tradedOn:string;
+  counterpartyName:string;counterpartyContact:string|null;destination:string|null;
+  currency:'USD';notes:string|null;total:number;status:'ACTIVE'|'CANCELLED';
+  cancellationReason:string|null;createdAt:string;registeredBy:string;lines:CommerceLine[]}
+export interface CommerceInput {kind:'SALE'|'PURCHASE';tradedOn:string;counterpartyName:string;
+  counterpartyContact:string|null;destination:string|null;notes:string|null;
+  lines:Array<{animalId?:string;productName?:string;quantity:number;unit:string;
+    unitPrice:number;animalEffect?:'KEEP_CURRENT_PROPERTY'|'EXIT_CURRENT_PROPERTY'}>}
+export function getCommerce(token:string){return request<CommerceRecord[]>('/commerce',
+  {headers:bearer(token)});}
+export function getCommerceAnimals(token:string){return request<Array<{id:string;name:string;
+  earTagCode:string|null;status:string}>>('/commerce/animals',{headers:bearer(token)});}
+export function createCommerce(token:string,input:CommerceInput){
+  return request<CommerceRecord>('/commerce',{method:'POST',headers:bearer(token),body:JSON.stringify(input)});
+}
+export interface AgendaItem {id:string;kind:'TASK'|'EVENT';activityType:string;title:string;
+  instructions:string|null;scheduledAt:string;reminderAt:string|null;
+  visibility:'PRIVATE'|'SELECTED'|'ALL';status:'PENDING'|'COMPLETED'|'CANCELLED';
+  createdBy:string;createdAt:string;createdByName:string;myResponse:'PENDING'|'ACCEPTED'|'DECLINED'|null;
+  users:Array<{id:string;name:string;response:string}>;
+  animals:Array<{id:string;name:string;earTagCode:string|null}>}
+export interface AgendaOptions {users:Array<{id:string;name:string}>;
+  animals:Array<{id:string;name:string;earTagCode:string|null}>;
+  tasks:boolean;events:boolean}
+export type AgendaInput={kind:'TASK'|'EVENT';activityType:string;title:string;
+  instructions:string|null;scheduledAt:string;reminderAt:string|null;
+  visibility:'PRIVATE'|'SELECTED'|'ALL';userIds:string[];animalIds:string[]};
+export function getAgenda(token:string){return request<AgendaItem[]>('/agenda',{headers:bearer(token)});}
+export function getAgendaOptions(token:string){return request<AgendaOptions>('/agenda/options',
+  {headers:bearer(token)});}
+export function createAgenda(token:string,input:AgendaInput){return request<AgendaItem>('/agenda',
+  {method:'POST',headers:bearer(token),body:JSON.stringify(input)});}
+export function actOnAgenda(token:string,id:string,action:'ACCEPT'|'DECLINE'|'COMPLETE'|'CANCEL'){
+  return request<AgendaItem>(`/agenda/${encodeURIComponent(id)}/action`,{
+    method:'POST',headers:bearer(token),body:JSON.stringify({action})});
+}
+export interface FinanceAccount {id:string;name:string;kind:'CASH'|'BANK'|'WALLET'|'CREDIT_CARD'|'OTHER';
+  openingBalance:number;balance:number;active:boolean;createdAt:string}
+export interface FinanceMovement {id:string;kind:'INCOME'|'EXPENSE'|'TRANSFER';
+  sourceAccountId:string|null;destinationAccountId:string|null;
+  sourceAccountName:string|null;destinationAccountName:string|null;
+  amount:number;occurredOn:string;category:string|null;concept:string;notes:string|null;
+  cancelledAt:string|null;cancellationReason:string|null;createdAt:string}
+export type FinanceScope='property'|'personal';
+export function getFinanceAccounts(token:string,scope:FinanceScope){return request<FinanceAccount[]>(
+  `/finances/${scope}/accounts`,{headers:bearer(token)});}
+export function getFinanceMovements(token:string,scope:FinanceScope){return request<FinanceMovement[]>(
+  `/finances/${scope}/movements`,{headers:bearer(token)});}
+export function createFinanceAccount(token:string,scope:FinanceScope,input:{name:string;
+  kind:FinanceAccount['kind'];openingBalance:number}){return request<FinanceAccount>(
+    `/finances/${scope}/accounts`,{method:'POST',headers:bearer(token),body:JSON.stringify(input)});}
+export function updateFinanceAccount(token:string,scope:FinanceScope,id:string,input:{name:string;
+  kind:FinanceAccount['kind'];active:boolean}){return request<FinanceAccount>(
+    `/finances/${scope}/accounts/${encodeURIComponent(id)}`,{
+      method:'PATCH',headers:bearer(token),body:JSON.stringify(input)});}
+export function createFinanceMovement(token:string,scope:FinanceScope,input:{
+  kind:FinanceMovement['kind'];sourceAccountId:string|null;destinationAccountId:string|null;
+  amount:number;occurredOn:string;category:string|null;concept:string;notes:string|null}){
+  return request<FinanceMovement>(`/finances/${scope}/movements`,{
+    method:'POST',headers:bearer(token),body:JSON.stringify(input)});}
+export function cancelFinanceMovement(token:string,scope:FinanceScope,id:string,reason:string){
+  return request<FinanceMovement>(`/finances/${scope}/movements/${encodeURIComponent(id)}/cancel`,{
+    method:'POST',headers:bearer(token),body:JSON.stringify({reason})});}
+export function cancelCommerce(token:string,id:string,reason:string){
+  return request<CommerceRecord>(`/commerce/${encodeURIComponent(id)}/cancel`,{
+    method:'POST',headers:bearer(token),body:JSON.stringify({reason})});
+}
+export interface AppNotification {id:string;kind:string;title:string;message:string;
+  agendaItemId:string|null;propertyId:string;propertyName:string;
+  readAt:string|null;createdAt:string}
+export function getNotifications(token:string){return request<AppNotification[]>('/notifications',
+  {headers:bearer(token)});}
+export function readNotification(token:string,id:string){return request<{read:true}>(
+  `/notifications/${encodeURIComponent(id)}/read`,{method:'POST',headers:bearer(token)});}
+export function readAllNotifications(token:string){return request<{read:true}>(
+  '/notifications/read-all',{method:'POST',headers:bearer(token)});}
+export type AnimalStatusInput={animalId:string;action:AnimalStatusEvent['action'];
+  reason:string|null;occurredAt:string;expectedVersion:number;exitReasonCode?:string};
+export function getAnimalStatusEvents(token:string,animalId?:string){
+  return request<AnimalStatusEvent[]>(`/animal-status${animalId?`?animalId=${encodeURIComponent(animalId)}`:''}`,
+    {headers:bearer(token)});
+}
+export interface AnimalStatusOption {id:string;name:string;earTagCode:string|null;
+  status:'ACTIVE'|'MISSING'|'INACTIVE';version:number}
+export function getAnimalStatusOptions(token:string){
+  return request<AnimalStatusOption[]>('/animal-status/options',{headers:bearer(token)});
+}
+export function createAnimalStatusEvent(token:string,input:AnimalStatusInput){
+  return request<AnimalStatusEvent>('/animal-status',{
+    method:'POST',headers:bearer(token),body:JSON.stringify(input)});
+}
 export interface AuditRecord {
   id:string;occurredAt:string;action:string;entityType:string;entityId:string|null;
   reason:string|null;beforeData:unknown;afterData:unknown;ipAddress:string|null;

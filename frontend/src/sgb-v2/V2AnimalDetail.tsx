@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
-import {ArrowLeft,ArrowLeftRight,Baby,Beef,Camera,Droplets,Edit3,MapPin,Milk,Users,Weight} from 'lucide-react';
+import {ArrowLeft,ArrowLeftRight,Baby,Beef,Camera,Droplets,Edit3,MapPin,Milk,Users,Weight,
+  HeartCrack,ShoppingCart,ShoppingBag} from 'lucide-react';
 import {useNavigate,useParams} from 'react-router-dom';
 import {Badge,Card,IconButton,LoadingState,ErrorState} from '../components/ui';
 import {formatDate} from '../utils';
@@ -37,7 +38,8 @@ export function V2AnimalDetail(){
   const gallery=media.filter(item=>item.kind==='IMAGE'&&item.relation_code!=='PROFILE');
   const usable=animal?.availabilityStatusCode==='ACTIVE';
   const status=animal?.availabilityStatusCode==='ACTIVE'?'Activo':animal?.availabilityStatusCode==='DEAD'
-    ?'Fallecido':animal?.availabilityStatusCode==='MISSING'?'Desaparecido':'Inactivo';
+    ?'Fallecido':animal?.availabilityStatusCode==='MISSING'?'Desaparecido':
+      animal?.availabilityStatusCode==='EXITED'?'Salió de la propiedad':'Inactivo';
   const go=(path:string)=>navigate(`${path}?animal=${encodeURIComponent(id??'')}`);
   if(error&&!animal)return <ErrorState message={error} onRetry={()=>navigate('/animales')}/>;
   if(!animal)return <LoadingState text="Abriendo ficha…"/>;
@@ -60,6 +62,11 @@ export function V2AnimalDetail(){
         <Camera size={19}/></IconButton>}
       {hasPermission('ANIMAL_UPDATE')&&<IconButton label="Editar animal" onClick={()=>go('/animales/gestionar')}>
         <Edit3 size={19}/></IconButton>}
+      {hasPermission('ANIMAL_VIEW')&&<IconButton label="Bajas y novedades" onClick={()=>go('/bajas')}>
+        <HeartCrack size={19}/></IconButton>}
+      {usable&&hasPermission('COMMERCE_VIEW')&&modules.includes('SALES_PURCHASES')&&<>
+        <IconButton label="Ventas del animal" onClick={()=>go('/ventas')}><ShoppingCart size={19}/></IconButton>
+        <IconButton label="Compras del animal" onClick={()=>go('/compras')}><ShoppingBag size={19}/></IconButton></>}
       {usable&&hasPermission('MOVEMENT_VIEW')&&modules.includes('MOVEMENTS')&&<IconButton label="Movimientos"
         onClick={()=>go('/movimientos')}><ArrowLeftRight size={19}/></IconButton>}
       {usable&&hasPermission('WEIGHING_VIEW')&&modules.includes('WEIGHING')&&<IconButton label="Pesajes"
