@@ -95,7 +95,7 @@ export function V2AnimalStatusPage(){
             {labels[code]}</option>):<option>Selecciona un animal</option>}</Select></Field>
         {action==='RECORD_EXIT'&&<Field label="Motivo de salida" required><Select name="exitReasonCode" required>
           <option value="">Selecciona un motivo</option>
-          <option value="SALE">Venta</option><option value="DONATION">Donación</option>
+          <option value="DONATION">Donación</option>
           <option value="SLAUGHTER">Sacrificio</option>
           <option value="EXTERNAL_TRANSFER">Traslado externo</option>
           <option value="OTHER">Otro</option></Select></Field>}

@@ -108,7 +108,8 @@ export function V2CommercePage({kind}:{kind:'SALE'|'PURCHASE'}){
       footer={<><Button variant="ghost" onClick={()=>setCancelling(false)}>Volver</Button>
         <Button type="submit" form="commerce-cancel" loading={busy}>Confirmar anulación</Button></>}>
       <form id="commerce-cancel" className="form-stack" onSubmit={event=>void confirmCancel(event)}>
-        <p>Se conservará la operación y su historial. Si la venta sacó animales, se intentará revertir su salida.</p>
+        <p>Se conservará la operación y su historial. Si la venta sacó animales, se intentará revertir su salida.
+          Después revisa y reasigna el grupo y la ubicación desde Movimientos.</p>
         {error&&<div className="form-error admin-error" role="alert">{error}</div>}
         <Field label="Motivo" required><Textarea name="reason" required minLength={3} maxLength={3000}/></Field>
       </form></Modal>}
