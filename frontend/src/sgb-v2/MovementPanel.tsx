@@ -47,9 +47,13 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
   useEffect(()=>{if(!initialAnimalId||initialAnimalId===prefilledAnimalId||!options||!canManage)return;
     const animal=options.animals.find(item=>item.id===initialAnimalId);
-    if(animal?.groupId){setKind('GRUPO');setSourceGroupId(animal.groupId);setMode('MANUAL');setSelected([animal.id]);
+    if(animal?.groupId){const requested=new URLSearchParams(window.location.search).get('accion');
+      const requestedKind=requested==='UBICACION'&&canChangeLocation?'UBICACION':
+        requested==='PROPIEDAD'?'PROPIEDAD':'GRUPO';
+      setKind(requestedKind);setSourceGroupId(animal.groupId);
+      setMode(requestedKind==='UBICACION'?'GRUPO':'MANUAL');setSelected([animal.id]);
       setDestinationGroupId('');setDestinationLocationId('');setFormOpen(true);setPrefilledAnimalId(animal.id);}
-  },[initialAnimalId,prefilledAnimalId,options?.animals,canManage]);
+  },[initialAnimalId,prefilledAnimalId,options?.animals,canManage,canChangeLocation]);
 
   useEffect(()=>{let active=true;
     void getMovements(accessToken).then(movements=>{if(active){setRecords(movements);setError(null);}})

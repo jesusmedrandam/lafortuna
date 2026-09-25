@@ -46,7 +46,10 @@ export function HealthPanel({accessToken,canManage,initialAnimalId}:{accessToken
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
   useEffect(()=>{if(!initialAnimalId||initialAnimalId===prefilledAnimalId||
     !options?.animals.some(item=>item.id===initialAnimalId)||!canManage)return;
-    setTab('conditions');setShowCondition(true);setPrefilledAnimalId(initialAnimalId);
+    if(new URLSearchParams(window.location.search).get('accion')==='TRATAMIENTO'){
+      setTab('treatments');setMode('MANUAL');setSelected([initialAnimalId]);setShowCampaign(true);
+    }else{setTab('conditions');setShowCondition(true);}
+    setPrefilledAnimalId(initialAnimalId);
   },[initialAnimalId,prefilledAnimalId,options?.animals,canManage]);
 
   useEffect(()=>{let active=true;

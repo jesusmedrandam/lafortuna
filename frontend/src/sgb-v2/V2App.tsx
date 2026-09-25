@@ -199,7 +199,8 @@ function Panel({kind}:{kind:'animals'|'movements'|'reproduction'|'production'|'h
       canManageMedia={hasPermission('MEDIA_MANAGE')&&modules.includes('MULTIMEDIA')}/>;
     case 'media':return <MediaPanel accessToken={token}
       permissions={property?.roles.find(role=>role.id===overview.activeContext?.roleId)?.permissions??[]}/>;
-    case 'catalogs':return <CatalogPanel accessToken={token} canManage={hasPermission('CATALOG_MANAGE')}/>;
+    case 'catalogs':return <CatalogPanel accessToken={token} canManage={hasPermission('CATALOG_MANAGE')}
+      commerceEnabled={modules.includes('SALES_PURCHASES')}/>;
     case 'team':return <PropertyTeamPanel accessToken={token}/>;
     case 'settings':return <PropertySettingsPanel accessToken={token}
       onPropertyCreated={async(propertyId,roleId)=>{await selectContext(propertyId,roleId);navigate('/');}}

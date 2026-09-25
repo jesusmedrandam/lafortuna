@@ -106,7 +106,10 @@ export function V2AnimalStatusPage(){
       </form></Modal>}
     {canManage&&<FloatingActionDock><IconButton label="Registrar novedad" onClick={()=>{
       const preselected=options.find(row=>row.id===animalId);setChosen(preselected?.id??'');
-      setAction(preselected? actionFor(preselected.status)[0]!:'REPORT_MISSING');setError('');setOpen(true);
+      const requested=params.get('accion');const choices=preselected?actionFor(preselected.status):[];
+      setAction(choices.includes(requested as AnimalStatusEvent['action'])?
+        requested as AnimalStatusEvent['action']:choices[0]??'REPORT_MISSING');
+      setError('');setOpen(true);
     }}><Plus size={23}/></IconButton></FloatingActionDock>}
   </div>;
 }

@@ -4,14 +4,14 @@ import {useNavigate,useSearchParams} from 'react-router-dom';
 import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,Field,FloatingActionDock,
   IconButton,Input,LoadingState,Modal,Select,Textarea} from '../components/ui';
 import {formatDate} from '../utils';
-import {cancelCommerce,createCommerce,getCommerce,getCommerceAnimals,
-  type CommerceInput,type CommerceLine,type CommerceRecord} from './api';
+import {cancelCommerce,createCommerce,getCommerce,getCommerceAnimals,listCatalogItems,
+  createCatalogItem,type CatalogItem,type CommerceInput,type CommerceLine,type CommerceRecord} from './api';
 import {useV2Session} from './V2Session';
 
-type DraftLine={key:number;type:'ANIMAL'|'PRODUCT';animalId:string;productName:string;
+type DraftLine={key:number;type:'ANIMAL'|'PRODUCT';animalId:string;productId:string;productName:string;
   quantity:string;unit:string;unitPrice:string;animalEffect:'KEEP_CURRENT_PROPERTY'|'EXIT_CURRENT_PROPERTY'};
 let nextKey=1;
-function freshLine():DraftLine{return {key:nextKey++,type:'PRODUCT',animalId:'',productName:'',
+function freshLine():DraftLine{return {key:nextKey++,type:'PRODUCT',animalId:'',productId:'',productName:'',
   quantity:'1',unit:'UNIDAD',unitPrice:'',animalEffect:'KEEP_CURRENT_PROPERTY'};}
 function today(){return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil',year:'numeric',
   month:'2-digit',day:'2-digit'}).format(new Date());}
@@ -27,13 +27,23 @@ export function V2CommercePage({kind}:{kind:'SALE'|'PURCHASE'}){
   const [open,setOpen]=useState(false);const [cancelling,setCancelling]=useState(false);
   const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [revision,setRevision]=useState(0);
   const [draft,setDraft]=useState<DraftLine[]>([freshLine()]);
+  const [buyers,setBuyers]=useState<CatalogItem[]>([]);const [products,setProducts]=useState<CatalogItem[]>([]);
+  const [buyerId,setBuyerId]=useState('');
+  const [newCatalog,setNewCatalog]=useState<'BUYERS'|'SALE_PRODUCTS'|null>(null);
+  const [catalogLineKey,setCatalogLineKey]=useState<number|null>(null);
+  const [newName,setNewName]=useState('');
   const canManage=hasPermission('COMMERCE_MANAGE');
+  const canManageCatalogs=hasPermission('CATALOG_MANAGE');
   useEffect(()=>{let active=true;setRows(null);setError('');
     void getCommerce(token).then(data=>{if(active)setRows(data);}).catch(reason=>{
       if(active)setError(reason instanceof Error?reason.message:'No se pudieron cargar las operaciones.');});
     if(canManage)void getCommerceAnimals(token).then(data=>{if(active)setAnimals(data);})
       .catch(reason=>{if(active)setError(reason instanceof Error?reason.message:'No se pudieron cargar los animales.');});
-    return()=>{active=false;};},[token,canManage,revision]);
+    if(kind==='SALE')void Promise.all([listCatalogItems(token,'BUYERS'),
+      listCatalogItems(token,'SALE_PRODUCTS')]).then(([people,items])=>{
+      if(active){setBuyers(people.filter(item=>item.active));setProducts(items.filter(item=>item.active));}
+    }).catch(reason=>{if(active)setError(reason instanceof Error?reason.message:'No se pudieron cargar los catálogos.');});
+    return()=>{active=false;};},[token,canManage,revision,kind]);
   const visible=useMemo(()=>rows?.filter(row=>row.kind===kind&&
     (!initialAnimal||row.lines.some(line=>line.animalId===initialAnimal))&&
     `${row.counterpartyName} ${row.destination??''} ${row.lines.map(summary).join(' ')}`
@@ -41,20 +51,36 @@ export function V2CommercePage({kind}:{kind:'SALE'|'PURCHASE'}){
   function update(key:number,patch:Partial<DraftLine>){
     setDraft(lines=>lines.map(line=>line.key===key?{...line,...patch}:line));}
   function start(){setDraft([{...freshLine(),...(initialAnimal?{type:'ANIMAL' as const,
-    animalId:initialAnimal,unit:'ANIMAL'}:{})}]);setError('');setOpen(true);}
+    animalId:initialAnimal,unit:'ANIMAL'}:{})}]);setBuyerId('');setError('');setOpen(true);}
+  async function addCatalog(){if(!newCatalog||!newName.trim())return;
+    setBusy(true);setError('');try{
+      const item=await createCatalogItem(token,newCatalog,newName.trim());
+      if(newCatalog==='BUYERS'){setBuyers(rows=>[...rows,item].sort((a,b)=>a.name.localeCompare(b.name)));
+        setBuyerId(item.id);}
+      else{setProducts(rows=>[...rows,item].sort((a,b)=>a.name.localeCompare(b.name)));
+        setDraft(rows=>rows.map(line=>line.key===catalogLineKey?
+          {...line,productId:item.id}:line));}
+      setNewCatalog(null);setCatalogLineKey(null);setNewName('');
+    }catch(reason){setError(reason instanceof Error?reason.message:'No se pudo agregar la opción.');}
+    finally{setBusy(false);}
+  }
   async function save(event:FormEvent<HTMLFormElement>){event.preventDefault();const data=new FormData(event.currentTarget);
     const lines:CommerceInput['lines']=draft.map(line=>line.type==='ANIMAL'?{
       animalId:line.animalId,quantity:1,unit:'ANIMAL',unitPrice:Number(line.unitPrice),
       ...(kind==='SALE'?{animalEffect:line.animalEffect}:{})}:{
-      productName:line.productName.trim(),quantity:Number(line.quantity),unit:line.unit.trim(),
+      ...(kind==='SALE'?{productId:line.productId}:{productName:line.productName.trim()}),
+      quantity:Number(line.quantity),unit:line.unit.trim(),
       unitPrice:Number(line.unitPrice)});
     const input:CommerceInput={kind,tradedOn:String(data.get('tradedOn')),
-      counterpartyName:String(data.get('counterpartyName')).trim(),
+      ...(kind==='SALE'?{buyerId}:{counterpartyName:String(data.get('counterpartyName')).trim()}),
       counterpartyContact:String(data.get('counterpartyContact')??'').trim()||null,
       destination:String(data.get('destination')??'').trim()||null,
       notes:String(data.get('notes')??'').trim()||null,lines};
     if(lines.some(line=>line.animalId&&!animals.some(animal=>animal.id===line.animalId))){
       setError('Selecciona animales activos de esta propiedad.');return;}
+    if(kind==='SALE'&&(!buyers.some(item=>item.id===buyerId)||draft.some(line=>
+      line.type==='PRODUCT'&&!products.some(item=>item.id===line.productId)))){
+      setError('Selecciona un comprador y productos de venta activos de tu cuenta.');return;}
     setBusy(true);setError('');try{await createCommerce(token,input);setOpen(false);
       setRevision(value=>value+1);}catch(reason){setError(reason instanceof Error?reason.message:'No se pudo guardar.');}
     finally{setBusy(false);}
@@ -120,23 +146,34 @@ export function V2CommercePage({kind}:{kind:'SALE'|'PURCHASE'}){
         {error&&<div className="form-error admin-error" role="alert">{error}</div>}
         <div className="form-grid"><Field label="Fecha" required><Input name="tradedOn" type="date"
           max={today()} defaultValue={today()} required/></Field>
-          <Field label={kind==='SALE'?'Comprador':'Vendedor'} required><Input name="counterpartyName"
-            required maxLength={180}/></Field>
+          {kind==='SALE'?<Field label="Comprador" required><Select required value={buyerId}
+            onChange={event=>setBuyerId(event.target.value)}><option value="">Selecciona un comprador</option>
+            {buyers.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select>
+            {canManageCatalogs&&<button type="button" className="v2-catalog-add"
+              onClick={()=>{setNewCatalog('BUYERS');setNewName('');}}>+ Agregar comprador</button>}</Field>
+            :<Field label="Vendedor" required><Input name="counterpartyName" required maxLength={180}/></Field>}
           <Field label="Contacto"><Input name="counterpartyContact" maxLength={180}/></Field>
           <Field label="Destino"><Input name="destination" maxLength={240}/></Field></div>
         <h3>Animales y productos</h3>
         {draft.map(line=><div key={line.key} className="form-section">
           <div className="form-grid"><Field label="Tipo"><Select value={line.type}
             onChange={event=>update(line.key,{type:event.target.value as DraftLine['type'],
-              animalId:'',productName:'',quantity:'1',unit:event.target.value==='ANIMAL'?'ANIMAL':'UNIDAD'})}>
+              animalId:'',productId:'',productName:'',quantity:'1',unit:event.target.value==='ANIMAL'?'ANIMAL':'UNIDAD'})}>
               <option value="PRODUCT">Producto</option><option value="ANIMAL">Animal</option>
             </Select></Field>
             {line.type==='ANIMAL'?<Field label="Animal" required><Select required value={line.animalId}
               onChange={event=>update(line.key,{animalId:event.target.value})}>
               <option value="">Selecciona</option>{animals.map(animal=><option key={animal.id} value={animal.id}>
                 {animal.name}{animal.earTagCode?` · ${animal.earTagCode}`:''}</option>)}</Select></Field>
-              :<Field label="Producto" required><Input required maxLength={180}
-                value={line.productName} onChange={event=>update(line.key,{productName:event.target.value})}/></Field>}
+              :<Field label="Producto" required>{kind==='SALE'?<><Select required
+                value={line.productId} onChange={event=>update(line.key,{productId:event.target.value})}>
+                <option value="">Selecciona un producto</option>{products.map(item=><option key={item.id}
+                  value={item.id}>{item.name}</option>)}</Select>
+                {canManageCatalogs&&<button type="button" className="v2-catalog-add"
+                  onClick={()=>{setCatalogLineKey(line.key);setNewCatalog('SALE_PRODUCTS');
+                    setNewName('');}}>+ Agregar producto</button>}</>
+                :<Input required maxLength={180} value={line.productName}
+                  onChange={event=>update(line.key,{productName:event.target.value})}/>}</Field>}
             {line.type==='PRODUCT'&&<><Field label="Cantidad" required><Input type="number" min="0.001"
               step="0.001" required value={line.quantity} onChange={event=>update(line.key,{quantity:event.target.value})}/></Field>
               <Field label="Unidad" required><Input required maxLength={40} value={line.unit}
@@ -160,6 +197,15 @@ export function V2CommercePage({kind}:{kind:'SALE'|'PURCHASE'}){
           (Number(line.unitPrice)||0),0))}</strong>
         <Field label="Observaciones"><Textarea name="notes" maxLength={3000} rows={3}/></Field>
       </form></Modal>}
+    {newCatalog&&<Modal title={newCatalog==='BUYERS'?'Agregar comprador':'Agregar producto de venta'}
+      onClose={()=>setNewCatalog(null)} footer={<><Button variant="ghost"
+        onClick={()=>setNewCatalog(null)}>Cancelar</Button><Button type="button" loading={busy}
+        onClick={()=>void addCatalog()}>Agregar a mi cuenta</Button></>}>
+      {error&&<div className="form-error" role="alert">{error}</div>}
+      <Field label="Nombre" required><Input autoFocus minLength={2} maxLength={160} required
+        value={newName} onChange={event=>setNewName(event.target.value)}/></Field>
+      <p className="muted">Estará disponible en todas las propiedades de tu cuenta.</p>
+    </Modal>}
     {canManage&&<FloatingActionDock><IconButton label={`Nueva ${kind==='SALE'?'venta':'compra'}`}
       onClick={start}><Plus size={23}/></IconButton></FloatingActionDock>}
   </div>;

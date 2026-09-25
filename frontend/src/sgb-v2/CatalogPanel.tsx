@@ -13,10 +13,15 @@ const catalogs: Array<{ code: EditableCatalogCode; name: string }> = [
   { code: 'AGROCHEMICAL_CATEGORIES', name: 'Categorías de productos' },
   { code: 'MEDIA_TAGS', name: 'Etiquetas multimedia' },
   { code: 'MOVEMENT_REASONS', name: 'Motivos de movimiento' },
+  { code: 'BUYERS', name: 'Compradores' },
+  { code: 'SALE_PRODUCTS', name: 'Productos de venta' },
 ];
 const classificationCodes=['VACA','VACONA','TERNERA','TORO','TORETE','TERNERO'] as const;
 
-export function CatalogPanel({ accessToken, canManage }: { accessToken: string; canManage: boolean }) {
+export function CatalogPanel({ accessToken, canManage, commerceEnabled = false }: {
+  accessToken: string; canManage: boolean; commerceEnabled?:boolean }) {
+  const availableCatalogs=catalogs.filter(({code})=>commerceEnabled||
+    (code!=='BUYERS'&&code!=='SALE_PRODUCTS'));
   const [reference, setReference] = useState<CatalogReference | null>(null);
   const [items, setItems] = useState<Partial<Record<EditableCatalogCode, CatalogItem[]>>>({});
   const [busy, setBusy] = useState(false);
@@ -26,13 +31,13 @@ export function CatalogPanel({ accessToken, canManage }: { accessToken: string; 
   useEffect(() => {
     let active = true;
     void Promise.all([getCatalogReference(accessToken),
-      ...catalogs.map(({code}) => listCatalogItems(accessToken, code))])
+      ...availableCatalogs.map(({code}) => listCatalogItems(accessToken, code))])
       .then(([data, ...lists]) => {
         if (active) { setReference(data as CatalogReference); setItems(Object.fromEntries(
-          catalogs.map(({code},index)=>[code, lists[index]])) as Record<EditableCatalogCode,CatalogItem[]>); }
+          availableCatalogs.map(({code},index)=>[code, lists[index]])) as Record<EditableCatalogCode,CatalogItem[]>); }
       }).catch((failure) => { if (active) setError(message(failure)); });
     return () => { active = false; };
-  }, [accessToken]);
+  }, [accessToken,commerceEnabled]);
   useEffect(()=>{let active=true;void getAnimalClassificationPolicy(accessToken)
     .then(value=>{if(active)setClassification(value);})
     .catch(failure=>{if(active)setError(message(failure));});
@@ -97,13 +102,15 @@ export function CatalogPanel({ accessToken, canManage }: { accessToken: string; 
           </form><small>Sin fecha de nacimiento, hembras y machos sin descendencia se consideran adultos.</small>
         </div>
       </details>}
-      <div className="catalog-grid">{catalogs.map(({ code, name }) => <details className="team-block catalog-section" key={code}>
+      <div className="catalog-grid">{availableCatalogs.map(({ code, name }) => <details className="team-block catalog-section" key={code}>
         <summary><strong>{name}</strong><small>{(items[code]??[]).length} opciones</small></summary>
         <div className="catalog-content">
-          {canManage && reference.species.some((species) => species.code === 'BOVINE') &&
+          {canManage && (code==='BUYERS'||code==='SALE_PRODUCTS'||
+            reference.species.some((species) => species.code === 'BOVINE')) &&
             <form className="catalog-create" onSubmit={(event) => void create(event, code)}>
               <label><span>Nueva opción</span><input name="name" minLength={2} maxLength={160}
-                placeholder={`Ej. ${code === 'BREEDS' ? 'Charolais' : 'Colorado'}`} disabled={busy} required /></label>
+                placeholder={`Ej. ${code==='BREEDS'?'Charolais':code==='BUYERS'?'Cooperativa local':
+                  code==='SALE_PRODUCTS'?'Leche':'Colorado'}`} disabled={busy} required /></label>
               <button type="submit" className="primary-button compact" disabled={busy}>Agregar</button>
             </form>}
           {(items[code]??[]).length === 0 && <p className="muted">Aún no hay opciones registradas.</p>}

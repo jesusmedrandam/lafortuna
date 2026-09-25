@@ -52,7 +52,7 @@ export interface PropertySettings {
 
 export type EditableCatalogCode = 'BREEDS' | 'COLORS' | 'GRASS_TYPES' |
   'HEALTH_CONDITION_TYPES' | 'AGROCHEMICAL_CATEGORIES' | 'MEDIA_TAGS' |
-  'MOVEMENT_REASONS' | 'TREATMENT_TYPES';
+  'MOVEMENT_REASONS' | 'TREATMENT_TYPES' | 'BUYERS' | 'SALE_PRODUCTS';
 export interface CatalogItem {
   id: string;
   catalogCode: EditableCatalogCode;
@@ -427,16 +427,17 @@ export interface AnimalStatusEvent {
   reason:string|null;exitReasonCode:string|null;occurredAt:string;createdAt:string;
   registeredBy:string;
 }
-export interface CommerceLine {id:string;animalId:string|null;animalName:string|null;
+export interface CommerceLine {id:string;animalId:string|null;animalName:string|null;productId:string|null;
   productName:string|null;quantity:number;unit:string;unitPrice:number;
   animalEffect:string|null}
-export interface CommerceRecord {id:string;kind:'SALE'|'PURCHASE';tradedOn:string;
+export interface CommerceRecord {id:string;kind:'SALE'|'PURCHASE';tradedOn:string;buyerId:string|null;
   counterpartyName:string;counterpartyContact:string|null;destination:string|null;
   currency:'USD';notes:string|null;total:number;status:'ACTIVE'|'CANCELLED';
   cancellationReason:string|null;createdAt:string;registeredBy:string;lines:CommerceLine[]}
-export interface CommerceInput {kind:'SALE'|'PURCHASE';tradedOn:string;counterpartyName:string;
+export interface CommerceInput {kind:'SALE'|'PURCHASE';tradedOn:string;buyerId?:string;
+  counterpartyName?:string;
   counterpartyContact:string|null;destination:string|null;notes:string|null;
-  lines:Array<{animalId?:string;productName?:string;quantity:number;unit:string;
+  lines:Array<{animalId?:string;productId?:string;productName?:string;quantity:number;unit:string;
     unitPrice:number;animalEffect?:'KEEP_CURRENT_PROPERTY'|'EXIT_CURRENT_PROPERTY'}>}
 export function getCommerce(token:string){return request<CommerceRecord[]>('/commerce',
   {headers:bearer(token)});}
@@ -716,7 +717,8 @@ export function listCatalogItems(accessToken: string, code: EditableCatalogCode)
 
 export function createCatalogItem(accessToken: string, code: EditableCatalogCode, name: string) {
   return request<CatalogItem>(`/catalogs/${code}/items`, {
-    method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name, speciesCode: 'BOVINE' }),
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name,
+      speciesCode:code==='BUYERS'||code==='SALE_PRODUCTS'?null:'BOVINE' }),
   });
 }
 

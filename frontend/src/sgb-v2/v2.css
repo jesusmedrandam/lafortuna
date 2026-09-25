@@ -30,6 +30,42 @@
 .sgb-v2-animal-detail .animal-compact-info-grid>div>span { display:grid;gap:3px;min-width:0; }
 .sgb-v2-animal-detail .animal-compact-info-grid small { color:var(--muted); }
 .sgb-v2-animal-detail .animal-compact-info-grid strong { overflow-wrap:anywhere; }
+.sgb-v2-animal-detail .animal-profile-action-strip { flex-wrap:nowrap;overflow-x:auto;
+  overscroll-behavior-x:contain;scrollbar-width:none;gap:10px;padding:8px 2px 14px;
+  margin-bottom:8px; }
+.sgb-v2-animal-detail .animal-profile-action-strip::-webkit-scrollbar { display:none; }
+.sgb-v2-animal-detail .animal-profile-action-strip .icon-button { flex:0 0 47px;width:47px;
+  height:47px;margin:0;border:1px solid var(--border);border-radius:11px;color:#2356ba;
+  background:var(--surface);box-shadow:0 1px 3px #0001; }
+.sgb-v2-animal-detail .animal-profile-action-strip .icon-button:hover { color:var(--primary);
+  background:var(--surface-alt);border-color:var(--primary); }
+.v2-animal-history { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));
+  gap:14px;margin-top:16px; }
+.v2-animal-history-card { min-width:0;padding:15px 18px; }
+.v2-animal-history-title { display:flex;justify-content:space-between;align-items:center;gap:12px;
+  margin-bottom:10px; }
+.v2-animal-history-title h2 { margin:0;font-size:1rem; }
+.v2-animal-history-title h2 span { color:var(--muted);font-size:.78rem; }
+.v2-animal-history-title button { display:flex;align-items:center;white-space:nowrap;gap:3px;
+  border:0;color:var(--primary);background:transparent;font-size:.78rem;font-weight:800;cursor:pointer; }
+.v2-animal-history-card>.muted { margin:4px 0;font-size:.82rem; }
+.v2-animal-history-row { display:flex;justify-content:space-between;gap:12px;
+  border-top:1px solid var(--border);padding:10px 0;font-size:.82rem; }
+.v2-animal-history-row strong { min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.v2-animal-history-row time { flex:0 0 auto;color:var(--muted); }
+.v2-animal-sheet-backdrop { position:fixed;inset:0;z-index:120;display:flex;align-items:flex-end;
+  justify-content:center;background:rgba(0,0,0,.55); }
+.v2-animal-sheet { width:min(100%,520px);padding:18px 18px max(22px,env(safe-area-inset-bottom));
+  border-radius:22px 22px 0 0;background:var(--surface);box-shadow:0 -12px 35px #0003; }
+.v2-animal-sheet header { display:flex;align-items:center;justify-content:space-between;
+  padding:0 0 12px;border-bottom:1px solid var(--border); }
+.v2-animal-sheet h2 { margin:0;font-size:1.1rem; }
+.v2-animal-sheet>button { display:flex;align-items:center;justify-content:space-between;
+  width:100%;padding:15px 6px;border:0;border-bottom:1px solid var(--border);
+  background:transparent;color:var(--text);text-align:left;font-weight:700;cursor:pointer; }
+.v2-animal-sheet>button:last-child { border-bottom:0; }
+.v2-catalog-add { width:fit-content;margin-top:5px;padding:3px 0;border:0;
+  background:transparent;color:var(--primary);font-size:.77rem;font-weight:800;cursor:pointer; }
 .v2-animal-gallery { margin:18px 0; }
 .v2-animal-gallery h2 { font-size:1.08rem; }
 .v2-animal-gallery>div { display:grid;grid-template-columns:repeat(auto-fill,minmax(115px,1fr));gap:9px; }
