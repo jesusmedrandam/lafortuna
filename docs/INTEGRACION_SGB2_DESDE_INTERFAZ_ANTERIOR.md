@@ -37,7 +37,8 @@ versionados; no se pegan migraciones manualmente. Montes es el entorno de prueba
 autorizado para esta integración todavía parcial; comprobar allí el inicio de
 sesión y las operaciones habilitadas con una cuenta de prueba. El sitio anterior
 `medranda.onrender.com` sigue en `main`. En Render, `appsgb.onrender.com`
-continúa desplegándose desde `SGB/foundation/sgb-v2`.
+se despliega desde `SGB/feature/sgb-v2-pesajes`, que contiene las rutas de
+Auditoría y Pesajes y aplicó automáticamente la migración `0025`.
 
 ## Estado de integración
 
@@ -48,11 +49,12 @@ continúa desplegándose desde `SGB/foundation/sgb-v2`.
 | Animales | Listado, filtros y vista de ficha con el diseño anterior; edición y creación mediante el panel de SGB 2 |
 | Grupos, potreros, corrales | Listas, búsqueda, filtros, detalles y formularios separados con la presentación anterior; datos de la API nueva |
 | Movimientos | Listado, búsqueda, filtros de orden y acceso a detalles con el diseño anterior; las asignaciones de ubicación se gestionan solo aquí |
-| Pesajes | Pantalla, filtros, ficha, registro y anulación integrados; requieren la migración y API de la rama `feature/sgb-v2-pesajes` del repositorio `SGB` |
-| Auditoría | Tabla, filtros, paginación y detalles con el diseño anterior; requiere la ruta `/audit` en la rama `feature/sgb-v2-pesajes` de `SGB` |
+| Pesajes | Pantalla, filtros, ficha, registro y anulación integrados; API y migración desplegadas, pendiente prueba con módulo habilitado |
+| Auditoría | Tabla, filtros, paginación y detalles con el diseño anterior; ruta `/audit` desplegada, pendiente prueba autenticada |
 | Reproducción | Lista, filtros, detalle y formularios separados con la presentación anterior y la API nueva |
 | Producción | Pestañas, resumen diario, lactancias, búsqueda, detalles y formularios separados con la presentación anterior y la API nueva |
-| Sanidad, limpiezas | Conectados a los paneles y API nueva; resta adaptar sus vistas originales |
+| Sanidad | Conectada a la API nueva; conserva el listado compacto y los detalles separados, quedan ajustes visuales |
+| Limpiezas | Lista y filtros con el diseño anterior, detalle y edición separados; fotografías conectadas a la API nueva |
 | Actividades | Lista, filtros, detalle, edición separada y fotografías con la presentación anterior y la API nueva |
 | Multimedia, catálogos, equipo, configuración, superadministración | Conectados a los paneles y API nueva |
 | Historial y acciones adicionales de la ficha antigua | Pendientes de trasladar al modelo nuevo |

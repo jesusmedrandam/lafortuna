@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react';
-import {ApiRequestError,deleteMedia,getMedia,uploadMedia,type MediaItem} from './api';
+import {ApiRequestError,deleteMediaObject,getMedia,uploadMedia,type MediaItem} from './api';
 
 export function RecordMedia({accessToken,entityType,entityId,canManage}:{accessToken:string;
   entityType:string;entityId:string;canManage:boolean}){
@@ -23,7 +23,8 @@ export function RecordMedia({accessToken,entityType,entityId,canManage}:{accessT
       <a href={photo.url} target="_blank" rel="noreferrer"><img src={photo.thumbnailUrl??photo.url}
         alt="Foto de la limpieza" loading="lazy"/></a>
       {canManage&&<button type="button" className="secondary-button compact" disabled={busy}
-        onClick={()=>{if(window.confirm('¿Eliminar esta foto?'))void execute(()=>deleteMedia(accessToken,photo.id));}}>
+        onClick={()=>{if(window.confirm('¿Eliminar esta foto del almacenamiento?'))
+          void execute(()=>deleteMediaObject(accessToken,photo.storage_object_id));}}>
         Eliminar</button>}</div>)}</div>}
     {canManage&&photos.length<3&&<div className="record-photo-add">
       <input type="file" accept="image/jpeg,image/png,image/webp,image/heic" aria-label="Foto de la limpieza"

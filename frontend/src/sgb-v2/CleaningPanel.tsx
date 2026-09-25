@@ -1,4 +1,8 @@
-import {type FormEvent,useEffect,useState} from 'react';
+import {type FormEvent,useEffect,useMemo,useState} from 'react';
+import {ArrowUpDown,ChevronRight,Edit3,MapPin,Plus,Sprout} from 'lucide-react';
+import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
+  IconButton,LoadingState,Modal} from '../components/ui';
+import {formatDate} from '../utils';
 import {ApiRequestError,applyCleaning,cancelCleaning,createCleaning,createCleaningProduct,
   getCleaningOptions,getCleaningProducts,getCleanings,listCatalogItems,updateCleaning,
   type CatalogItem,type CleaningInput,type CleaningOptions,type CleaningProduct,type CleaningRecord} from './api';
@@ -22,6 +26,10 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
   const [showForm,setShowForm]=useState(false);
   const [showProduct,setShowProduct]=useState(false);
   const [editing,setEditing]=useState<CleaningRecord|null>(null);
+  const [selectedId,setSelectedId]=useState<string|null>(null);
+  const [search,setSearch]=useState('');
+  const [activityFilter,setActivityFilter]=useState<CleaningInput['activities'][number]|''>('');
+  const [newest,setNewest]=useState(true);
   const [locationId,setLocationId]=useState('');
   const [areaType,setAreaType]=useState<CleaningInput['areaType']>('TOTAL');
   const [activities,setActivities]=useState<CleaningInput['activities']>([]);
@@ -37,7 +45,7 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
   },[accessToken,revision]);
   function reset(){setEditing(null);setShowForm(false);setLocationId('');setAreaType('TOTAL');
     setActivities([]);setApplicationCount('');setApplicationUnit('TANQUES');setLines([]);setOperators([]);}
-  function edit(item:CleaningRecord){setEditing(item);setShowForm(true);setLocationId(item.locationId);
+  function edit(item:CleaningRecord){setSelectedId(null);setEditing(item);setShowForm(true);setLocationId(item.locationId);
     setAreaType(item.areaType);setActivities(item.activities);setApplicationUnit(item.applicationUnit??'TANQUES');
     setApplicationCount(item.applicationCount==null?'':String(item.applicationCount));
     setLines(item.products.map(({productId,unitCode,quantityPerApplication,notes})=>({
@@ -67,17 +75,30 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
       :createCleaning(accessToken,input),reset);
   }
   const location=options?.locations.find((item)=>item.id===locationId);
-  return <section className="section-block cleanings-panel">
-    <div className="section-heading"><div><span className="eyebrow">Potreros</span><h2>Limpieza de potreros</h2>
-      <p className="muted">Labores, operadores y consumo total calculado por tanque o bombada.</p></div>
-      {canManage&&<div className="movement-actions"><button className="secondary-button compact" type="button"
-        onClick={()=>setShowProduct((value)=>!value)}>+ Producto</button>
-        <button className="primary-button compact" type="button" onClick={()=>showForm?reset():setShowForm(true)}>
-          {showForm?'Cerrar':'+ Limpieza'}</button></div>}
+  const visible=useMemo(()=>records?.filter(item=>(!activityFilter||item.activities.includes(activityFilter))&&
+    [item.locationName,item.notes??'',...item.activities.map(activity=>labels[activity]),
+      ...item.products.map(product=>product.productName)].join(' ').toLocaleLowerCase()
+      .includes(search.trim().toLocaleLowerCase()))
+    .sort((a,b)=>(newest?-1:1)*(a.startedOn.localeCompare(b.startedOn)||
+      a.createdAt.localeCompare(b.createdAt)))??[],[records,activityFilter,search,newest]);
+  const viewing=records?.find(item=>item.id===selectedId);
+  return <section className="module-no-header cleanings-panel">
+    <div className="activity-type-strip" aria-label="Filtrar tipo de labor">
+      <button type="button" className={!activityFilter?'selected':''} onClick={()=>setActivityFilter('')}>
+        <span><Sprout size={20}/></span><small>Todas</small></button>
+      {(Object.keys(labels) as CleaningInput['activities'][number][]).map(code=><button type="button"
+        key={code} className={activityFilter===code?'selected':''} onClick={()=>setActivityFilter(code)}>
+        <span>{labels[code].slice(0,1)}</span><small>{labels[code]}</small></button>)}
     </div>
+    <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar potrero, labor o producto…"
+      count={visible.length} actions={<><IconButton label={newest?'Más recientes':'Más antiguos'}
+        onClick={()=>setNewest(value=>!value)}><ArrowUpDown size={18}/></IconButton>
+        {canManage&&<IconButton label="Nuevo producto" onClick={()=>setShowProduct(true)}>
+          <Plus size={18}/><Sprout size={15}/></IconButton>}</>}/>
     {error&&<div role="alert" className="form-error admin-error">{error}</div>}
-    {canManage&&showProduct&&<form className="movement-form" onSubmit={saveProduct}>
-      <h3>Nuevo producto compartido en la cuenta</h3>
+    {canManage&&showProduct&&<Modal title="Nuevo producto compartido en la cuenta" wide
+      onClose={()=>setShowProduct(false)} footer={<Button variant="ghost"
+        onClick={()=>setShowProduct(false)}>Cerrar</Button>}><form className="movement-form" onSubmit={saveProduct}>
       <label><span>Nombre *</span><input name="name" required minLength={2} maxLength={160}/></label>
       <label><span>Categoría *</span><select name="category" required><option value="">Selecciona</option>
         {categories.filter(item=>item.active).map(item=><option key={item.id} value={item.name}>{item.name}</option>)}
@@ -85,9 +106,10 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
       <label><span>Principio activo</span><textarea name="activeIngredient" maxLength={2000}/></label>
       <label><span>Formulado por</span><input name="formulatedBy" maxLength={200}/></label>
       <label className="movement-wide"><span>Descripción</span><textarea name="description" maxLength={2000}/></label>
-      <button className="primary-button compact" disabled={busy}>Guardar producto</button></form>}
-    {canManage&&showForm&&options&&<form className="movement-form" onSubmit={save}
-      key={editing?.id??'new'}><h3>{editing?'Editar borrador':'Nueva limpieza'}</h3>
+      <button className="primary-button compact" disabled={busy}>Guardar producto</button></form></Modal>}
+    {canManage&&showForm&&options&&<Modal title={editing?'Editar borrador':'Nueva limpieza'} wide
+      onClose={reset} footer={<Button variant="ghost" onClick={reset}>Cerrar</Button>}>
+      <form className="movement-form" onSubmit={save} key={editing?.id??'new'}>
       <label><span>Potrero *</span><select required value={locationId}
         onChange={(event)=>setLocationId(event.target.value)}><option value="">Selecciona</option>
         {options.locations.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -152,34 +174,51 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
       <button className="primary-button compact" disabled={busy||!activities.length||!locationId
         ||activities.includes('FUMIGACION')&&lines.length>0&&!applicationCount}>
         {editing?'Guardar borrador':'Crear borrador'}</button>
-    </form>}
-    <div className="movement-list"><h3>Labores registradas</h3>
-      {!records&&!error&&<p className="muted">Cargando limpiezas…</p>}
-      {records?.length===0&&<p className="muted">Aún no hay limpiezas registradas.</p>}
-      {records?.map((item)=><article className="movement-card" key={item.id}>
-        <div className="movement-card-top"><div><strong>{item.locationName}</strong>
-          <small>{item.startedOn}{item.finishedOn?` → ${item.finishedOn}`:''} · {item.activities
-            .map((activity)=>labels[activity]).join(', ')}</small></div>
-          <span className={`movement-status status-${item.status.toLowerCase()}`}>
-            {item.status==='BORRADOR'?'Borrador':item.status==='COMPLETADO'?'Completado':'Cancelado'}</span></div>
-        <p>Área {item.areaType==='TOTAL'?'total':`${item.partialPercent}%`} · {item.areaValue??'Sin área'}
-          {item.areaUnitCode?` ${item.areaUnitCode}`:''}
-          {item.applicationCount!=null?` · ${item.applicationCount} ${item.applicationUnit==='TANQUES'?'tanques':'bombadas'}`:''}</p>
-        <details className="record-detail"><summary>Ver limpieza completa</summary>
-          {item.notes&&<p>{item.notes}</p>}
-          {item.products.map((product)=><span className="movement-animal-name" key={product.productId}>
-            {product.productName}: {product.totalQuantity} {product.unitCode} en total</span>)}
-          {item.operators.map((operator)=><span className="movement-animal-name" key={operator.name}>
-            {operator.name}{operator.function?` · ${operator.function}`:''}</span>)}
-          {canViewMedia&&<RecordMedia accessToken={accessToken} entityType="CLEANING" entityId={item.id}
-            canManage={canManageMedia}/>}
-        {canManage&&item.status==='BORRADOR'&&<div className="movement-actions">
-          <button type="button" className="secondary-button compact" disabled={busy}
-            onClick={()=>edit(item)}>Editar</button>
-          <button type="button" className="primary-button compact" disabled={busy}
-            onClick={()=>void run(()=>applyCleaning(accessToken,item.id))}>Completar</button>
-          <button type="button" className="secondary-button compact" disabled={busy}
-            onClick={()=>void run(()=>cancelCleaning(accessToken,item.id))}>Cancelar</button></div>}</details>
-      </article>)}</div>
+    </form></Modal>}
+    {records===null&&!error?<LoadingState/>:records===null?<ErrorState
+      message={error??'No se pudieron cargar las limpiezas.'}
+      onRetry={()=>setRevision(value=>value+1)}/>:visible.length?<Card className="cleaning-list">
+      <div className="cleaning-list-head"><span>Potrero</span><span>Inicio</span><span>Actividades</span>
+        <span>Área</span><span>Estado</span><span/></div>
+      {visible.map(item=><button type="button" className="cleaning-list-row" key={item.id}
+        onClick={()=>setSelectedId(item.id)}><span className="cleaning-identity"><span><MapPin size={19}/></span>
+          <span><strong>{item.locationName}</strong><small>{item.notes||'Sin observaciones'}</small></span></span>
+        <span>{formatDate(item.startedOn)}</span><span>{item.activities.map(activity=>labels[activity]).join(', ')}</span>
+        <span>{item.areaType==='TOTAL'?'Total':`${item.partialPercent}%`}</span>
+        <span><Badge tone={item.status==='COMPLETADO'?'success':item.status==='BORRADOR'?'warning':'danger'}>
+          {item.status==='BORRADOR'?'Borrador':item.status==='COMPLETADO'?'Completado':'Cancelado'}</Badge></span>
+        <ChevronRight size={18}/></button>)}</Card>:<EmptyState icon={Sprout} title="Sin limpiezas"
+        description={records.length?'Prueba otra búsqueda o filtro.':'Registra la primera labor en un potrero.'}/>}
+    {viewing&&<Modal title="Detalle de la limpieza" wide onClose={()=>setSelectedId(null)}
+      footer={<><Button variant="ghost" onClick={()=>setSelectedId(null)}>Cerrar</Button>
+        {canManage&&viewing.status==='BORRADOR'&&<><Button variant="secondary"
+          onClick={()=>edit(viewing)}><Edit3 size={16}/>Editar</Button>
+          <Button disabled={busy} onClick={()=>void run(()=>applyCleaning(accessToken,viewing.id),
+            ()=>setSelectedId(null))}>Completar</Button>
+          <Button variant="ghost" disabled={busy} onClick={()=>void run(()=>cancelCleaning(accessToken,viewing.id),
+            ()=>setSelectedId(null))}>Cancelar limpieza</Button></>}</>}>
+      <div className="cleaning-detail"><div className="cleaning-detail-heading">
+        <span className="record-icon"><MapPin size={22}/></span><div><h2>{viewing.locationName}</h2>
+          <p>{formatDate(viewing.startedOn)}{viewing.finishedOn?` – ${formatDate(viewing.finishedOn)}`:''}</p></div>
+        <Badge tone={viewing.status==='COMPLETADO'?'success':viewing.status==='BORRADOR'?'warning':'danger'}>
+          {viewing.status==='BORRADOR'?'Borrador':viewing.status==='COMPLETADO'?'Completado':'Cancelado'}</Badge></div>
+        <div className="cleaning-detail-grid"><div><small>Actividades</small><strong>{viewing.activities
+          .map(activity=>labels[activity]).join(', ')}</strong></div><div><small>Área intervenida</small>
+          <strong>{viewing.areaType==='TOTAL'?'Total':`${viewing.partialPercent}%`}
+            {viewing.areaValue!=null?` · ${viewing.areaValue} ${viewing.areaUnitCode??''}`:''}</strong></div>
+          {viewing.applicationCount!=null&&<div><small>Aplicaciones</small><strong>
+            {viewing.applicationCount} {viewing.applicationUnit==='TANQUES'?'tanques':'bombadas'}</strong></div>}</div>
+        {viewing.products.length>0&&<section><h3>Productos aplicados</h3><div className="cleaning-detail-lines">
+          {viewing.products.map(product=><div key={product.productId}><strong>{product.productName}</strong>
+            <small>{product.totalQuantity} {product.unitCode} en total</small></div>)}</div></section>}
+        {viewing.operators.length>0&&<section><h3>Operadores</h3><div className="cleaning-detail-lines">
+          {viewing.operators.map((operator,index)=><div key={`${operator.name}-${index}`}>
+            <strong>{operator.name}</strong><small>{operator.function||'Sin función indicada'}</small></div>)}</div></section>}
+        {viewing.notes&&<section><h3>Observaciones</h3><p>{viewing.notes}</p></section>}
+        {canViewMedia&&<section><h3>Fotografías</h3><RecordMedia accessToken={accessToken}
+          entityType="CLEANING" entityId={viewing.id} canManage={canManageMedia}/></section>}
+      </div></Modal>}
+    {canManage&&<FloatingActionDock><IconButton label="Nueva limpieza" onClick={()=>{
+      reset();setShowForm(true);}}><Plus size={22}/></IconButton></FloatingActionDock>}
   </section>;
 }
