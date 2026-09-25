@@ -44,13 +44,17 @@ export function HealthPanel({accessToken,canManage,initialAnimalId}:{accessToken
   const [doses,setDoses]=useState<Record<string,string>>({});
   const [conditionIds,setConditionIds]=useState<Record<string,string>>({});
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
-  useEffect(()=>{if(!initialAnimalId||initialAnimalId===prefilledAnimalId||
-    !options?.animals.some(item=>item.id===initialAnimalId)||!canManage)return;
-    if(new URLSearchParams(window.location.search).get('accion')==='TRATAMIENTO'){
+  useEffect(()=>{const requested=new URLSearchParams(window.location.search).get('accion');
+    if(!['CONDICION','TRATAMIENTO'].includes(requested??'')||
+      !initialAnimalId||initialAnimalId===prefilledAnimalId||
+      !options?.animals.some(item=>item.id===initialAnimalId)||!canManage)return;
+    if(requested==='TRATAMIENTO'){
       setTab('treatments');setMode('MANUAL');setSelected([initialAnimalId]);setShowCampaign(true);
     }else{setTab('conditions');setShowCondition(true);}
     setPrefilledAnimalId(initialAnimalId);
   },[initialAnimalId,prefilledAnimalId,options?.animals,canManage]);
+  useEffect(()=>{if(new URLSearchParams(window.location.search).get('vista')==='tratamientos')
+    setTab('treatments');},[initialAnimalId]);
 
   useEffect(()=>{let active=true;
     void Promise.allSettled([getHealthMedicines(accessToken),getHealthOptions(accessToken),
@@ -83,16 +87,20 @@ export function HealthPanel({accessToken,canManage,initialAnimalId}:{accessToken
       order==='AZ'||order==='ZA'?(order==='AZ'?1:-1)*name(a).localeCompare(name(b),'es'):
         (order==='NEWEST'?-1:1)*date(a).localeCompare(date(b)));
     return {
-      conditions:sorted(conditions.filter(item=>[item.animalName,item.kind,item.description,item.status]
+      conditions:sorted(conditions.filter(item=>(!initialAnimalId||item.animalId===initialAnimalId)&&
+        [item.animalName,item.kind,item.description,item.status]
         .join(' ').toLocaleLowerCase().includes(term)),item=>item.detectedOn,item=>item.animalName),
-      treatments:sorted(relatedTreatments.filter(({record,animal})=>[animal.name,record.medicineName,
+      treatments:sorted(relatedTreatments.filter(({record,animal})=>(!initialAnimalId||
+        animal.animalId===initialAnimalId)&&[animal.name,record.medicineName,
         record.responsible,record.groupName,record.kind].join(' ').toLocaleLowerCase().includes(term)),
         item=>item.record.appliedOn,item=>item.animal.name),
-      campaigns:sorted((campaigns??[]).filter(item=>[item.medicineName,item.responsible,item.groupName,
+      campaigns:sorted((campaigns??[]).filter(item=>(!initialAnimalId||item.animals.some(
+        animal=>animal.animalId===initialAnimalId&&animal.selected))&&
+        [item.medicineName,item.responsible,item.groupName,
         item.kind,...item.animals.map(animal=>animal.name)].join(' ').toLocaleLowerCase().includes(term)),
         item=>item.appliedOn,item=>item.medicineName),
     };
-  },[campaigns,conditions,relatedTreatments,search,order]);
+  },[campaigns,conditions,relatedTreatments,search,order,initialAnimalId]);
   const selectedCondition=conditions.find(item=>item.id===selectedConditionId);
   const selectedCampaign=campaigns?.find(item=>item.id===selectedCampaignId);
   const treatmentRecord=campaigns?.find(item=>item.id===selectedTreatment?.campaignId);

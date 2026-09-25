@@ -42,9 +42,13 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
   const [newest,setNewest]=useState(true);
   const females = candidates.filter((animal) => animal.sex === 'FEMALE');
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
-  useEffect(()=>{if(!initialAnimalId||initialAnimalId===prefilledAnimalId||!canManage||
+  useEffect(()=>{const action=new URLSearchParams(window.location.search).get('accion');
+    const form=({CELO:'HEAT',SERVICIO:'SERVICE',PRENEZ:'PREGNANCY',PARTO:'BIRTH',
+      PERDIDA:'LOSS'} as const)[action as 'CELO'];
+    if(!form||
+    !initialAnimalId||initialAnimalId===prefilledAnimalId||!canManage||
     !candidates.some(animal=>animal.id===initialAnimalId&&animal.sex==='FEMALE'))return;
-    setCowId(initialAnimalId);setActiveForm('HEAT');setPrefilledAnimalId(initialAnimalId);
+    setCowId(initialAnimalId);setActiveForm(form);setPrefilledAnimalId(initialAnimalId);
   },[initialAnimalId,prefilledAnimalId,candidates,canManage]);
   const males = candidates.filter((animal) => animal.sex === 'MALE');
   const confirmed = records?.pregnancies.filter((pregnancy) => pregnancy.status === 'CONFIRMED') ?? [];
@@ -67,9 +71,21 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
     ...records.losses.map(item=>({id:item.id,kind:'LOSS' as const,name:item.cowName,
       date:item.occurredOn,summary:'Pérdida de preñez',notes:item.notes,status:'Registrado',canCancel:false})),
   ]:[],[records]);
-  const visible=useMemo(()=>rows.filter(item=>(!selectedCategory||selectedCategory===item.kind)&&
+  const relatedIds=useMemo(()=>new Set(initialAnimalId&&records?[
+    ...records.heats.filter(item=>item.cowId===initialAnimalId).map(item=>item.id),
+    ...records.services.filter(item=>item.cowId===initialAnimalId||item.fatherId===initialAnimalId||
+      item.donorId===initialAnimalId).map(item=>item.id),
+    ...records.pregnancies.filter(item=>item.cowId===initialAnimalId||item.fatherId===initialAnimalId)
+      .map(item=>item.id),
+    ...records.births.filter(item=>item.motherId===initialAnimalId||
+      item.calves.some(calf=>calf.id===initialAnimalId)).map(item=>item.id),
+    ...records.losses.filter(item=>item.cowId===initialAnimalId).map(item=>item.id),
+  ]:[]),[records,initialAnimalId]);
+  const visible=useMemo(()=>rows.filter(item=>(!initialAnimalId||relatedIds.has(item.id))&&
+    (!selectedCategory||selectedCategory===item.kind)&&
     `${item.name} ${item.summary} ${item.notes??''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
-    .sort((a,b)=>(newest?-1:1)*a.date.localeCompare(b.date)),[rows,selectedCategory,search,newest]);
+    .sort((a,b)=>(newest?-1:1)*a.date.localeCompare(b.date)),
+    [rows,selectedCategory,search,newest,initialAnimalId,relatedIds]);
   const viewing=rows.find(item=>`${item.kind}:${item.id}`===selectedRecord);
 
   useEffect(() => {
@@ -292,7 +308,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
 
       <form className="group-new-form" onSubmit={reproductiveService} hidden={activeForm!=='SERVICE'}>
         <h3>Inseminación o transferencia</h3>
-        <label><span>Receptora *</span><select name="cowId" required defaultValue="">
+        <label><span>Receptora *</span><select name="cowId" required defaultValue={initialAnimalId??''}>
           <option value="" disabled>Selecciona la vaca</option>
           {females.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
         </select></label>
@@ -326,7 +342,8 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
 
       <form className="group-new-form" onSubmit={birth} hidden={activeForm!=='BIRTH'}>
         <h3>Registrar parto</h3>
-        <label><span>Preñez confirmada *</span><select name="pregnancyId" required defaultValue="">
+        <label><span>Preñez confirmada *</span><select name="pregnancyId" required
+          defaultValue={confirmed.find(item=>item.cowId===initialAnimalId)?.id??''}>
           <option value="" disabled>Selecciona una preñez</option>
           {confirmed.map((item) => <option key={item.id} value={item.id}>
             {item.cowName} · {item.confirmedOn}</option>)}
@@ -352,7 +369,8 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
 
       <form className="group-new-form" onSubmit={loss} hidden={activeForm!=='LOSS'}>
         <h3>Registrar pérdida de preñez</h3>
-        <label><span>Preñez confirmada *</span><select name="pregnancyId" required defaultValue="">
+        <label><span>Preñez confirmada *</span><select name="pregnancyId" required
+          defaultValue={confirmed.find(item=>item.cowId===initialAnimalId)?.id??''}>
           <option value="" disabled>Selecciona una preñez</option>
           {confirmed.map((item) => <option key={item.id} value={item.id}>
             {item.cowName} · {item.confirmedOn}</option>)}

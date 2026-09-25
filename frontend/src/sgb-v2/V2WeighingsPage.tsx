@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState,type FormEvent} from 'react';
+import {useEffect,useMemo,useRef,useState,type FormEvent} from 'react';
 import {ArrowUpDown,ChevronRight,Edit3,Plus,Weight} from 'lucide-react';
 import {useNavigate,useSearchParams} from 'react-router-dom';
 import {Badge,Button,Card,CompactToolbar,ConfirmDialog,EmptyState,ErrorState,Field,
@@ -27,6 +27,11 @@ export function V2WeighingsPage(){
   const [voiding,setVoiding]=useState<string|null>(null);
   const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [revision,setRevision]=useState(0);
   const canManage=hasPermission('WEIGHING_MANAGE');
+  const openedFromProfile=useRef<string|null>(null);
+  useEffect(()=>{if(!canManage||!animalId||params.get('accion')!=='NUEVO'||
+    openedFromProfile.current===animalId||!animals.some(item=>item.id===animalId))return;
+    openedFromProfile.current=animalId;setEditing(null);
+  },[animalId,animals,canManage,params]);
   useEffect(()=>{let active=true;setError('');
     void getWeighings(token,animalId).then(items=>{if(active)setRecords(items);})
       .catch(reason=>{if(active)setError(message(reason));});

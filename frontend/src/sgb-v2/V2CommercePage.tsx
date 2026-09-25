@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState,type FormEvent} from 'react';
+import {useEffect,useMemo,useRef,useState,type FormEvent} from 'react';
 import {Ban,ChevronRight,Plus,ShoppingCart,ShoppingBag,Trash2} from 'lucide-react';
 import {useNavigate,useSearchParams} from 'react-router-dom';
 import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,Field,FloatingActionDock,
@@ -34,6 +34,11 @@ export function V2CommercePage({kind}:{kind:'SALE'|'PURCHASE'}){
   const [newName,setNewName]=useState('');
   const canManage=hasPermission('COMMERCE_MANAGE');
   const canManageCatalogs=hasPermission('CATALOG_MANAGE');
+  const openedFromProfile=useRef<string|null>(null);
+  useEffect(()=>{if(!canManage||!initialAnimal||params.get('accion')!=='NUEVA'||
+    openedFromProfile.current===initialAnimal||!animals.some(item=>item.id===initialAnimal))return;
+    openedFromProfile.current=initialAnimal;start();
+  },[animals,canManage,initialAnimal,params]);
   useEffect(()=>{let active=true;setRows(null);setError('');
     void getCommerce(token).then(data=>{if(active)setRows(data);}).catch(reason=>{
       if(active)setError(reason instanceof Error?reason.message:'No se pudieron cargar las operaciones.');});

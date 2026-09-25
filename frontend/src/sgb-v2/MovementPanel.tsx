@@ -45,15 +45,19 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
   const [destinationLocationId,setDestinationLocationId]=useState('');
   const [selected,setSelected]=useState<string[]>([]);
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
-  useEffect(()=>{if(!initialAnimalId||initialAnimalId===prefilledAnimalId||!options||!canManage)return;
+  useEffect(()=>{const requested=new URLSearchParams(window.location.search).get('accion');
+    if(!['GRUPO','PROPIEDAD','UBICACION'].includes(requested??'')||
+      !initialAnimalId||initialAnimalId===prefilledAnimalId||!options||!canManage)return;
     const animal=options.animals.find(item=>item.id===initialAnimalId);
-    if(animal?.groupId){const requested=new URLSearchParams(window.location.search).get('accion');
+    if(animal?.groupId){
       const requestedKind=requested==='UBICACION'&&canChangeLocation?'UBICACION':
         requested==='PROPIEDAD'?'PROPIEDAD':'GRUPO';
       setKind(requestedKind);setSourceGroupId(animal.groupId);
       setMode(requestedKind==='UBICACION'?'GRUPO':'MANUAL');setSelected([animal.id]);
+      setDestinationPropertyId(requestedKind==='PROPIEDAD'?
+        options.properties.find(item=>item.id!==propertyId)?.id??'':propertyId);
       setDestinationGroupId('');setDestinationLocationId('');setFormOpen(true);setPrefilledAnimalId(animal.id);}
-  },[initialAnimalId,prefilledAnimalId,options?.animals,canManage,canChangeLocation]);
+  },[initialAnimalId,prefilledAnimalId,options,canManage,canChangeLocation,propertyId]);
 
   useEffect(()=>{let active=true;
     void getMovements(accessToken).then(movements=>{if(active){setRecords(movements);setError(null);}})
@@ -77,14 +81,16 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
     && !options.groups.some((group)=>group.locationId===location.id))??[];
   const visible=useMemo(()=>{
     const term=search.trim().toLocaleLowerCase();
-    const rows=(records??[]).filter(item=>[item.reason,item.sourceGroupName,item.destinationGroupName,
+    const rows=(records??[]).filter(item=>(!initialAnimalId||
+      item.animals.some(animal=>animal.id===initialAnimalId))&&
+      [item.reason,item.sourceGroupName,item.destinationGroupName,
       item.sourceLocationName,item.destinationLocationName,item.sourcePropertyName,
       item.destinationPropertyName,...item.animals.map(animal=>animal.name)].join(' ')
       .toLocaleLowerCase().includes(term));
     return rows.sort((a,b)=>order==='AZ'||order==='ZA'
       ? (order==='AZ'?1:-1)*a.reason.localeCompare(b.reason,'es')
       : (order==='NEWEST'?-1:1)*a.movementOn.localeCompare(b.movementOn));
-  },[records,search,order]);
+  },[records,search,order,initialAnimalId]);
   const viewing=records?.find(item=>item.id===viewingId);
   useEffect(()=>{if(!formOpen&&!viewing)return;
     const onKey=(event:KeyboardEvent)=>{if(event.key==='Escape'&&!busy){

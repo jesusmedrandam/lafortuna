@@ -1,12 +1,13 @@
 import {useEffect,useRef,useState} from 'react';
 import {ArrowLeft,ArrowLeftRight,Baby,Beef,Camera,Droplets,Edit3,MapPin,Milk,Users,Weight,
-  HeartCrack,ShoppingCart,X,ChevronRight} from 'lucide-react';
+  HeartCrack,ShoppingCart,ShoppingBag,X,ChevronRight} from 'lucide-react';
 import {useNavigate,useParams} from 'react-router-dom';
 import {Badge,Card,IconButton,LoadingState,ErrorState} from '../components/ui';
 import {formatDate} from '../utils';
 import {getAnimal,getMedia,uploadMedia,getMovements,getMovementOptions,getWeighings,getHealthConditions,
   getHealthCampaigns,getReproduction,getProduction,getCommerce,getAnimalStatusEvents,
-  type Animal,type MediaItem,type MovementOptions} from './api';
+  getReproductionSettings,type Animal,type MediaItem,type MovementOptions,
+  type ReproductionRecords,type ReproductionSettings} from './api';
 import {useV2Session} from './V2Session';
 
 type Section={title:string;path:string;entries:Array<{id:string;date:string;label:string}>};
@@ -23,6 +24,8 @@ export function V2AnimalDetail(){
   const [sections,setSections]=useState<Section[]>([]);
   const [movementOptions,setMovementOptions]=useState<MovementOptions|null>(null);
   const [inMilking,setInMilking]=useState(false);
+  const [reproduction,setReproduction]=useState<ReproductionRecords|null>(null);
+  const [reproductionSettings,setReproductionSettings]=useState<ReproductionSettings|null>(null);
   const fileRef=useRef<HTMLInputElement>(null);
   const token=session!.accessToken;
   const property=session!.overview.properties.find(value=>value.id===session!.overview.activeContext?.propertyId);
@@ -39,6 +42,7 @@ export function V2AnimalDetail(){
     return()=>{active=false;};
   },[id,token,canViewMedia]);
   useEffect(()=>{if(!id)return;let active=true;setSections([]);setInMilking(false);
+    setReproduction(null);setReproductionSettings(null);
     setMovementOptions(null);
     if(can('MOVEMENT_MANAGE','MOVEMENTS'))void getMovementOptions(token)
       .then(options=>{if(active)setMovementOptions(options);}).catch(()=>{});
@@ -59,13 +63,17 @@ export function V2AnimalDetail(){
       jobs.push(getHealthConditions(token).then(items=>recent('Condiciones de salud','/sanidad',
         items.filter(item=>item.animalId===id).map(item=>({id:item.id,date:item.detectedOn,
           label:`${item.kind??'Condición'} · ${item.description}`})))));
-      jobs.push(getHealthCampaigns(token).then(items=>recent('Tratamientos','/sanidad',
+      jobs.push(getHealthCampaigns(token).then(items=>recent('Tratamientos','/sanidad?vista=tratamientos',
         items.filter(item=>item.animals.some(row=>row.animalId===id&&row.selected))
           .map(item=>({id:item.id,date:item.appliedOn,
             label:`${item.medicineName} · ${item.status==='COMPLETADO'?'Aplicado':item.status==='BORRADOR'?'Borrador':'Cancelado'}`})))));
     }
-    if(can('REPRODUCTION_VIEW','REPRODUCTION'))jobs.push(getReproduction(token).then(items=>
-      recent('Reproducción','/reproduccion',[
+    if(can('REPRODUCTION_VIEW','REPRODUCTION')){
+      if(can('REPRODUCTION_MANAGE'))void getReproductionSettings(token)
+        .then(value=>{if(active)setReproductionSettings(value);}).catch(()=>{});
+      jobs.push(getReproduction(token).then(items=>{
+        if(active)setReproduction(items);
+        return recent('Reproducción','/reproduccion',[
         ...items.heats.filter(item=>item.cowId===id).map(item=>({id:item.id,date:item.startsOn,label:'Celo'})),
         ...items.services.filter(item=>item.cowId===id||item.fatherId===id||item.donorId===id)
           .map(item=>({id:item.id,date:item.occurredOn,label:item.kind==='INSEMINATION'?'Inseminación':'Transferencia de embrión'})),
@@ -75,7 +83,9 @@ export function V2AnimalDetail(){
           .map(item=>({id:item.id,date:item.occurredOn,label:'Parto'})),
         ...items.losses.filter(item=>item.cowId===id)
           .map(item=>({id:item.id,date:item.occurredOn,label:'Pérdida gestacional'})),
-      ])));
+        ]);
+      }));
+    }
     if(can('PRODUCTION_VIEW','PRODUCTION'))jobs.push(getProduction(token).then(items=>{
       if(active)setInMilking(Boolean(items.cows.find(row=>row.id===id)?.inMilking));
       return recent('Producción','/produccion',[
@@ -85,10 +95,14 @@ export function V2AnimalDetail(){
           .map(item=>({id:item.id,date:item.startedOn,label:'Lactancia'})),
       ]);
     }));
-    if(can('COMMERCE_VIEW','SALES_PURCHASES'))jobs.push(getCommerce(token).then(items=>
-      recent('Ventas y compras','/ventas',items.filter(item=>item.lines.some(line=>line.animalId===id))
-        .map(item=>({id:item.id,date:item.tradedOn,
-          label:`${item.kind==='SALE'?'Venta':'Compra'} · ${item.counterpartyName}`})))));
+    if(can('COMMERCE_VIEW','SALES_PURCHASES')){
+      const commerce=getCommerce(token);
+      for(const [kind,title,path] of [['SALE','Ventas','/ventas'],
+        ['PURCHASE','Compras','/compras']] as const)jobs.push(commerce.then(items=>
+        recent(title,path,items.filter(item=>item.kind===kind&&
+          item.lines.some(line=>line.animalId===id)).map(item=>({id:item.id,date:item.tradedOn,
+          label:item.counterpartyName})))));
+    }
     void Promise.allSettled(jobs).then(results=>{if(active)setSections(results.flatMap(result=>
       result.status==='fulfilled'?[result.value]:[]));});
     return()=>{active=false;};
@@ -107,7 +121,7 @@ export function V2AnimalDetail(){
   const status=animal?.availabilityStatusCode==='ACTIVE'?'Activo':animal?.availabilityStatusCode==='DEAD'
     ?'Fallecido':animal?.availabilityStatusCode==='MISSING'?'Desaparecido':
       animal?.availabilityStatusCode==='EXITED'?'Salió de la propiedad':'Inactivo';
-  const go=(path:string,action?:string)=>{setMenu(null);navigate(`${path}?animal=${encodeURIComponent(id??'')}`+
+  const go=(path:string,action?:string)=>{setMenu(null);navigate(`${path}${path.includes('?')?'&':'?'}animal=${encodeURIComponent(id??'')}`+
     (action?`&accion=${encodeURIComponent(action)}`:''));};
   const choose=(title:string,actions:AnimalAction[])=>{
     if(actions.length===1)actions[0]!.run();else if(actions.length>1)setMenu({title,actions});};
@@ -131,6 +145,22 @@ export function V2AnimalDetail(){
     ...(rotate?[{label:'Rotación de potrero o corral · todo el grupo',
       run:()=>go('/movimientos','UBICACION')}]:[]),
   ];
+  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil',
+    year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  const birth=animal?.birthDate;
+  const minimumDate=birth&&reproductionSettings?new Date(`${birth}T12:00:00Z`):null;
+  if(minimumDate)minimumDate.setUTCMonth(minimumDate.getUTCMonth()+reproductionSettings!.minimumCowMonths);
+  const reproductiveAge=Boolean(reproductionSettings&&(!minimumDate||
+    minimumDate.toISOString().slice(0,10)<=today));
+  const activePregnancy=reproduction?.pregnancies.find(item=>item.cowId===id&&item.status==='CONFIRMED');
+  const reproductiveActions:AnimalAction[]=reproductiveAge?(activePregnancy?[
+    {label:'Registrar parto',run:()=>go('/reproduccion','PARTO')},
+    {label:'Registrar pérdida de preñez',run:()=>go('/reproduccion','PERDIDA')},
+  ]:[
+    {label:'Registrar celo',run:()=>go('/reproduccion','CELO')},
+    {label:'Registrar inseminación o transferencia',run:()=>go('/reproduccion','SERVICIO')},
+    {label:'Confirmar preñez',run:()=>go('/reproduccion','PRENEZ')},
+  ]):[];
   if(error&&!animal)return <ErrorState message={error} onRetry={()=>navigate('/animales')}/>;
   if(!animal)return <LoadingState text="Abriendo ficha…"/>;
   return <div className="animal-detail-page sgb-v2-animal-detail">
@@ -161,22 +191,25 @@ export function V2AnimalDetail(){
                 {label:'Registrar salida',code:'RECORD_EXIT'}]).map(item=>({label:item.label,
                 run:()=>go('/bajas',item.code)})))}><HeartCrack size={21}/></IconButton>}
       {usable&&can('COMMERCE_MANAGE','SALES_PURCHASES')&&<IconButton label="Ventas"
-        onClick={()=>go('/ventas')}><ShoppingCart size={21}/></IconButton>}
+        onClick={()=>go('/ventas','NUEVA')}><ShoppingCart size={21}/></IconButton>}
+      {usable&&can('COMMERCE_MANAGE','SALES_PURCHASES')&&<IconButton label="Compras"
+        onClick={()=>go('/compras','NUEVA')}><ShoppingBag size={21}/></IconButton>}
       {usable&&movementActions.length>0&&<IconButton label="Movimientos"
         onClick={()=>choose('Movimiento de '+animal.name,movementActions)}>
         <ArrowLeftRight size={21}/></IconButton>}
       {usable&&can('WEIGHING_MANAGE','WEIGHING')&&<IconButton label="Registrar pesaje"
-        onClick={()=>go('/pesajes')}><Weight size={21}/></IconButton>}
+        onClick={()=>go('/pesajes','NUEVO')}><Weight size={21}/></IconButton>}
       {usable&&can('HEALTH_MANAGE','HEALTH')&&<IconButton label="Sanidad"
         onClick={()=>choose('Sanidad de '+animal.name,[
           {label:'Aplicar tratamiento',run:()=>go('/sanidad','TRATAMIENTO')},
           {label:'Crear condición de salud',run:()=>go('/sanidad','CONDICION')},
         ])}><Droplets size={21}/></IconButton>}
-      {usable&&animal.sex==='FEMALE'&&animal.classification?.code!=='TERNERA'&&
-        can('REPRODUCTION_MANAGE','REPRODUCTION')&&
-        <IconButton label="Reproducción" onClick={()=>go('/reproduccion')}><Baby size={21}/></IconButton>}
+      {usable&&animal.sex==='FEMALE'&&can('REPRODUCTION_MANAGE','REPRODUCTION')&&
+        reproductiveActions.length>0&&<IconButton label="Reproducción"
+          onClick={()=>choose('Reproducción de '+animal.name,reproductiveActions)}>
+          <Baby size={21}/></IconButton>}
       {usable&&animal.sex==='FEMALE'&&inMilking&&can('PRODUCTION_MANAGE','PRODUCTION')&&
-        <IconButton label="Registrar producción" onClick={()=>go('/produccion')}><Milk size={21}/></IconButton>}
+        <IconButton label="Registrar producción" onClick={()=>go('/produccion','LECHE')}><Milk size={21}/></IconButton>}
     </div>
     <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic" hidden
       disabled={busy} onChange={event=>{const file=event.currentTarget.files?.[0];event.currentTarget.value='';

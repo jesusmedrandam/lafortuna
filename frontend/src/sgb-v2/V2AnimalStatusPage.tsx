@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState,type FormEvent} from 'react';
+import {useEffect,useMemo,useRef,useState,type FormEvent} from 'react';
 import {ChevronRight,HeartCrack,Plus} from 'lucide-react';
 import {useNavigate,useSearchParams} from 'react-router-dom';
 import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,Field,FloatingActionDock,
@@ -29,6 +29,16 @@ export function V2AnimalStatusPage(){
   const [action,setAction]=useState<AnimalStatusEvent['action']>('REPORT_MISSING');
   const [error,setError]=useState('');const [saving,setSaving]=useState(false);
   const [revision,setRevision]=useState(0);const canManage=hasPermission('ANIMAL_UPDATE');
+  const openedFromProfile=useRef<string|null>(null);
+  useEffect(()=>{const requested=params.get('accion');
+    const preselected=options.find(row=>row.id===animalId);
+    if(!canManage||!preselected||!requested||
+      openedFromProfile.current===`${animalId}:${requested}`)return;
+    const choices=actionFor(preselected.status);
+    if(!choices.includes(requested as AnimalStatusEvent['action']))return;
+    openedFromProfile.current=`${animalId}:${requested}`;setChosen(preselected.id);
+    setAction(requested as AnimalStatusEvent['action']);setOpen(true);
+  },[animalId,options,canManage,params]);
   useEffect(()=>{let active=true;setError('');setEvents(null);
     void getAnimalStatusEvents(token,animalId).then(rows=>{if(active)setEvents(rows);})
       .catch(reason=>{if(active)setError(reason instanceof Error?reason.message:'No se pudo cargar el historial.');});

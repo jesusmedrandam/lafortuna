@@ -171,7 +171,8 @@ function Panel({kind}:{kind:'animals'|'movements'|'reproduction'|'production'|'h
   const overview=session!.overview;const property=activeProperty(overview);const token=session!.accessToken;
   const modules=property?.enabledModules??[];
   const goAnimal=(section:'movements'|'health'|'reproduction'|'production',animal:{id:string})=>
-    navigate(`/${{movements:'movimientos',health:'sanidad',reproduction:'reproduccion',production:'produccion'}[section]}?animal=${encodeURIComponent(animal.id)}`);
+    navigate(`/${{movements:'movimientos',health:'sanidad',reproduction:'reproduccion',production:'produccion'}[section]}?animal=${encodeURIComponent(animal.id)}&accion=${
+      {movements:'GRUPO',health:'CONDICION',reproduction:'CELO',production:'LECHE'}[section]}`);
   const initialAnimalId=new URLSearchParams(window.location.search).get('animal')??undefined;
   switch(kind){
     case 'animals':return <AnimalPanel accessToken={token} canCreate={hasPermission('ANIMAL_CREATE')}

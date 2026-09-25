@@ -21,7 +21,7 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId}:{accessT
   const [revision,setRevision]=useState(0);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState<string|null>(null);
-  const [date,setDate]=useState(localDate());
+  const [date,setDate]=useState(initialAnimalId?'':localDate());
   const [tab,setTab]=useState<'production'|'lactations'>('production');
   const [search,setSearch]=useState('');
   const [selected,setSelected]=useState<{kind:'MILK'|'TANK'|'LACTATION'|'COW';id:string}|null>(null);
@@ -34,18 +34,21 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId}:{accessT
   },[accessToken,revision]);
   const milkingCows=records?.cows.filter((row)=>row.inMilking)??[];
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
-  useEffect(()=>{if(!initialAnimalId||initialAnimalId===prefilledAnimalId||!records||!canManage)return;
+  useEffect(()=>{if(new URLSearchParams(window.location.search).get('accion')!=='LECHE'||
+    !initialAnimalId||initialAnimalId===prefilledAnimalId||!records||!canManage)return;
     if(records.cows.some(row=>row.id===initialAnimalId&&row.inMilking)){
       setActiveForm('MILK');setPrefilledAnimalId(initialAnimalId);}
   },[initialAnimalId,prefilledAnimalId,records,canManage]);
   const daily=useMemo(()=>({
-    milk:records?.milk.filter((row)=>row.producedOn===date&&row.cowName.toLocaleLowerCase()
+    milk:records?.milk.filter((row)=>(!initialAnimalId||row.cowId===initialAnimalId)&&
+      (!date||row.producedOn===date)&&row.cowName.toLocaleLowerCase()
       .includes(search.trim().toLocaleLowerCase()))??[],
-    tanks:records?.tanks.filter((row)=>row.producedOn===date&&(!search||'tanque'
+    tanks:initialAnimalId?[]:records?.tanks.filter((row)=>(!date||row.producedOn===date)&&(!search||'tanque'
       .includes(search.trim().toLocaleLowerCase())))??[],
-  }),[records,date,search]);
-  const lactations=useMemo(()=>records?.lactations.filter(row=>row.cowName.toLocaleLowerCase()
-    .includes(search.trim().toLocaleLowerCase()))??[],[records,search]);
+  }),[records,date,search,initialAnimalId]);
+  const lactations=useMemo(()=>records?.lactations.filter(row=>(!initialAnimalId||
+    row.cowId===initialAnimalId)&&row.cowName.toLocaleLowerCase()
+    .includes(search.trim().toLocaleLowerCase()))??[],[records,search,initialAnimalId]);
   const viewMilk=selected?.kind==='MILK'?records?.milk.find(row=>row.id===selected.id):null;
   const viewTank=selected?.kind==='TANK'?records?.tanks.find(row=>row.id===selected.id):null;
   const viewLactation=selected?.kind==='LACTATION'?records?.lactations.find(row=>row.id===selected.id):null;
@@ -174,7 +177,8 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId}:{accessT
         description="Abre una lactancia para habilitar el registro diario de esa vaca."/>}
       {records.cows.length>0&&<section className="production-daily-group production-cows">
         <header><span><Milk size={18}/><strong>Vacas aptas para ordeño</strong></span></header>
-        <div className="production-compact-list">{records.cows.filter(row=>row.name.toLocaleLowerCase()
+        <div className="production-compact-list">{records.cows.filter(row=>(!initialAnimalId||
+          row.id===initialAnimalId)&&row.name.toLocaleLowerCase()
           .includes(search.trim().toLocaleLowerCase())).map(row=><button type="button"
           className="production-compact-row" key={row.id}
           onClick={()=>setSelected({kind:'COW',id:row.id})}><span><strong>{row.name}</strong>
