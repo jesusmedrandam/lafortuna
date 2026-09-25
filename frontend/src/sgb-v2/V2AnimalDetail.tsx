@@ -136,7 +136,7 @@ export function V2AnimalDetail(){
   const moveOtherProperty=Boolean(ownGroup&&movementOptions?.groups.some(item=>
     item.propertyId!==property?.id));
   const rotate=Boolean(ownGroup&&can('LOCATION_MANAGE')&&
-    (modules.includes('PASTURES')||modules.includes('CORRALS'))&&
+    modules.includes('PASTURES')&&modules.includes('CORRALS')&&
     movementOptions?.locations.some(item=>item.propertyId===property?.id&&
       item.id!==ownGroup.locationId&&!movementOptions.groups.some(group=>group.locationId===item.id)));
   const movementActions:AnimalAction[]=[
@@ -177,7 +177,7 @@ export function V2AnimalDetail(){
     </section>
     <div className="animal-profile-action-strip" aria-label="Acciones del animal">
       {canManageMedia&&<IconButton label="Fotos del animal" onClick={photoAction}><Camera size={21}/></IconButton>}
-      {hasPermission('ANIMAL_UPDATE')&&<IconButton label="Editar animal" onClick={()=>go('/animales/gestionar')}>
+      {hasPermission('ANIMAL_UPDATE')&&<IconButton label="Editar animal" onClick={()=>go('/animales/gestionar','EDITAR')}>
         <Edit3 size={21}/></IconButton>}
       {['ACTIVE','MISSING','INACTIVE'].includes(animal.availabilityStatusCode)&&
         hasPermission('ANIMAL_UPDATE')&&<IconButton label="Bajas y novedades"

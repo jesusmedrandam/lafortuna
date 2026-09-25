@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import {
   ApiRequestError, createAnimal, createBrand, getAnimal, getAnimals, listBrands,
   listCatalogItems, setBrandActive, updateAnimalBrands, updateAnimalCatalogs,
@@ -152,12 +152,12 @@ function ParentField({ accessToken, child, role }: {
 
 export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs, canManageBrands,
   canViewMedia,canManageMedia,initialClassification,canViewLocations,modules,onNavigate,
-  initialAnimalId,initialCreate,onBack }: {
+  initialAnimalId,initialCreate,initialEdit,onBack }: {
   accessToken: string; canCreate: boolean; canUpdate: boolean;
   canViewCatalogs: boolean; canManageBrands: boolean;
   canViewMedia:boolean;canManageMedia:boolean;initialClassification?:string;
   canViewLocations:boolean;modules:string[];
-  initialAnimalId?:string;initialCreate?:boolean;onBack?:()=>void;
+  initialAnimalId?:string;initialCreate?:boolean;initialEdit?:boolean;onBack?:()=>void;
   onNavigate:(section:'movements'|'health'|'reproduction'|'production',animal:Animal)=>void;
 }) {
   const [result, setResult] = useState<AnimalList | null>(null);
@@ -181,6 +181,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
   const [accountUsers, setAccountUsers] = useState<Array<{ id: string; name: string }>>([]);
   const [animalMedia,setAnimalMedia]=useState<MediaItem[]>([]);
   const [mediaRevision,setMediaRevision]=useState(0);
+  const openedEdit=useRef<string|null>(null);
   useEffect(()=>{
     if(!initialAnimalId)return;
     let active=true;
@@ -189,6 +190,12 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       .catch(reason=>{if(active)setError(message(reason));});
     return()=>{active=false;};
   },[accessToken,initialAnimalId]);
+  useEffect(()=>{if(!initialEdit||!canUpdate||!selected||selected.id!==initialAnimalId||
+    openedEdit.current===selected.id)return;
+    const panel=document.getElementById('animal-edit-panel') as HTMLDetailsElement|null;
+    if(panel){openedEdit.current=selected.id;panel.open=true;
+      panel.scrollIntoView({behavior:'smooth',block:'start'});}
+  },[initialEdit,canUpdate,selected?.id,initialAnimalId]);
   useEffect(()=>{setClassification(initialClassification??'');setPage(1);setSelected(null);},
     [initialClassification]);
   useEffect(()=>{let active=true;void getAnimalClassificationPolicy(accessToken)

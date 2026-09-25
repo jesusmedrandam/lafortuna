@@ -182,6 +182,7 @@ function Panel({kind}:{kind:'animals'|'movements'|'reproduction'|'production'|'h
       canViewLocations={hasPermission('LOCATION_VIEW')} modules={modules} onNavigate={goAnimal}
       initialAnimalId={id??new URLSearchParams(window.location.search).get('animal')??undefined}
       initialCreate={new URLSearchParams(window.location.search).get('create')==='1'}
+      initialEdit={new URLSearchParams(window.location.search).get('accion')==='EDITAR'}
       onBack={()=>navigate('/animales')}/>;
     case 'movements':return <MovementPanel accessToken={token} propertyId={property!.id}
       canManage={hasPermission('MOVEMENT_MANAGE')} canCancel={hasPermission('MOVEMENT_CANCEL')}
