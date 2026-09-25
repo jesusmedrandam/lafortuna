@@ -228,7 +228,38 @@ interface ApiEnvelope<T> {
 
 interface ApiErrorEnvelope {
   ok: false;
-  error?: { code?: string; message?: string };
+  error?: { code?: string; message?: string;
+    fields?: Array<{path:string;message:string}> };
+}
+
+function validationDetail(path:string,reason:string){
+  const names:Record<string,string>={name:'Nombre',kind:'Tipo',animalId:'Animal',
+    detectedOn:'Fecha de detección',description:'Descripción',medicineId:'Medicamento',
+    defaultUnitCode:'Unidad de dosis',treatmentCatalogItemId:'Tipo de tratamiento',
+    administrationRoute:'Vía de administración',selectionMode:'Selección de animales',
+    groupId:'Grupo',appliedOn:'Fecha',dose:'Dosis',unitCode:'Unidad',
+    locationId:'Potrero',startedOn:'Fecha de inicio',finishedOn:'Fecha de finalización',
+    activities:'Actividades',applicationUnit:'Unidad de aplicación',
+    applicationCount:'Cantidad de aplicaciones',tankCapacityLiters:'Capacidad del tanque',
+    areaType:'Área intervenida',partialPercent:'Porcentaje',productId:'Producto',
+    quantityPerApplication:'Cantidad por aplicación',products:'Productos',
+    operators:'Operadores',function:'Función',category:'Categoría',
+    formulatedBy:'Formulado por',activeIngredient:'Principio activo',
+    withdrawalMilkDays:'Retiro de leche',withdrawalMeatDays:'Retiro de carne',
+    expectedVersion:'Versión del registro'};
+  const parts=path.split('.');const key=parts.at(-1)??'';
+  const field=names[key]??key;
+  const index=parts.findIndex(part=>/^\d+$/.test(part));
+  const item=index>0?` (${names[parts[index-1]??'']??parts[index-1]} ${Number(parts[index])+1})`:'';
+  const detail=reason.startsWith('Invalid input: expected number')?'ingresa un número válido':
+    reason.startsWith('Invalid input: expected string')?'ingresa un valor':
+    reason.startsWith('Invalid input: expected uuid')||reason.startsWith('Invalid UUID')
+      ?'selecciona un registro válido':
+    reason.startsWith('Invalid ISO date')?'ingresa una fecha válida':
+    reason.startsWith('Invalid option:')?'selecciona una opción válida':
+    reason.startsWith('Too small:')?'el valor es demasiado corto o pequeño':
+    reason.startsWith('Too big:')?'supera el límite permitido':reason;
+  return field?`${field}${item}: ${detail}`:detail;
 }
 
 export class ApiRequestError extends Error {
@@ -264,8 +295,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const body = text ? JSON.parse(text) as ApiEnvelope<T> | ApiErrorEnvelope : null;
   if (!response.ok) {
     const failure = body as ApiErrorEnvelope | null;
+    const fields=failure?.error?.fields;
+    const details=failure?.error?.code==='VALIDATION_ERROR'&&fields?.length
+      ? [...new Set(fields.slice(0,3).map(issue=>validationDetail(issue.path,issue.message)))].join('; ')
+      : '';
     throw new ApiRequestError(
-      failure?.error?.message || 'No fue posible completar la solicitud.',
+      details || failure?.error?.message || 'No fue posible completar la solicitud.',
       response.status,
       failure?.error?.code || 'REQUEST_FAILED',
     );

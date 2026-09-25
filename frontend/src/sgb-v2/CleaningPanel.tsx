@@ -44,9 +44,11 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
     if(active){setRecords(items);setOptions(choices);setProducts(catalog);setCategories(types);}
   }).catch((failure)=>{if(active)setError(message(failure));});return ()=>{active=false;};
   },[accessToken,revision]);
-  function reset(){setEditing(null);setShowForm(false);setPhotos([]);setLocationId('');setAreaType('TOTAL');
+  function reset(){setEditing(null);setShowForm(false);setPhotos([]);setError(null);
+    setLocationId('');setAreaType('TOTAL');
     setActivities([]);setApplicationCount('');setApplicationUnit('TANQUES');setLines([]);setOperators([]);}
-  function edit(item:CleaningRecord){setSelectedId(null);setEditing(item);setShowForm(true);setLocationId(item.locationId);
+  function edit(item:CleaningRecord){setSelectedId(null);setError(null);setEditing(item);
+    setShowForm(true);setLocationId(item.locationId);
     setAreaType(item.areaType);setActivities(item.activities);setApplicationUnit(item.applicationUnit??'TANQUES');
     setApplicationCount(item.applicationCount==null?'':String(item.applicationCount));
     setLines(item.products.map(({productId,unitCode,quantityPerApplication,notes})=>({
@@ -65,6 +67,12 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
       description:String(data.get('description')).trim()||null}),()=>setShowProduct(false));}
   async function save(event:FormEvent<HTMLFormElement>){event.preventDefault();const data=new FormData(event.currentTarget);
     const spray=activities.includes('FUMIGACION');
+    if(spray&&new Set(lines.map(line=>line.productId)).size!==lines.length){
+      setError('No repitas un producto en la misma limpieza.');return;
+    }
+    if(new Set(operators.map(item=>item.name.trim().toLocaleLowerCase())).size!==operators.length){
+      setError('No repitas un operador en la misma limpieza.');return;
+    }
     const input:CleaningInput={locationId,startedOn:String(data.get('startedOn')),
       finishedOn:String(data.get('finishedOn'))||null,activities,applicationUnit:spray?applicationUnit:null,
       applicationCount:spray&&applicationCount?Number(applicationCount):null,
@@ -102,12 +110,14 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
     <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar potrero, labor o producto…"
       count={visible.length} actions={<><IconButton label={newest?'Más recientes':'Más antiguos'}
         onClick={()=>setNewest(value=>!value)}><ArrowUpDown size={18}/></IconButton>
-        {canManage&&<IconButton label="Nuevo producto" onClick={()=>setShowProduct(true)}>
+        {canManage&&<IconButton label="Nuevo producto" onClick={()=>{
+          setError(null);setShowProduct(true);}}>
           <Plus size={18}/><Sprout size={15}/></IconButton>}</>}/>
     {error&&<div role="alert" className="form-error admin-error">{error}</div>}
     {canManage&&showProduct&&<Modal title="Nuevo producto compartido en la cuenta" wide
       onClose={()=>setShowProduct(false)} footer={<Button variant="ghost"
         onClick={()=>setShowProduct(false)}>Cerrar</Button>}><form className="movement-form" onSubmit={saveProduct}>
+      {error&&<div role="alert" className="form-error movement-wide">{error}</div>}
       <label><span>Nombre *</span><input name="name" required minLength={2} maxLength={160}/></label>
       <label><span>Categoría *</span><select name="category" required><option value="">Selecciona</option>
         {categories.filter(item=>item.active).map(item=><option key={item.id} value={item.name}>{item.name}</option>)}
@@ -119,6 +129,7 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
     {canManage&&showForm&&options&&<Modal title={editing?'Editar borrador':'Nueva limpieza'} wide
       onClose={reset} footer={<Button variant="ghost" onClick={reset}>Cerrar</Button>}>
       <form className="movement-form" onSubmit={save} key={editing?.id??'new'}>
+      {error&&<div role="alert" className="form-error movement-wide">{error}</div>}
       <label><span>Potrero *</span><select required value={locationId}
         onChange={(event)=>setLocationId(event.target.value)}><option value="">Selecciona</option>
         {options.locations.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -144,9 +155,9 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
         onChange={(event)=>setApplicationUnit(event.target.value as 'TANQUES'|'BOMBADAS')}>
         <option value="TANQUES">Tanques</option><option value="BOMBADAS">Bombadas</option></select></label>
       <label><span>Cantidad de {applicationUnit==='TANQUES'?'tanques':'bombadas'}</span>
-        <input type="number" min="0.01" step="0.01" value={applicationCount}
+        <input type="number" min="0.01" max="100000" step="0.01" value={applicationCount}
           onChange={(event)=>setApplicationCount(event.target.value)}/></label>
-      <label><span>Capacidad (litros)</span><input name="capacity" type="number" min="0.01"
+      <label><span>Capacidad (litros)</span><input name="capacity" type="number" min="0.01" max="100000"
         step="0.01" defaultValue={editing?.tankCapacityLiters??''}/></label></>}
       <label className="movement-wide"><span>Observaciones</span><textarea name="notes" maxLength={5000}
         defaultValue={editing?.notes??''}/></label>
@@ -158,7 +169,7 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
             (item,i)=>i===index?{...item,productId:event.target.value}:item))}>
             <option value="">Selecciona</option>{products.filter((item)=>item.active).map((item)=><option
               key={item.id} value={item.id}>{item.name}</option>)}</select>
-          <input type="number" min="0.0001" step="any" value={line.quantityPerApplication}
+          <input type="number" min="0.0001" max="1000000" step="any" value={line.quantityPerApplication}
             aria-label="Cantidad por aplicación" required onChange={(event)=>setLines(lines.map((item,i)=>
               i===index?{...item,quantityPerApplication:Number(event.target.value)}:item))}/>
           <select aria-label="Unidad" value={line.unitCode} onChange={(event)=>setLines(lines.map((
@@ -172,10 +183,11 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
         <button type="button" className="secondary-button compact" onClick={()=>setOperators([...operators,
           {name:'',function:null}])}>+ Operador</button></div>
         {operators.map((item,index)=><div className="cleaning-line" key={index}>
-          <input aria-label="Nombre de operador" placeholder="Nombre" required value={item.name}
+          <input aria-label="Nombre de operador" placeholder="Nombre" required minLength={2}
+            maxLength={160} value={item.name}
             onChange={(event)=>setOperators(operators.map((entry,i)=>i===index
               ?{...entry,name:event.target.value}:entry))}/>
-          <input aria-label="Función" placeholder="Función" value={item.function??''}
+          <input aria-label="Función" placeholder="Función" maxLength={100} value={item.function??''}
             onChange={(event)=>setOperators(operators.map((entry,i)=>i===index
               ?{...entry,function:event.target.value}:entry))}/>
           <button type="button" className="secondary-button compact"

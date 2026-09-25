@@ -120,11 +120,15 @@ export function HealthPanel({accessToken,canManage,initialAnimalId}:{accessToken
   }
   function saveMedicine(event:FormEvent<HTMLFormElement>){event.preventDefault();
     const data=new FormData(event.currentTarget);
+    const unit=String(data.get('unit')??'');
+    if(!options?.units.some(item=>item.code===unit)){
+      setError('Selecciona una unidad de dosis válida.');return;
+    }
     void run(()=>createHealthMedicine(accessToken,{
       name:String(data.get('name')).trim(),kind:String(data.get('kind')) as HealthMedicine['kind'],
       activeIngredient:String(data.get('ingredient')).trim()||null,
       treatmentCatalogItemId:String(data.get('treatmentCatalogItemId')||'')||null,
-      defaultUnitCode:String(data.get('unit')),suggestedDose:String(data.get('suggestion')).trim()||null,
+      defaultUnitCode:unit,suggestedDose:String(data.get('suggestion')).trim()||null,
       indications:String(data.get('indications')).trim()||null,
       withdrawalMilkDays:Number(data.get('milkDays')),
       withdrawalMeatDays:Number(data.get('meatDays')),
@@ -148,7 +152,8 @@ export function HealthPanel({accessToken,canManage,initialAnimalId}:{accessToken
       appliedOn:String(data.get('date')),responsible:String(data.get('responsible')).trim()||null,
       notes:String(data.get('notes')).trim()||null,
       animals:ids.map((id)=>({animalId:id,selected:true,
-        dose:Number(doses[id]??data.get('defaultDose')),unitCode:medicine.defaultUnitCode,
+        dose:Number(doses[id]?.trim()||data.get('defaultDose')),
+        unitCode:medicine.defaultUnitCode,
         conditionId:conditionIds[id]||null})),
       ...(editing?{expectedVersion:editing.version}:{})};
     if(individualTreatment){
@@ -171,7 +176,8 @@ export function HealthPanel({accessToken,canManage,initialAnimalId}:{accessToken
         onClick={()=>setOrder(value=>value==='NEWEST'?'OLDEST':value==='OLDEST'?'AZ':value==='AZ'?'ZA':'NEWEST')}>↕</button>
       {canManage&&<><button className="secondary-button compact health-medicine-button" type="button"
         aria-label="Nuevo medicamento" title="Nuevo medicamento"
-        onClick={()=>{closeDialogs();setShowMedicine(true);}}>+ Medicamento</button>
+        disabled={!options?.units.length}
+        onClick={()=>{closeDialogs();setError(null);setShowMedicine(true);}}>+ Medicamento</button>
         <button className="primary-button compact health-add" type="button" onClick={openNew}>
           + {tab==='conditions'?'Condición':tab==='treatments'?'Tratamiento':'Jornada'}</button></>}
     </div>
