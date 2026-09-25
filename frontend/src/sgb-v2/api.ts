@@ -275,13 +275,14 @@ export class ApiRequestError extends Error {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
+    // Header names are case-insensitive. Sending both content-type and Content-Type
+    // joins their values with a comma; express.json then ignores the JSON body.
+    const headers = new Headers(init.headers);
+    if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
     response = await fetch(`${API_URL}${path}`, {
       ...init,
       credentials: 'include',
-      headers: {
-        ...(init.body ? { 'content-type': 'application/json' } : {}),
-        ...init.headers,
-      },
+      headers,
     });
   } catch {
     throw new ApiRequestError(
