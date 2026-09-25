@@ -1,10 +1,10 @@
 import {type FormEvent,useEffect,useMemo,useState} from 'react';
-import {ArrowUpDown,ChevronRight,Edit3,MapPin,Plus,Sprout} from 'lucide-react';
+import {ArrowUpDown,ChevronRight,Edit3,ImagePlus,MapPin,Plus,Sprout} from 'lucide-react';
 import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
   IconButton,LoadingState,Modal} from '../components/ui';
 import {formatDate} from '../utils';
 import {ApiRequestError,applyCleaning,cancelCleaning,createCleaning,createCleaningProduct,
-  getCleaningOptions,getCleaningProducts,getCleanings,listCatalogItems,updateCleaning,
+  getCleaningOptions,getCleaningProducts,getCleanings,listCatalogItems,updateCleaning,uploadMedia,
   type CatalogItem,type CleaningInput,type CleaningOptions,type CleaningProduct,type CleaningRecord} from './api';
 import {RecordMedia} from './RecordMedia';
 const labels={FUMIGACION:'Fumigación',TALA_SELECTIVA:'Tala selectiva',
@@ -26,6 +26,7 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
   const [showForm,setShowForm]=useState(false);
   const [showProduct,setShowProduct]=useState(false);
   const [editing,setEditing]=useState<CleaningRecord|null>(null);
+  const [photos,setPhotos]=useState<File[]>([]);
   const [selectedId,setSelectedId]=useState<string|null>(null);
   const [search,setSearch]=useState('');
   const [activityFilter,setActivityFilter]=useState<CleaningInput['activities'][number]|''>('');
@@ -43,7 +44,7 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
     if(active){setRecords(items);setOptions(choices);setProducts(catalog);setCategories(types);}
   }).catch((failure)=>{if(active)setError(message(failure));});return ()=>{active=false;};
   },[accessToken,revision]);
-  function reset(){setEditing(null);setShowForm(false);setLocationId('');setAreaType('TOTAL');
+  function reset(){setEditing(null);setShowForm(false);setPhotos([]);setLocationId('');setAreaType('TOTAL');
     setActivities([]);setApplicationCount('');setApplicationUnit('TANQUES');setLines([]);setOperators([]);}
   function edit(item:CleaningRecord){setSelectedId(null);setEditing(item);setShowForm(true);setLocationId(item.locationId);
     setAreaType(item.areaType);setActivities(item.activities);setApplicationUnit(item.applicationUnit??'TANQUES');
@@ -62,7 +63,7 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
       activeIngredient:String(data.get('activeIngredient')).trim()||null,
       formulatedBy:String(data.get('formulatedBy')).trim()||null,
       description:String(data.get('description')).trim()||null}),()=>setShowProduct(false));}
-  function save(event:FormEvent<HTMLFormElement>){event.preventDefault();const data=new FormData(event.currentTarget);
+  async function save(event:FormEvent<HTMLFormElement>){event.preventDefault();const data=new FormData(event.currentTarget);
     const spray=activities.includes('FUMIGACION');
     const input:CleaningInput={locationId,startedOn:String(data.get('startedOn')),
       finishedOn:String(data.get('finishedOn'))||null,activities,applicationUnit:spray?applicationUnit:null,
@@ -71,8 +72,16 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
       areaType,partialPercent:areaType==='PARCIAL'?Number(data.get('partialPercent')):null,
       notes:String(data.get('notes')).trim()||null,products:spray?lines:[],operators,
       ...(editing?{expectedVersion:editing.version}:{})};
-    void run(()=>editing?updateCleaning(accessToken,editing.id,input)
-      :createCleaning(accessToken,input),reset);
+    setBusy(true);setError(null);let saved:CleaningRecord|null=null;
+    try{
+      saved=editing?await updateCleaning(accessToken,editing.id,input):await createCleaning(accessToken,input);
+      for(const file of photos)await uploadMedia(accessToken,{file,entityType:'CLEANING',
+        entityId:saved.id,relationCode:'GENERAL'});
+      reset();setRevision(value=>value+1);
+    }catch(failure){if(saved){reset();setRevision(value=>value+1);setSelectedId(saved.id);
+        setError(`La limpieza se guardó, pero no se completó la carga de fotografías: ${message(failure)}`);
+      }else setError(message(failure));}
+    finally{setBusy(false);}
   }
   const location=options?.locations.find((item)=>item.id===locationId);
   const visible=useMemo(()=>records?.filter(item=>(!activityFilter||item.activities.includes(activityFilter))&&
@@ -171,6 +180,18 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
               ?{...entry,function:event.target.value}:entry))}/>
           <button type="button" className="secondary-button compact"
             onClick={()=>setOperators(operators.filter((_,i)=>i!==index))}>Quitar</button></div>)}</div>
+      {canManageMedia&&!editing&&<div className="movement-wide record-photo-picker">
+        <strong>Fotografías de la limpieza</strong><small>Hasta tres imágenes. Se cargarán al guardar el borrador.</small>
+        {photos.length>0&&<div className="record-photo-grid">{photos.map((file,index)=><div
+          key={`${file.name}-${index}`}><CleaningPhotoPreview file={file}/><button type="button"
+            aria-label={`Quitar ${file.name}`} onClick={()=>setPhotos(current=>current.filter((_,i)=>i!==index))}>×</button>
+        </div>)}</div>}
+        <label className={`photo-upload-button ${photos.length>=3?'disabled':''}`}>
+          <ImagePlus size={18}/>Agregar fotografías
+          <input hidden type="file" accept="image/jpeg,image/png,image/webp" multiple
+            disabled={photos.length>=3} onChange={event=>{setPhotos(current=>[
+              ...current,...Array.from(event.target.files??[])].slice(0,3));event.currentTarget.value='';}}/>
+        </label><small>{photos.length} de 3</small></div>}
       <button className="primary-button compact" disabled={busy||!activities.length||!locationId
         ||activities.includes('FUMIGACION')&&lines.length>0&&!applicationCount}>
         {editing?'Guardar borrador':'Crear borrador'}</button>
@@ -221,4 +242,11 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
     {canManage&&<FloatingActionDock><IconButton label="Nueva limpieza" onClick={()=>{
       reset();setShowForm(true);}}><Plus size={22}/></IconButton></FloatingActionDock>}
   </section>;
+}
+
+function CleaningPhotoPreview({file}:{file:File}){
+  const [url,setUrl]=useState('');
+  useEffect(()=>{const next=URL.createObjectURL(file);setUrl(next);
+    return()=>URL.revokeObjectURL(next);},[file]);
+  return <img src={url} alt={file.name}/>;
 }

@@ -54,7 +54,7 @@ Auditoría y Pesajes y aplicó automáticamente la migración `0025`.
 | Reproducción | Lista, filtros, detalle y formularios separados con la presentación anterior y la API nueva |
 | Producción | Pestañas, resumen diario, lactancias, búsqueda, detalles y formularios separados con la presentación anterior y la API nueva |
 | Sanidad | Conectada a la API nueva; conserva el listado compacto y los detalles separados, quedan ajustes visuales |
-| Limpiezas | Lista y filtros con el diseño anterior, detalle y edición separados; fotografías conectadas a la API nueva |
+| Limpiezas | Lista y filtros con el diseño anterior, detalle y edición separados; fotografías al crear y en el detalle conectadas a la API nueva |
 | Actividades | Lista, filtros, detalle, edición separada y fotografías con la presentación anterior y la API nueva |
 | Multimedia, catálogos, equipo, configuración, superadministración | Conectados a los paneles y API nueva |
 | Historial y acciones adicionales de la ficha antigua | Pendientes de trasladar al modelo nuevo |
