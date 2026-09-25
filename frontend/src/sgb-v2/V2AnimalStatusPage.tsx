@@ -18,9 +18,11 @@ function actionFor(status:AnimalStatusOption['status']):AnimalStatusEvent['actio
 function today(){return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil',year:'numeric',
   month:'2-digit',day:'2-digit'}).format(new Date());}
 
-export function V2AnimalStatusPage(){
+export function V2AnimalStatusPage({profileAnimalId,profileAction,onCompleted}:{
+  profileAnimalId?:string;profileAction?:string;onCompleted?:()=>void}={}){
   const {session,hasPermission}=useV2Session();const token=session!.accessToken;
-  const navigate=useNavigate();const [params]=useSearchParams();const animalId=params.get('animal')??undefined;
+  const navigate=useNavigate();const [params]=useSearchParams();
+  const animalId=profileAnimalId??params.get('animal')??undefined;
   const [events,setEvents]=useState<AnimalStatusEvent[]|null>(null);
   const [options,setOptions]=useState<AnimalStatusOption[]>([]);
   const [query,setQuery]=useState('');const [filter,setFilter]=useState('');
@@ -30,7 +32,7 @@ export function V2AnimalStatusPage(){
   const [error,setError]=useState('');const [saving,setSaving]=useState(false);
   const [revision,setRevision]=useState(0);const canManage=hasPermission('ANIMAL_UPDATE');
   const openedFromProfile=useRef<string|null>(null);
-  useEffect(()=>{const requested=params.get('accion');
+  useEffect(()=>{const requested=profileAction??params.get('accion');
     const preselected=options.find(row=>row.id===animalId);
     if(!canManage||!preselected||!requested||
       openedFromProfile.current===`${animalId}:${requested}`)return;
@@ -38,7 +40,7 @@ export function V2AnimalStatusPage(){
     if(!choices.includes(requested as AnimalStatusEvent['action']))return;
     openedFromProfile.current=`${animalId}:${requested}`;setChosen(preselected.id);
     setAction(requested as AnimalStatusEvent['action']);setOpen(true);
-  },[animalId,options,canManage,params]);
+  },[animalId,options,canManage,params,profileAction]);
   useEffect(()=>{let active=true;setError('');setEvents(null);
     void getAnimalStatusEvents(token,animalId).then(rows=>{if(active)setEvents(rows);})
       .catch(reason=>{if(active)setError(reason instanceof Error?reason.message:'No se pudo cargar el historial.');});
@@ -57,7 +59,7 @@ export function V2AnimalStatusPage(){
       expectedVersion:selected.version,...(action==='RECORD_EXIT'?{
         exitReasonCode:String(data.get('exitReasonCode'))}: {})};
     setSaving(true);setError('');try{await createAnimalStatusEvent(token,input);
-      setOpen(false);setRevision(value=>value+1);
+    setOpen(false);setRevision(value=>value+1);if(profileAction)onCompleted?.();
     }catch(reason){setError(reason instanceof Error?reason.message:'No se pudo registrar el evento.');}
     finally{setSaving(false);}
   }

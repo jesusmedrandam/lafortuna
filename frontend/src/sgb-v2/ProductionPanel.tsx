@@ -15,8 +15,9 @@ function ShiftSelect(){return <select name="shift" defaultValue="SINGLE">
   {Object.entries(shiftName).map(([code,label])=><option key={code} value={code}>{label}</option>)}
 </select>;}
 
-export function ProductionPanel({accessToken,canManage,initialAnimalId}:{accessToken:string;
-  canManage:boolean;initialAnimalId?:string|undefined}){
+export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAction,onCompleted}:{
+  accessToken:string;canManage:boolean;initialAnimalId?:string|undefined;
+  initialAction?:string;onCompleted?:()=>void}){
   const [records,setRecords]=useState<ProductionRecords|null>(null);
   const [revision,setRevision]=useState(0);
   const [busy,setBusy]=useState(false);
@@ -34,11 +35,11 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId}:{accessT
   },[accessToken,revision]);
   const milkingCows=records?.cows.filter((row)=>row.inMilking)??[];
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
-  useEffect(()=>{if(new URLSearchParams(window.location.search).get('accion')!=='LECHE'||
+  useEffect(()=>{if((initialAction??new URLSearchParams(window.location.search).get('accion'))!=='LECHE'||
     !initialAnimalId||initialAnimalId===prefilledAnimalId||!records||!canManage)return;
     if(records.cows.some(row=>row.id===initialAnimalId&&row.inMilking)){
       setActiveForm('MILK');setPrefilledAnimalId(initialAnimalId);}
-  },[initialAnimalId,prefilledAnimalId,records,canManage]);
+  },[initialAnimalId,prefilledAnimalId,records,canManage,initialAction]);
   const daily=useMemo(()=>({
     milk:records?.milk.filter((row)=>(!initialAnimalId||row.cowId===initialAnimalId)&&
       (!date||row.producedOn===date)&&row.cowName.toLocaleLowerCase()
@@ -56,6 +57,7 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId}:{accessT
   async function run(operation:()=>Promise<unknown>,form?:HTMLFormElement){
     setBusy(true);setError(null);
     try{await operation();form?.reset();setActiveForm(null);setSelected(null);
+      if(initialAction)onCompleted?.();
       setRevision((value)=>value+1);}
     catch(failure){setError(issue(failure));}
     finally{setBusy(false);}

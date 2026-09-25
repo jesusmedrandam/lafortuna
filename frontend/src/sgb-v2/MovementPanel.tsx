@@ -22,9 +22,10 @@ function routeSide(record:MovementRecord,side:'source'|'destination'){
   return record.kind==='GRUPO'?groupAndLocation:`${property} · ${groupAndLocation}`;
 }
 
-export function MovementPanel({accessToken,propertyId,canManage,canCancel,canChangeLocation,initialAnimalId}:{
+export function MovementPanel({accessToken,propertyId,canManage,canCancel,canChangeLocation,
+  initialAnimalId,initialAction,onCompleted}:{
   accessToken:string;propertyId:string;canManage:boolean;canCancel:boolean;canChangeLocation:boolean;
-  initialAnimalId?:string|undefined;
+  initialAnimalId?:string|undefined;initialAction?:string;onCompleted?:()=>void;
 }){
   const [records,setRecords]=useState<MovementRecord[]|null>(null);
   const [options,setOptions]=useState<MovementOptions|null>(null);
@@ -45,7 +46,7 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
   const [destinationLocationId,setDestinationLocationId]=useState('');
   const [selected,setSelected]=useState<string[]>([]);
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
-  useEffect(()=>{const requested=new URLSearchParams(window.location.search).get('accion');
+  useEffect(()=>{const requested=initialAction??new URLSearchParams(window.location.search).get('accion');
     if(!['GRUPO','PROPIEDAD','UBICACION'].includes(requested??'')||
       !initialAnimalId||initialAnimalId===prefilledAnimalId||!options||!canManage)return;
     const animal=options.animals.find(item=>item.id===initialAnimalId);
@@ -57,7 +58,7 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
       setDestinationPropertyId(requestedKind==='PROPIEDAD'?
         options.properties.find(item=>item.id!==propertyId)?.id??'':propertyId);
       setDestinationGroupId('');setDestinationLocationId('');setFormOpen(true);setPrefilledAnimalId(animal.id);}
-  },[initialAnimalId,prefilledAnimalId,options,canManage,canChangeLocation,propertyId]);
+  },[initialAnimalId,prefilledAnimalId,options,canManage,canChangeLocation,propertyId,initialAction]);
 
   useEffect(()=>{let active=true;
     void getMovements(accessToken).then(movements=>{if(active){setRecords(movements);setError(null);}})
@@ -123,7 +124,14 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
       notes:String(data.get('notes')).trim()||null,
       animalIds:mode==='GRUPO'?groupAnimals.map((animal)=>animal.id):selected,
       ...(editing?{expectedVersion:editing.version}:{})};
-    void run(()=>editing?updateMovement(accessToken,editing.id,input):createMovement(accessToken,input),reset);
+    void run(async()=>{
+      if(editing)return updateMovement(accessToken,editing.id,input);
+      const draft=await createMovement(accessToken,input);
+      if(onCompleted){try{return await applyMovement(accessToken,draft.id);}
+        catch(failure){throw new Error(`El movimiento quedó como borrador. Ábrelo en Movimientos para revisarlo y aplicarlo. ${message(failure)}`);}}
+      return draft;
+    },
+      ()=>{reset();onCompleted?.();});
   }
   return <section className="module-no-header movements-panel">
     <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar movimiento…"
@@ -142,7 +150,7 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
       {error&&<div role="alert" className="form-error movement-dialog-error">{error}</div>}
       <form className="movement-form" onSubmit={save}
       key={editing?.id??'new'}>
-      <label><span>Tipo *</span><select value={kind} onChange={(event)=>{
+      <label><span>Tipo *</span><select value={kind} disabled={Boolean(onCompleted)} onChange={(event)=>{
         const next=event.target.value as MovementRecord['kind'];setKind(next);
         if(next==='UBICACION'){setMode('GRUPO');setDestinationPropertyId(propertyId);
           setDestinationGroupId(sourceGroupId);} else if(next==='GRUPO')setDestinationPropertyId(propertyId);
@@ -153,7 +161,7 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
           (value!=='UBICACION'||canChangeLocation)&&(value!=='COMBINADO'||editing?.kind==='COMBINADO'))
           .map(([value,label])=><option key={value} value={value}>{label}</option>)}
       </select></label>
-      <label><span>Grupo de origen *</span><select value={sourceGroupId} required onChange={(event)=>{
+      <label><span>Grupo de origen *</span><select value={sourceGroupId} required disabled={Boolean(onCompleted)} onChange={(event)=>{
         const id=event.target.value;setSourceGroupId(id);setSelected([]);
         setDestinationGroupId(kind==='UBICACION'?id:'');setDestinationLocationId('');}}>
         <option value="">Selecciona el grupo primero</option>
@@ -179,14 +187,16 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
             {destinations.map((group)=><option key={group.id} value={group.id}>
               {group.name}{group.locationName?` · ${group.locationName}`:''}</option>)}
           </select><small>La ubicación se toma del grupo de destino.</small></label>}
-      {kind!=='UBICACION'&&<label><span>Selección</span><select value={mode}
+      {kind!=='UBICACION'&&<label><span>Selección</span><select value={mode} disabled={Boolean(onCompleted)}
         onChange={(event)=>setMode(event.target.value as MovementRecord['selectionMode'])}>
           <option value="GRUPO">Grupo completo</option><option value="MANUAL">Animales seleccionados</option>
         </select></label>}
       <label><span>Fecha *</span><input type="date" name="movementOn" required max={today()}
         defaultValue={editing?.movementOn??today()}/></label>
       <label className="movement-wide"><span>Motivo *</span><input name="reason" list="movement-reasons" required
-        minLength={2} maxLength={300} defaultValue={editing?.reason??''}
+        minLength={2} maxLength={300} defaultValue={editing?.reason??(initialAction==='UBICACION'
+          ?'Rotación de potrero':initialAction==='PROPIEDAD'?'Traslado a otra propiedad':
+            initialAction==='GRUPO'?'Cambio de grupo':'')}
         placeholder="Selecciona o escribe un motivo"/>
         <datalist id="movement-reasons">{reasons.filter(item=>item.active).map(item=><option
           key={item.id} value={item.name}/>)}</datalist></label>
@@ -195,11 +205,12 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
       {sourceGroupId&&<div className="movement-selection movement-wide">
         <strong>{mode==='GRUPO'?`Grupo completo · ${groupAnimals.length} animales`:'Selecciona los animales del grupo'}</strong>
         {!groupAnimals.length&&<p className="muted">El grupo no tiene animales activos. Puedes asignar su primera ubicación.</p>}
-        {mode==='MANUAL'&&<><button type="button" className="secondary-button compact"
+        {mode==='MANUAL'&&<>{!onCompleted&&<button type="button" className="secondary-button compact"
           onClick={()=>setSelected(selected.length===groupAnimals.length?[]:groupAnimals.map((animal)=>animal.id))}>
-          {selected.length===groupAnimals.length?'Quitar selección':'Seleccionar todos'}</button>
-          <div className="movement-animal-grid">{groupAnimals.map((animal)=><label key={animal.id}>
-            <input type="checkbox" checked={selected.includes(animal.id)} onChange={(event)=>setSelected(
+          {selected.length===groupAnimals.length?'Quitar selección':'Seleccionar todos'}</button>}
+          <div className="movement-animal-grid">{groupAnimals.filter(animal=>!onCompleted||selected.includes(animal.id))
+            .map((animal)=><label key={animal.id}>
+            <input type="checkbox" checked={selected.includes(animal.id)} disabled={Boolean(onCompleted)} onChange={(event)=>setSelected(
               event.target.checked?[...selected,animal.id]:selected.filter((id)=>id!==animal.id))}/>
             <span>{animal.name}{animal.earTagCode?` · ${animal.earTagCode}`:''}</span></label>)}</div>
         </>}
@@ -208,7 +219,7 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
         || !sourceGroupId || kind!=='UBICACION'&&!groupAnimals.length || mode==='MANUAL'&&!selected.length
         || kind!=='UBICACION'&&!destinationGroupId || kind==='UBICACION'&&!destinationLocationId
         || kind==='PROPIEDAD'&&!cross}>
-        {busy?'Guardando…':editing?'Guardar borrador':'Crear borrador'}</button>
+        {busy?'Guardando…':editing?'Guardar borrador':onCompleted?'Guardar y aplicar':'Crear borrador'}</button>
         {editing&&<button type="button" className="secondary-button compact" onClick={reset}>Cancelar edición</button>}
       </div>
       </form></div></div>}

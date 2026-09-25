@@ -23,8 +23,10 @@ const categories:Record<ReproductionKind,string>={HEAT:'Celos',SERVICE:'Servicio
 interface ReproductionRow {id:string;kind:ReproductionKind;name:string;date:string;
   summary:string;notes:string|null;status:string;canCancel:boolean;}
 
-export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
+export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
+  initialAction,onCompleted }: {
   accessToken: string; canManage: boolean; initialAnimalId?:string|undefined;
+  initialAction?:string;onCompleted?:()=>void;
 }) {
   const [records, setRecords] = useState<ReproductionRecords | null>(null);
   const [candidates, setCandidates] = useState<ReproductionCandidate[]>([]);
@@ -42,14 +44,14 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
   const [newest,setNewest]=useState(true);
   const females = candidates.filter((animal) => animal.sex === 'FEMALE');
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
-  useEffect(()=>{const action=new URLSearchParams(window.location.search).get('accion');
+  useEffect(()=>{const action=initialAction??new URLSearchParams(window.location.search).get('accion');
     const form=({CELO:'HEAT',SERVICIO:'SERVICE',PRENEZ:'PREGNANCY',PARTO:'BIRTH',
       PERDIDA:'LOSS'} as const)[action as 'CELO'];
     if(!form||
     !initialAnimalId||initialAnimalId===prefilledAnimalId||!canManage||
     !candidates.some(animal=>animal.id===initialAnimalId&&animal.sex==='FEMALE'))return;
     setCowId(initialAnimalId);setActiveForm(form);setPrefilledAnimalId(initialAnimalId);
-  },[initialAnimalId,prefilledAnimalId,candidates,canManage]);
+  },[initialAnimalId,prefilledAnimalId,candidates,canManage,initialAction]);
   const males = candidates.filter((animal) => animal.sex === 'MALE');
   const confirmed = records?.pregnancies.filter((pregnancy) => pregnancy.status === 'CONFIRMED') ?? [];
   const rows=useMemo<ReproductionRow[]>(()=>records?[
@@ -102,7 +104,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
   async function run(operation: () => Promise<unknown>, form?: HTMLFormElement) {
     setBusy(true); setError(null);
     try { await operation(); form?.reset();setActiveForm(null);setSettingsOpen(false);
-      setSelectedRecord(null);setRevision((value) => value + 1); }
+      setSelectedRecord(null);setRevision((value) => value + 1);if(initialAction)onCompleted?.(); }
     catch (failure) { setError(errorMessage(failure)); }
     finally { setBusy(false); }
   }
@@ -238,20 +240,21 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
     {canManage && activeForm && <Modal title="Registrar evento reproductivo" wide
       onClose={()=>setActiveForm(null)} footer={<Button variant="ghost"
         onClick={()=>setActiveForm(null)}>Cerrar</Button>}>
-      <div className="form-toolbar" aria-label="Tipo de evento">
+      {!initialAction&&<div className="form-toolbar" aria-label="Tipo de evento">
       {([['HEAT','Celo'],['SERVICE','Servicio'],['PREGNANCY','Preñez'],
         ['BIRTH','Parto'],['LOSS','Pérdida']] as const).map(([id,label])=><button
           key={id} type="button" className={activeForm===id?'active':''}
           aria-pressed={activeForm===id} onClick={()=>setActiveForm(id)}>
           {label}</button>)}
-      </div>
+      </div>}
       <div className="reproduction-forms">
       <form className="group-new-form" onSubmit={heat} hidden={activeForm!=='HEAT'}>
         <h3>Registrar celo</h3>
-        <label><span>Vaca *</span><select name="cowId" required defaultValue={initialAnimalId??''}>
+        <label><span>Vaca *</span><select name="cowId" required defaultValue={initialAnimalId??''}
+          disabled={Boolean(initialAction)}>
           <option value="" disabled>Selecciona la vaca</option>
           {females.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
-        </select></label>
+        </select>{initialAction&&<input type="hidden" name="cowId" value={initialAnimalId}/>}</label>
         <label><span>Toro registrado</span><select name="bullId" defaultValue="">
           <option value="">No registrado</option>
           {males.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
@@ -266,10 +269,11 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
       <form className="group-new-form" onSubmit={pregnancy} hidden={activeForm!=='PREGNANCY'}>
         <h3>Confirmar preñez</h3>
         <label><span>Vaca *</span><select name="cowId" required value={cowId}
+          disabled={Boolean(initialAction)}
           onChange={(event) => setCowId(event.target.value)}>
           <option value="" disabled>Selecciona la vaca</option>
           {females.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
-        </select></label>
+        </select>{initialAction&&<input type="hidden" name="cowId" value={initialAnimalId}/>}</label>
         <label><span>Celo relacionado</span><select name="heatId" defaultValue="" key={cowId}>
           <option value="">Sin celo registrado</option>
           {records?.heats.filter((entry) => entry.cowId === cowId && !entry.cancelled && !entry.isFalse)
@@ -308,10 +312,11 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
 
       <form className="group-new-form" onSubmit={reproductiveService} hidden={activeForm!=='SERVICE'}>
         <h3>Inseminación o transferencia</h3>
-        <label><span>Receptora *</span><select name="cowId" required defaultValue={initialAnimalId??''}>
+        <label><span>Receptora *</span><select name="cowId" required defaultValue={initialAnimalId??''}
+          disabled={Boolean(initialAction)}>
           <option value="" disabled>Selecciona la vaca</option>
           {females.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
-        </select></label>
+        </select>{initialAction&&<input type="hidden" name="cowId" value={initialAnimalId}/>}</label>
         <label><span>Tipo *</span><select name="kind" defaultValue="INSEMINATION">
           <option value="INSEMINATION">Inseminación artificial</option>
           <option value="EMBRYO_TRANSFER">Transferencia de embriones</option>
@@ -319,7 +324,8 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
         <label><span>Fecha *</span><input type="date" name="occurredOn" required defaultValue={localDate()} /></label>
         <label><span>Celo relacionado</span><select name="heatId" defaultValue="">
           <option value="">Sin celo registrado</option>
-          {records?.heats.filter((entry) => !entry.cancelled && !entry.isFalse)
+          {records?.heats.filter((entry) => !entry.cancelled && !entry.isFalse&&
+            (!initialAction||entry.cowId===initialAnimalId))
             .map((entry) => <option key={entry.id} value={entry.id}>{entry.cowName} · {entry.startsOn}</option>)}
         </select></label>
         <label><span>Padre registrado</span><select name="fatherId" defaultValue="">
@@ -345,7 +351,8 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
         <label><span>Preñez confirmada *</span><select name="pregnancyId" required
           defaultValue={confirmed.find(item=>item.cowId===initialAnimalId)?.id??''}>
           <option value="" disabled>Selecciona una preñez</option>
-          {confirmed.map((item) => <option key={item.id} value={item.id}>
+          {confirmed.filter(item=>!initialAction||item.cowId===initialAnimalId)
+            .map((item) => <option key={item.id} value={item.id}>
             {item.cowName} · {item.confirmedOn}</option>)}
         </select></label>
         <label><span>Fecha de parto *</span><input type="date" name="occurredOn"
@@ -372,7 +379,8 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
         <label><span>Preñez confirmada *</span><select name="pregnancyId" required
           defaultValue={confirmed.find(item=>item.cowId===initialAnimalId)?.id??''}>
           <option value="" disabled>Selecciona una preñez</option>
-          {confirmed.map((item) => <option key={item.id} value={item.id}>
+          {confirmed.filter(item=>!initialAction||item.cowId===initialAnimalId)
+            .map((item) => <option key={item.id} value={item.id}>
             {item.cowName} · {item.confirmedOn}</option>)}
         </select></label>
         <label><span>Fecha *</span><input type="date" name="occurredOn"

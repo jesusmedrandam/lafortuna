@@ -9,6 +9,7 @@ import {
   type AccountDetails,
   type PlatformOverview,
 } from './api';
+import {SystemCatalogAdmin} from './SystemCatalogAdmin';
 
 const message = (error: unknown) => error instanceof ApiRequestError
   ? error.message
@@ -56,6 +57,7 @@ export function SuperadminPanel({ accessToken, onSettingsChanged }: {
   const [detail, setDetail] = useState<AccountDetails | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tab,setTab]=useState<'accounts'|'catalogs'>('accounts');
 
   async function loadOverview() {
     setOverview(await getPlatformOverview(accessToken));
@@ -120,6 +122,13 @@ export function SuperadminPanel({ accessToken, onSettingsChanged }: {
     <div className="section-heading"><div><span className="eyebrow">Administración global</span>
       <h2>Estado de la plataforma</h2></div><span className="phase-label">Datos reales</span></div>
     {error && <div className="form-error admin-error" role="alert">{error}</div>}
+    <div className="system-admin-tabs" role="group" aria-label="Administración global">
+      <button type="button" className={tab==='accounts'?'active':''}
+        onClick={()=>setTab('accounts')}>Cuentas y módulos</button>
+      <button type="button" className={tab==='catalogs'?'active':''}
+        onClick={()=>setTab('catalogs')}>Opciones del sistema</button>
+    </div>
+    {tab==='catalogs'?<SystemCatalogAdmin token={accessToken}/>:<>
     <div className="platform-totals">
       <article><span>Usuarios</span><strong>{overview.totals.users}</strong></article>
       <article><span>Cuentas</span><strong>{overview.totals.accounts}</strong></article>
@@ -177,5 +186,6 @@ export function SuperadminPanel({ accessToken, onSettingsChanged }: {
         </>}
       </div>
     </div>
+    </>}
   </section>;
 }

@@ -18,9 +18,10 @@ function today(){return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guaya
 function money(value:number){return new Intl.NumberFormat('es-EC',{style:'currency',currency:'USD'}).format(value);}
 function summary(line:CommerceLine){return line.animalName??`${line.quantity} ${line.unit} ${line.productName}`;}
 
-export function V2CommercePage({kind}:{kind:'SALE'|'PURCHASE'}){
+export function V2CommercePage({kind,profileAnimalId,profileAction,onCompleted}:{
+  kind:'SALE'|'PURCHASE';profileAnimalId?:string;profileAction?:string;onCompleted?:()=>void}){
   const {session,hasPermission}=useV2Session();const token=session!.accessToken;const navigate=useNavigate();
-  const [params]=useSearchParams();const initialAnimal=params.get('animal')??'';
+  const [params]=useSearchParams();const initialAnimal=profileAnimalId??params.get('animal')??'';
   const [rows,setRows]=useState<CommerceRecord[]|null>(null);
   const [animals,setAnimals]=useState<Array<{id:string;name:string;earTagCode:string|null}>>([]);
   const [query,setQuery]=useState('');const [detail,setDetail]=useState<CommerceRecord|null>(null);
@@ -35,10 +36,10 @@ export function V2CommercePage({kind}:{kind:'SALE'|'PURCHASE'}){
   const canManage=hasPermission('COMMERCE_MANAGE');
   const canManageCatalogs=hasPermission('CATALOG_MANAGE');
   const openedFromProfile=useRef<string|null>(null);
-  useEffect(()=>{if(!canManage||!initialAnimal||params.get('accion')!=='NUEVA'||
+  useEffect(()=>{if(!canManage||!initialAnimal||(profileAction??params.get('accion'))!=='NUEVA'||
     openedFromProfile.current===initialAnimal||!animals.some(item=>item.id===initialAnimal))return;
     openedFromProfile.current=initialAnimal;start();
-  },[animals,canManage,initialAnimal,params]);
+  },[animals,canManage,initialAnimal,params,profileAction]);
   useEffect(()=>{let active=true;setRows(null);setError('');
     void getCommerce(token).then(data=>{if(active)setRows(data);}).catch(reason=>{
       if(active)setError(reason instanceof Error?reason.message:'No se pudieron cargar las operaciones.');});
@@ -87,6 +88,7 @@ export function V2CommercePage({kind}:{kind:'SALE'|'PURCHASE'}){
       line.type==='PRODUCT'&&!products.some(item=>item.id===line.productId)))){
       setError('Selecciona un comprador y productos de venta activos de tu cuenta.');return;}
     setBusy(true);setError('');try{await createCommerce(token,input);setOpen(false);
+      if(profileAction)onCompleted?.();
       setRevision(value=>value+1);}catch(reason){setError(reason instanceof Error?reason.message:'No se pudo guardar.');}
     finally{setBusy(false);}
   }

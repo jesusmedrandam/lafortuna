@@ -80,7 +80,9 @@ function V2Shell(){
   const [error,setError]=useState('');const location=useLocation();const navigate=useNavigate();
   const overview=session!.overview;const property=activeProperty(overview);
   const role=property?.roles.find(item=>item.id===overview.activeContext?.roleId);
+  const platformMode=overview.user.isSuperadmin&&location.pathname.startsWith('/administracion');
   const visible=useMemo(()=>destinations.filter(item=>{
+    if(platformMode)return Boolean(item.admin);
     if(item.admin)return overview.user.isSuperadmin;
     if(item.to==='/')return true;
     if(item.to==='/mis-finanzas')return overview.enabledUserModules.includes('PERSONAL_FINANCE');
@@ -91,7 +93,7 @@ function V2Shell(){
     if(item.to==='/grupos'&&!property.enabledModules.some(code=>code==='PASTURES'||code==='CORRALS'))return false;
     if(item.to==='/limpiezas'&&!property.enabledModules.includes('PASTURES'))return false;
     return true;
-  }),[overview,property,hasPermission]);
+  }),[overview,property,hasPermission,platformMode]);
   const current=visible.find(item=>item.to===location.pathname)||visible.find(item=>
     item.to!=='/'&&location.pathname.startsWith(`${item.to}/`));
   async function switchProperty(id:string){
@@ -112,15 +114,24 @@ function V2Shell(){
       <div className="sidebar-brand"><img src="/branding/logo-sgb-icon.png" alt="SGB"/>
         <div><strong>SGB</strong><span>Gestión Bovina</span></div>
         <IconButton label="Cerrar menú" className="sidebar-close" onClick={()=>setOpen(false)}><X size={20}/></IconButton></div>
-      <div className="v2-property-picker"><label htmlFor="active-property">Propiedad activa</label>
+      {overview.user.isSuperadmin&&<div className="v2-scope-picker">
+        <label htmlFor="active-scope">Trabajar como</label>
+        <select id="active-scope" value={platformMode?'PLATFORM':'PROPERTY'}
+          onChange={event=>navigate(event.target.value==='PLATFORM'?'/administracion':'/')}>
+          <option value="PLATFORM">Superadministrador</option>
+          <option value="PROPERTY">Rol en una propiedad</option>
+        </select>
+      </div>}
+      {!platformMode&&<div className="v2-property-picker"><label htmlFor="active-property">Propiedad activa</label>
         <select id="active-property" value={property?.id??''} disabled={changing||!overview.properties.length}
           onChange={event=>void switchProperty(event.target.value)}>
           {!property&&<option value="">Selecciona una propiedad</option>}
           {overview.properties.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>{property&&property.roles.length>1?<select aria-label="Rol activo" value={role?.id??''}
-          disabled={changing} onChange={event=>void switchRole(event.target.value)}>
+        </select>{property?<><label htmlFor="active-role">Rol en la propiedad</label>
+          <select id="active-role" value={role?.id??''}
+          disabled={changing||!property.roles.length} onChange={event=>void switchRole(event.target.value)}>
           {property.roles.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>:<small>{role?.name??'Sin rol activo'}</small>}</div>
+        </select></>:<small>Elige una propiedad para seleccionar un rol.</small>}</div>}
       <nav className="sidebar-nav" aria-label="Secciones">
         {(['principal','operaciones','configuracion'] as const).map(section=>{
           const items=visible.filter(item=>item.section===section);
@@ -133,14 +144,14 @@ function V2Shell(){
         })}
       </nav>
       <div className="sidebar-user"><div className="user-avatar"><span>{overview.user.displayName.slice(0,1)}</span></div>
-        <div><strong>{overview.user.displayName}</strong><span>{overview.user.isSuperadmin?'Superadministrador':role?.name??'Usuario'}</span></div>
+        <div><strong>{overview.user.displayName}</strong><span>{platformMode?'Superadministrador':role?.name??'Usuario'}</span></div>
         <IconButton label="Cerrar sesión" onClick={()=>void signOut()}><LogOut size={18}/></IconButton>
       </div>
     </aside>
     <div className="shell-main"><header className="topbar"><div className="topbar-left">
       <IconButton label="Abrir menú" className="mobile-menu-button" onClick={()=>setOpen(true)}><Menu size={22}/></IconButton>
       <div><span className="breadcrumb">Sistema de Gestión Bovina</span><h2>{current?.label??'Gestión ganadera'}</h2></div>
-    </div><div className="topbar-actions"><span className="v2-current-property">{property?.name??'Sin propiedad'}</span>
+    </div><div className="topbar-actions"><span className="v2-current-property">{platformMode?'Administración global':property?.name??'Sin propiedad'}</span>
       <V2NotificationCenter/>
       <IconButton label={theme==='dark'?'Usar tema claro':'Usar tema oscuro'} onClick={toggleTheme}>
         {theme==='dark'?<Sun size={19}/>:<Moon size={19}/>}</IconButton>

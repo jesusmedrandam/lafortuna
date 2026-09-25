@@ -14,8 +14,9 @@ const message=(error:unknown)=>error instanceof ApiRequestError?error.message:
   error instanceof Error?error.message:'No se pudo guardar el registro sanitario.';
 type HealthTab='conditions'|'treatments'|'campaigns';
 
-export function HealthPanel({accessToken,canManage,initialAnimalId}:{accessToken:string;canManage:boolean;
-  initialAnimalId?:string|undefined}){
+export function HealthPanel({accessToken,canManage,initialAnimalId,initialAction,onCompleted}:{
+  accessToken:string;canManage:boolean;initialAnimalId?:string|undefined;
+  initialAction?:string;onCompleted?:()=>void}){
   const [medicines,setMedicines]=useState<HealthMedicine[]>([]);
   const [options,setOptions]=useState<HealthOptions|null>(null);
   const [campaigns,setCampaigns]=useState<HealthCampaign[]|null>(null);
@@ -44,7 +45,7 @@ export function HealthPanel({accessToken,canManage,initialAnimalId}:{accessToken
   const [doses,setDoses]=useState<Record<string,string>>({});
   const [conditionIds,setConditionIds]=useState<Record<string,string>>({});
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
-  useEffect(()=>{const requested=new URLSearchParams(window.location.search).get('accion');
+  useEffect(()=>{const requested=initialAction??new URLSearchParams(window.location.search).get('accion');
     if(!['CONDICION','TRATAMIENTO'].includes(requested??'')||
       !initialAnimalId||initialAnimalId===prefilledAnimalId||
       !options?.animals.some(item=>item.id===initialAnimalId)||!canManage)return;
@@ -52,7 +53,7 @@ export function HealthPanel({accessToken,canManage,initialAnimalId}:{accessToken
       setTab('treatments');setMode('MANUAL');setSelected([initialAnimalId]);setShowCampaign(true);
     }else{setTab('conditions');setShowCondition(true);}
     setPrefilledAnimalId(initialAnimalId);
-  },[initialAnimalId,prefilledAnimalId,options?.animals,canManage]);
+  },[initialAnimalId,prefilledAnimalId,options?.animals,canManage,initialAction]);
   useEffect(()=>{if(new URLSearchParams(window.location.search).get('vista')==='tratamientos')
     setTab('treatments');},[initialAnimalId]);
 
@@ -125,7 +126,8 @@ export function HealthPanel({accessToken,canManage,initialAnimalId}:{accessToken
       animal.conditionId??''])));
   }
   async function run(operation:()=>Promise<unknown>,done?:()=>void){setBusy(true);setError(null);
-    try{await operation();done?.();setRevision((value)=>value+1);}
+    try{await operation();done?.();setRevision((value)=>value+1);
+      if(initialAction&&done)onCompleted?.();}
     catch(failure){setError(message(failure));window.scrollTo({top:0,behavior:'smooth'});}
     finally{setBusy(false);}
   }

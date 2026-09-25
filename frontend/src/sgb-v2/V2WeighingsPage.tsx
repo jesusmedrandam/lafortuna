@@ -17,9 +17,10 @@ function ecuadorToday(){
 function amount(item:WeighingRecord){return `${item.weight} ${item.unitCode==='POUND'?'lb':'kg'}`;}
 function message(reason:unknown){return reason instanceof Error?reason.message:'No se pudo guardar el pesaje.';}
 
-export function V2WeighingsPage(){
+export function V2WeighingsPage({profileAnimalId,profileAction,onCompleted}:{
+  profileAnimalId?:string;profileAction?:string;onCompleted?:()=>void}={}){
   const {session,hasPermission}=useV2Session();const token=session!.accessToken;const navigate=useNavigate();
-  const [params]=useSearchParams();const animalId=params.get('animal')??undefined;
+  const [params]=useSearchParams();const animalId=profileAnimalId??params.get('animal')??undefined;
   const [records,setRecords]=useState<WeighingRecord[]|null>(null);
   const [animals,setAnimals]=useState<Array<{id:string;name:string;earTagCode:string|null}>>([]);
   const [query,setQuery]=useState('');const [newest,setNewest]=useState(true);
@@ -28,10 +29,10 @@ export function V2WeighingsPage(){
   const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [revision,setRevision]=useState(0);
   const canManage=hasPermission('WEIGHING_MANAGE');
   const openedFromProfile=useRef<string|null>(null);
-  useEffect(()=>{if(!canManage||!animalId||params.get('accion')!=='NUEVO'||
+  useEffect(()=>{if(!canManage||!animalId||(profileAction??params.get('accion'))!=='NUEVO'||
     openedFromProfile.current===animalId||!animals.some(item=>item.id===animalId))return;
     openedFromProfile.current=animalId;setEditing(null);
-  },[animalId,animals,canManage,params]);
+  },[animalId,animals,canManage,params,profileAction]);
   useEffect(()=>{let active=true;setError('');
     void getWeighings(token,animalId).then(items=>{if(active)setRecords(items);})
       .catch(reason=>{if(active)setError(message(reason));});
@@ -55,7 +56,7 @@ export function V2WeighingsPage(){
       ...(editing?{expectedVersion:editing.version}:{})};
     try{if(editing)await updateWeighing(token,editing.id,input);
       else await createWeighing(token,input);
-      setEditing(undefined);setRevision(value=>value+1);
+      setEditing(undefined);setRevision(value=>value+1);if(profileAction)onCompleted?.();
     }catch(reason){setError(message(reason));}finally{setBusy(false);}
   }
   async function confirmVoid(){if(!pendingVoid)return;setBusy(true);setError('');

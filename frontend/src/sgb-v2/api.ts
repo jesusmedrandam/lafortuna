@@ -1192,6 +1192,23 @@ export function updateAdministrativeModule(
   });
 }
 
+export type SystemCatalogCode='BREEDS'|'COLORS'|'GRASS_TYPES'|'HEALTH_CONDITION_TYPES'|
+  'AGROCHEMICAL_CATEGORIES'|'MEDIA_TAGS'|'MOVEMENT_REASONS'|'TREATMENT_TYPES';
+export interface SystemCatalogItem {id:string;catalogCode:SystemCatalogCode;name:string;
+  itemCode:string|null;active:boolean;speciesCode:string|null;systemDefined:true}
+export function getSystemCatalog(token:string,code:SystemCatalogCode){
+  return request<SystemCatalogItem[]>(`/superadmin/catalogs/${code}/items`,{headers:bearer(token)});
+}
+export function createSystemCatalogItem(token:string,code:SystemCatalogCode,name:string){
+  return request<SystemCatalogItem>(`/superadmin/catalogs/${code}/items`,{
+    method:'POST',headers:bearer(token),body:JSON.stringify({name})});
+}
+export function updateSystemCatalogItem(token:string,code:SystemCatalogCode,id:string,
+  input:{name?:string;active?:boolean}){
+  return request<SystemCatalogItem>(`/superadmin/catalogs/${code}/items/${encodeURIComponent(id)}`,{
+    method:'PATCH',headers:bearer(token),body:JSON.stringify(input)});
+}
+
 export interface MediaItem {
   id:string;storage_object_id:string;entity_type:string;entity_id:string;entity_name:string|null;
   relation_code:string;description:string|null;captured_on:string|null;
