@@ -36,6 +36,7 @@ export function V2AnimalDetail(){
   const [sections,setSections]=useState<Section[]>([]);
   const [movementOptions,setMovementOptions]=useState<MovementOptions|null>(null);
   const [inMilking,setInMilking]=useState(false);
+  const [activeLactationId,setActiveLactationId]=useState<string|null>(null);
   const [hasMedicines,setHasMedicines]=useState(false);
   const [healthConditions,setHealthConditions]=useState<HealthCondition[]>([]);
   const [reproduction,setReproduction]=useState<ReproductionRecords|null>(null);
@@ -56,6 +57,7 @@ export function V2AnimalDetail(){
     return()=>{active=false;};
   },[id,token,canViewMedia,revision]);
   useEffect(()=>{if(!id)return;let active=true;setSections([]);setInMilking(false);
+    setActiveLactationId(null);
     setReproduction(null);setReproductionSettings(null);
     setMovementOptions(null);
     setHasMedicines(false);
@@ -107,6 +109,7 @@ export function V2AnimalDetail(){
     }
     if(can('PRODUCTION_VIEW','PRODUCTION'))jobs.push(getProduction(token).then(items=>{
       if(active)setInMilking(Boolean(items.cows.find(row=>row.id===id)?.inMilking));
+      if(active)setActiveLactationId(items.lactations.find(row=>row.cowId===id&&!row.endedOn)?.id??null);
       return recent('Producción','/produccion',[
         ...items.milk.filter(item=>item.cowId===id)
           .map(item=>({id:item.id,date:item.producedOn,label:`Leche · ${item.liters} L`})),
@@ -152,16 +155,15 @@ export function V2AnimalDetail(){
   ]);
   const groupId=animal?.group?.id;
   const ownGroup=movementOptions?.groups.find(item=>item.id===groupId);
-  const moveSameProperty=Boolean(ownGroup&&movementOptions?.groups.some(item=>
-    item.propertyId===property?.id&&item.id!==groupId));
-  const moveOtherProperty=Boolean(ownGroup&&movementOptions?.groups.some(item=>
-    item.propertyId!==property?.id));
-  const rotate=Boolean(ownGroup&&can('LOCATION_MANAGE')&&
+  const canMove=Boolean(usable&&groupId&&can('MOVEMENT_MANAGE','MOVEMENTS'));
+  const moveOtherProperty=Boolean(canMove&&(movementOptions?.properties.some(item=>
+    item.id!==property?.id)||session!.overview.properties.some(item=>item.id!==property?.id)));
+  const rotate=Boolean(canMove&&ownGroup&&can('LOCATION_MANAGE')&&
     (modules.includes('PASTURES')||modules.includes('CORRALS'))&&
     movementOptions?.locations.some(item=>item.propertyId===property?.id&&
       item.id!==ownGroup.locationId&&!movementOptions.groups.some(group=>group.locationId===item.id)));
   const movementActions:AnimalAction[]=[
-    ...(moveSameProperty?[{label:'Cambiar de grupo',run:()=>openAction('movement','GRUPO')}]:[]),
+    ...(canMove?[{label:'Cambiar de grupo',run:()=>openAction('movement','GRUPO')}]:[]),
     ...(moveOtherProperty?[{label:'Cambiar de propiedad',run:()=>openAction('movement','PROPIEDAD')}]:[]),
     ...(rotate?[{label:'Rotación de potrero o corral · todo el grupo',
       run:()=>openAction('movement','UBICACION')}]:[]),
@@ -171,17 +173,22 @@ export function V2AnimalDetail(){
     {label:movementHistory?.entries.length?'Ver historial de movimientos':'Ver movimientos',
       run:()=>go('/movimientos')}];
   const activeHealthConditions=healthConditions.filter(condition=>condition.status!=='RESUELTA');
+  const treatedHealthConditions=activeHealthConditions.filter(condition=>condition.status==='EN_TRATAMIENTO');
   const hasHealthHistory=sections.some(section=>
     (section.title==='Condiciones de salud'||section.title==='Tratamientos')&&section.entries.length>0);
   const healthActions:AnimalAction[]=[
     ...(usable&&can('HEALTH_MANAGE','HEALTH')?[{label:'Crear condición de salud',
       run:()=>openAction('health','CONDICION')}]:[]),
-    ...(hasHealthHistory?[{label:'Ver historial de sanidad',run:()=>go('/sanidad')}]:[]),
     ...(usable&&can('HEALTH_MANAGE','HEALTH')&&hasMedicines?[{label:'Aplicar tratamiento preventivo',
       run:()=>openAction('health','TRATAMIENTO_PREVENTIVO')}]:[]),
     ...(usable&&can('HEALTH_MANAGE','HEALTH')&&hasMedicines&&activeHealthConditions.length?[{
       label:'Aplicar tratamiento sobre condición de salud',
       run:()=>openAction('health','TRATAMIENTO_CONDICION')}]:[]),
+    ...(usable&&can('HEALTH_MANAGE','HEALTH')?treatedHealthConditions.map(condition=>({
+      label:`Marcar como resuelta · ${condition.kind??'Condición de salud'}`,
+      run:()=>openAction('health',`RESOLVER_CONDICION:${condition.id}`),
+    })):[]),
+    ...(hasHealthHistory?[{label:'Ver historial de sanidad',run:()=>go('/sanidad')}]:[]),
   ];
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil',
     year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -199,6 +206,14 @@ export function V2AnimalDetail(){
     {label:'Registrar inseminación o transferencia',run:()=>openAction('reproduction','SERVICIO')},
     {label:'Confirmar preñez',run:()=>openAction('reproduction','PRENEZ')},
   ]):[];
+  const productionHistory=sections.find(section=>section.title==='Producción');
+  const productionActions:AnimalAction[]=[
+    ...(inMilking&&usable&&can('PRODUCTION_MANAGE','PRODUCTION')?[{
+      label:'Registrar producción',run:()=>openAction('production','LECHE')}]:[]),
+    ...(activeLactationId&&usable&&can('PRODUCTION_MANAGE','PRODUCTION')?[{
+      label:'Cerrar lactancia',run:()=>openAction('production','CERRAR_LACTANCIA')}]:[]),
+    ...(productionHistory?.entries.length?[{label:'Ver historial de producción',run:()=>go('/produccion')}]:[]),
+  ];
   const lightboxItems:LightboxMedia[]=media.filter(item=>item.kind==='IMAGE').map(item=>({
     key:item.id,url:item.url,type:'IMAGEN',title:animal?.name??'Animal',
     subtitle:[item.relation_code==='PROFILE'?'Foto de perfil':item.relation_code==='COVER'?'Foto de portada':
@@ -253,8 +268,9 @@ export function V2AnimalDetail(){
         reproductiveActions.length>0&&<IconButton label="Reproducción"
           onClick={()=>choose('Reproducción de '+animal.name,reproductiveActions)}>
           <Baby size={21}/></IconButton>}
-      {usable&&animal.sex==='FEMALE'&&inMilking&&can('PRODUCTION_MANAGE','PRODUCTION')&&
-        <IconButton label="Registrar producción" onClick={()=>openAction('production','LECHE')}><Milk size={21}/></IconButton>}
+      {animal.sex==='FEMALE'&&productionActions.length>0&&can('PRODUCTION_VIEW','PRODUCTION')&&
+        <IconButton label="Producción" onClick={()=>setMenu({title:'Producción de '+animal.name,
+          actions:productionActions})}><Milk size={21}/></IconButton>}
     </div>
     <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic" hidden
       disabled={busy} onChange={event=>{const file=event.currentTarget.files?.[0];event.currentTarget.value='';

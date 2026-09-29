@@ -5,15 +5,13 @@ import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDoc
 import {formatDate} from '../utils';
 import {ApiRequestError,createLactation,finishLactation,getProduction,recordMilk,
   recordTank,setLactationMilking,setCowMilking,type MilkShift,type ProductionRecords} from './api';
+import {SearchableSelect} from './SearchableSelect';
 
 function localDate(){const date=new Date();return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;}
 const issue=(error:unknown)=>error instanceof ApiRequestError ? error.message
   : error instanceof Error ? error.message : 'No se pudo guardar la producción.';
 const optional=(data:FormData,key:string)=>String(data.get(key)||'').trim()||null;
 const shiftName:Record<MilkShift,string>={MORNING:'Mañana',AFTERNOON:'Tarde',NIGHT:'Noche',SINGLE:'Único'};
-function ShiftSelect(){return <select name="shift" defaultValue="SINGLE">
-  {Object.entries(shiftName).map(([code,label])=><option key={code} value={code}>{label}</option>)}
-</select>;}
 
 export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAction,onCompleted}:{
   accessToken:string;canManage:boolean;initialAnimalId?:string|undefined;
@@ -26,7 +24,15 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAc
   const [tab,setTab]=useState<'production'|'lactations'>('production');
   const [search,setSearch]=useState('');
   const [selected,setSelected]=useState<{kind:'MILK'|'TANK'|'LACTATION'|'COW';id:string}|null>(null);
-  const [activeForm,setActiveForm]=useState<'LACTATION'|'MILK'|'TANK'|null>(null);
+  const [activeForm,setActiveForm]=useState<'LACTATION'|'MILK'|'TANK'|'CLOSE_LACTATION'|null>(null);
+  const [birthId,setBirthId]=useState('');
+  const [milkCowId,setMilkCowId]=useState('');
+  const [milkShift,setMilkShift]=useState<MilkShift>('SINGLE');
+  const [milkSource,setMilkSource]=useState<'MANUAL'|'SENSOR'>('MANUAL');
+  const [tankShift,setTankShift]=useState<MilkShift>('SINGLE');
+  const [tankSource,setTankSource]=useState<'MANUAL'|'SENSOR'>('MANUAL');
+  const [closingLactationId,setClosingLactationId]=useState<string|null>(null);
+  const [closeDate,setCloseDate]=useState(localDate());
   useEffect(()=>{
     let active=true;
     void getProduction(accessToken).then((value)=>{if(active)setRecords(value);})
@@ -35,10 +41,13 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAc
   },[accessToken,revision]);
   const milkingCows=records?.cows.filter((row)=>row.inMilking)??[];
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
-  useEffect(()=>{if((initialAction??new URLSearchParams(window.location.search).get('accion'))!=='LECHE'||
-    !initialAnimalId||initialAnimalId===prefilledAnimalId||!records||!canManage)return;
-    if(records.cows.some(row=>row.id===initialAnimalId&&row.inMilking)){
-      setActiveForm('MILK');setPrefilledAnimalId(initialAnimalId);}
+  useEffect(()=>{const requested=initialAction??new URLSearchParams(window.location.search).get('accion');
+    if(!initialAnimalId||initialAnimalId===prefilledAnimalId||!records||!canManage)return;
+    if(requested==='LECHE'&&records.cows.some(row=>row.id===initialAnimalId&&row.inMilking)){
+      setMilkCowId(initialAnimalId);setActiveForm('MILK');setPrefilledAnimalId(initialAnimalId);return;}
+    if(requested==='CERRAR_LACTANCIA'){const active=records.lactations.find(row=>
+      row.cowId===initialAnimalId&&!row.endedOn);if(active){setClosingLactationId(active.id);
+        setCloseDate(localDate());setActiveForm('CLOSE_LACTATION');setPrefilledAnimalId(initialAnimalId);}}
   },[initialAnimalId,prefilledAnimalId,records,canManage,initialAction]);
   const daily=useMemo(()=>({
     milk:records?.milk.filter((row)=>(!initialAnimalId||row.cowId===initialAnimalId)&&
@@ -54,9 +63,10 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAc
   const viewTank=selected?.kind==='TANK'?records?.tanks.find(row=>row.id===selected.id):null;
   const viewLactation=selected?.kind==='LACTATION'?records?.lactations.find(row=>row.id===selected.id):null;
   const viewCow=selected?.kind==='COW'?records?.cows.find(row=>row.id===selected.id):null;
+  const closingLactation=records?.lactations.find(row=>row.id===closingLactationId);
   async function run(operation:()=>Promise<unknown>,form?:HTMLFormElement){
     setBusy(true);setError(null);
-    try{await operation();form?.reset();setActiveForm(null);setSelected(null);
+    try{await operation();form?.reset();setActiveForm(null);setSelected(null);setClosingLactationId(null);
       if(initialAction)onCompleted?.();
       setRevision((value)=>value+1);}
     catch(failure){setError(issue(failure));}
@@ -64,23 +74,26 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAc
   }
   function start(event:FormEvent<HTMLFormElement>){event.preventDefault();const form=event.currentTarget;
     const data=new FormData(form);
-    void run(()=>createLactation(accessToken,{birthId:String(data.get('birthId')),
+    void run(()=>createLactation(accessToken,{birthId,
       inMilking:data.get('inMilking')==='on',notes:optional(data,'notes')}),form);
   }
   function milk(event:FormEvent<HTMLFormElement>){event.preventDefault();const form=event.currentTarget;
     const data=new FormData(form);
-    void run(()=>recordMilk(accessToken,{cowId:String(data.get('cowId')),
-      producedOn:String(data.get('producedOn')),shift:String(data.get('shift')) as MilkShift,
-      liters:Number(data.get('liters')),source:String(data.get('source')) as 'MANUAL'|'SENSOR',
+    void run(()=>recordMilk(accessToken,{cowId:milkCowId,
+      producedOn:String(data.get('producedOn')),shift:milkShift,
+      liters:Number(data.get('liters')),source:milkSource,
       externalReference:optional(data,'externalReference'),notes:optional(data,'notes')}),form);
   }
   function tank(event:FormEvent<HTMLFormElement>){event.preventDefault();const form=event.currentTarget;
     const data=new FormData(form);
     void run(()=>recordTank(accessToken,{producedOn:String(data.get('producedOn')),
-      shift:String(data.get('shift')) as MilkShift,liters:Number(data.get('liters')),
-      source:String(data.get('source')) as 'MANUAL'|'SENSOR',
+      shift:tankShift,liters:Number(data.get('liters')),
+      source:tankSource,
       externalReference:optional(data,'externalReference'),notes:optional(data,'notes')}),form);
   }
+  function closeLactation(event:FormEvent<HTMLFormElement>){event.preventDefault();
+    if(!closingLactation)return;void run(()=>finishLactation(accessToken,closingLactation.id,closeDate),
+      event.currentTarget);}
   return <section className="module-no-header production-panel">
     <div className="form-toolbar reproduction-tabs" role="tablist" aria-label="Producción">
       <button type="button" role="tab" aria-selected={tab==='production'}
@@ -93,54 +106,69 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAc
     {error&&<div role="alert" className="form-error admin-error">{error}</div>}
     {!records&&!error&&<LoadingState/>}
     {!records&&error&&<ErrorState message={error} onRetry={()=>setRevision(value=>value+1)}/>}
-    {canManage&&records&&activeForm&&<Modal title="Registrar producción" wide
-      onClose={()=>setActiveForm(null)} footer={<Button variant="ghost"
-        onClick={()=>setActiveForm(null)}>Cerrar</Button>}>
-      <div className="form-toolbar" aria-label="Tipo de registro">
+    {canManage&&records&&activeForm&&<Modal title={activeForm==='CLOSE_LACTATION'?'Cerrar lactancia':'Registrar producción'} wide
+      onClose={()=>{setActiveForm(null);setClosingLactationId(null);}} footer={<Button variant="ghost"
+        onClick={()=>{setActiveForm(null);setClosingLactationId(null);}}>Cerrar</Button>}>
+      {!initialAction&&activeForm!=='CLOSE_LACTATION'&&<div className="form-toolbar" aria-label="Tipo de registro">
       {([['LACTATION','Iniciar lactancia'],['MILK','Ordeño'],['TANK','Tanque']] as const)
         .map(([id,label])=><button type="button" key={id} className={activeForm===id?'active':''}
           aria-pressed={activeForm===id} onClick={()=>setActiveForm(id)}>{label}</button>)}
-      </div>
+      </div>}
       <div className="production-forms">
       <form className="group-new-form" onSubmit={start} hidden={activeForm!=='LACTATION'}>
         <h3>Iniciar lactancia</h3>
-        <label><span>Parto *</span><select name="birthId" required defaultValue="">
-          <option value="" disabled>Selecciona el parto de la vaca</option>
-          {records.births.map((row)=><option key={row.id} value={row.id}>{row.cowName} · {row.occurredOn}</option>)}
-        </select></label>
+        <label><span>Parto *</span><SearchableSelect value={birthId} onChange={setBirthId}
+          title="Seleccionar parto" placeholder="Selecciona el parto de la vaca"
+          searchPlaceholder="Buscar por vaca o fecha…" options={records.births.map(row=>({value:row.id,
+            label:row.cowName,description:formatDate(row.occurredOn)}))}/></label>
         <label><span>En ordeño</span><input type="checkbox" name="inMilking" defaultChecked /></label>
         <label><span>Observaciones</span><textarea name="notes" maxLength={2000}/></label>
-        <button className="primary-button compact" disabled={busy||!records.births.length}>Iniciar lactancia</button>
+        <button className="primary-button compact" disabled={busy||!birthId}>Iniciar lactancia</button>
       </form>
       <form className="group-new-form" onSubmit={milk} hidden={activeForm!=='MILK'}>
         <h3>Registrar ordeño</h3>
-        <label><span>Vaca en ordeño *</span><select name="cowId" required
-          defaultValue={milkingCows.some(row=>row.id===initialAnimalId)?initialAnimalId:''}>
-          <option value="" disabled>Selecciona la vaca</option>
-          {milkingCows.map((row)=><option key={row.id} value={row.id}>
-            {row.name}{row.lactationId?' · con lactancia':' · sin lactancia'}</option>)}
-        </select></label>
+        <label><span>Vaca en ordeño *</span>{initialAnimalId&&milkCowId?<div className="health-fixed-animal selected">
+          <strong>{milkingCows.find(row=>row.id===milkCowId)?.name??'Vaca seleccionada'}</strong>
+          <small>Seleccionada desde su ficha</small></div>:<SearchableSelect value={milkCowId}
+            onChange={setMilkCowId} title="Seleccionar vaca" placeholder="Selecciona la vaca"
+            searchPlaceholder="Buscar vaca…" options={milkingCows.map(row=>({value:row.id,label:row.name,
+              description:row.lactationId?'Con lactancia activa':'Sin lactancia'}))}/>}</label>
         <label><span>Fecha *</span><input type="date" name="producedOn" required defaultValue={localDate()} /></label>
-        <label><span>Turno</span><ShiftSelect/></label>
+        <label><span>Turno</span><SearchableSelect value={milkShift}
+          onChange={value=>setMilkShift(value as MilkShift)} title="Turno de ordeño"
+          options={Object.entries(shiftName).map(([value,label])=>({value,label}))}/></label>
         <label><span>Litros *</span><input type="number" name="liters" min="0" max="10000" step="0.001" required /></label>
-        <label><span>Fuente</span><select name="source" defaultValue="MANUAL">
-          <option value="MANUAL">Manual</option><option value="SENSOR">Sensor</option>
-        </select></label>
+        <label><span>Fuente</span><SearchableSelect value={milkSource}
+          onChange={value=>setMilkSource(value as 'MANUAL'|'SENSOR')} title="Fuente de la medición"
+          options={[{value:'MANUAL',label:'Manual'},{value:'SENSOR',label:'Sensor'}]}/></label>
         <label><span>Referencia externa</span><input name="externalReference" maxLength={160}/></label>
         <label><span>Observaciones</span><textarea name="notes" maxLength={2000}/></label>
-        <button className="primary-button compact" disabled={busy||!milkingCows.length}>Guardar ordeño</button>
+        <button className="primary-button compact" disabled={busy||!milkCowId}>Guardar ordeño</button>
       </form>
       <form className="group-new-form" onSubmit={tank} hidden={activeForm!=='TANK'}>
         <h3>Registrar tanque</h3>
         <label><span>Fecha *</span><input type="date" name="producedOn" required defaultValue={localDate()}/></label>
-        <label><span>Turno</span><ShiftSelect/></label>
+        <label><span>Turno</span><SearchableSelect value={tankShift}
+          onChange={value=>setTankShift(value as MilkShift)} title="Turno del tanque"
+          options={Object.entries(shiftName).map(([value,label])=>({value,label}))}/></label>
         <label><span>Litros *</span><input type="number" name="liters" min="0" max="100000" step="0.001" required/></label>
-        <label><span>Fuente</span><select name="source" defaultValue="MANUAL">
-          <option value="MANUAL">Manual</option><option value="SENSOR">Sensor</option>
-        </select></label>
+        <label><span>Fuente</span><SearchableSelect value={tankSource}
+          onChange={value=>setTankSource(value as 'MANUAL'|'SENSOR')} title="Fuente de la medición"
+          options={[{value:'MANUAL',label:'Manual'},{value:'SENSOR',label:'Sensor'}]}/></label>
         <label><span>Referencia externa</span><input name="externalReference" maxLength={160}/></label>
         <label><span>Observaciones</span><textarea name="notes" maxLength={2000}/></label>
         <button className="primary-button compact" disabled={busy}>Guardar tanque</button>
+      </form>
+      <form className="group-new-form production-close-lactation" onSubmit={closeLactation}
+        hidden={activeForm!=='CLOSE_LACTATION'}>
+        <h3>Cerrar lactancia activa</h3>
+        {closingLactation&&<div className="health-fixed-animal selected"><strong>{closingLactation.cowName}</strong>
+          <small>Inició el {formatDate(closingLactation.startedOn)}</small></div>}
+        <label><span>Fecha de cierre *</span><input type="date" required value={closeDate}
+          min={closingLactation?.startedOn} max={localDate()} onChange={event=>setCloseDate(event.target.value)}/></label>
+        <p className="muted">Después del cierre ya no se podrán registrar nuevas producciones dentro de esta lactancia.</p>
+        <button className="primary-button compact" disabled={busy||!closingLactation||!closeDate}>
+          {busy?'Cerrando…':'Cerrar lactancia'}</button>
       </form>
     </div></Modal>}
     {records&&tab==='production'&&<><div className="production-date-filter">
@@ -209,9 +237,8 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAc
         {canManage&&!viewLactation.endedOn&&<><Button variant="secondary" disabled={busy}
           onClick={()=>void run(()=>setLactationMilking(accessToken,viewLactation.id,
             !viewLactation.inMilking))}>{viewLactation.inMilking?'Pausar ordeño':'Reanudar ordeño'}</Button>
-          <Button disabled={busy} onClick={()=>{const endedOn=window.prompt(
-            'Fecha de cierre (AAAA-MM-DD)',localDate());if(endedOn)void run(()=>finishLactation(
-              accessToken,viewLactation.id,endedOn));}}>Cerrar lactancia</Button></>}</>}>
+          <Button disabled={busy} onClick={()=>{setSelected(null);setClosingLactationId(viewLactation.id);
+            setCloseDate(localDate());setActiveForm('CLOSE_LACTATION');}}>Cerrar lactancia</Button></>}</>}>
       <div className="detail-grid"><div><small>Animal</small><strong>{viewLactation.cowName}</strong></div>
         <div><small>Inicio</small><strong>{formatDate(viewLactation.startedOn)}</strong></div>
         <div><small>Fin</small><strong>{viewLactation.endedOn?formatDate(viewLactation.endedOn):'Actualidad'}</strong></div>
@@ -226,9 +253,12 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAc
         <div><small>Estado</small><strong>{viewCow.inMilking?'En ordeño':'Sin ordeño'}</strong></div>
       </div></Modal>}
     {canManage&&records&&<FloatingActionDock>{tab==='production'&&<IconButton label="Medición del tanque"
-      className="secondary-fab" onClick={()=>setActiveForm('TANK')}><Gauge size={21}/></IconButton>}
+      className="secondary-fab" onClick={()=>{setTankShift('SINGLE');setTankSource('MANUAL');
+        setActiveForm('TANK');}}><Gauge size={21}/></IconButton>}
       <IconButton label={tab==='production'?'Producción por vaca':'Nueva lactancia'}
-        onClick={()=>setActiveForm(tab==='production'?'MILK':'LACTATION')}><Plus size={23}/>
+        onClick={()=>{if(tab==='production'){setMilkCowId(initialAnimalId&&milkingCows.some(row=>row.id===initialAnimalId)
+          ?initialAnimalId:'');setMilkShift('SINGLE');setMilkSource('MANUAL');setActiveForm('MILK');}
+        else{setBirthId('');setActiveForm('LACTATION');}}}><Plus size={23}/>
       </IconButton></FloatingActionDock>}
   </section>;
 }

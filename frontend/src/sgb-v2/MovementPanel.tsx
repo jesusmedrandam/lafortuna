@@ -5,6 +5,7 @@ import {Badge,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,IconB
 import {formatDate} from '../utils';
 import {ApiRequestError,applyMovement,cancelMovement,createMovement,getMovementOptions,
   getMovements,listCatalogItems,updateMovement,type CatalogItem,type MovementInput,type MovementOptions,type MovementRecord} from './api';
+import {SearchableSelect} from './SearchableSelect';
 
 const kinds:Record<MovementRecord['kind'],string>={
   UBICACION:'Cambiar potrero o corral',GRUPO:'Cambiar grupo',
@@ -150,47 +151,46 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
       {error&&<div role="alert" className="form-error movement-dialog-error">{error}</div>}
       <form className="movement-form" onSubmit={save}
       key={editing?.id??'new'}>
-      <label><span>Tipo *</span><select value={kind} disabled={Boolean(onCompleted)} onChange={(event)=>{
-        const next=event.target.value as MovementRecord['kind'];setKind(next);
+      <label><span>Tipo *</span><SearchableSelect value={kind} disabled={Boolean(onCompleted)}
+        title="Tipo de movimiento" onChange={value=>{
+        const next=value as MovementRecord['kind'];setKind(next);
         if(next==='UBICACION'){setMode('GRUPO');setDestinationPropertyId(propertyId);
           setDestinationGroupId(sourceGroupId);} else if(next==='GRUPO')setDestinationPropertyId(propertyId);
         else if(next==='PROPIEDAD')setDestinationPropertyId(
           options.properties.find((property)=>property.id!==propertyId)?.id??'');
-        setDestinationLocationId('');}}>
-        {Object.entries(kinds).filter(([value])=>
+        setDestinationLocationId('');}} options={Object.entries(kinds).filter(([value])=>
           (value!=='UBICACION'||canChangeLocation)&&(value!=='COMBINADO'||editing?.kind==='COMBINADO'))
-          .map(([value,label])=><option key={value} value={value}>{label}</option>)}
-      </select></label>
-      <label><span>Grupo de origen *</span><select value={sourceGroupId} required disabled={Boolean(onCompleted)} onChange={(event)=>{
-        const id=event.target.value;setSourceGroupId(id);setSelected([]);
-        setDestinationGroupId(kind==='UBICACION'?id:'');setDestinationLocationId('');}}>
-        <option value="">Selecciona el grupo primero</option>
-        {options.groups.filter((group)=>group.propertyId===propertyId).map((group)=><option
-          key={group.id} value={group.id}>{group.name}{group.locationName?` · ${group.locationName}`:''}</option>)}
-      </select></label>
+          .map(([value,label])=>({value,label}))}/></label>
+      <label><span>Grupo de origen *</span><SearchableSelect value={sourceGroupId}
+        title="Grupo de origen" placeholder="Selecciona el grupo primero" searchPlaceholder="Buscar grupo…"
+        disabled={Boolean(onCompleted)} onChange={id=>{setSourceGroupId(id);setSelected([]);
+        setDestinationGroupId(kind==='UBICACION'?id:'');setDestinationLocationId('');}}
+        options={options.groups.filter(group=>group.propertyId===propertyId).map(group=>({value:group.id,
+          label:group.name,description:group.locationName?`Ubicación: ${group.locationName}`:'Sin ubicación'}))}/></label>
       {(kind==='PROPIEDAD'||kind==='COMBINADO')&&<label><span>Propiedad de destino *</span>
-        <select value={destinationPropertyId} required onChange={(event)=>{
-          setDestinationPropertyId(event.target.value);setDestinationGroupId('');}}>
-          {options.properties.filter((property)=>kind!=='PROPIEDAD'||property.id!==propertyId)
-            .map((property)=><option key={property.id} value={property.id}>{property.name}</option>)}
-        </select><small>Solo aparecen propiedades de la misma cuenta donde puedes gestionar movimientos.</small>
+        <SearchableSelect value={destinationPropertyId} onChange={value=>{
+          setDestinationPropertyId(value);setDestinationGroupId('');}} title="Propiedad de destino"
+          placeholder="Selecciona la propiedad" searchPlaceholder="Buscar propiedad…"
+          options={options.properties.filter(property=>kind!=='PROPIEDAD'||property.id!==propertyId)
+            .map(property=>({value:property.id,label:property.name}))}/>
+        <small>Solo aparecen propiedades de la misma cuenta donde puedes gestionar movimientos.</small>
       </label>}
       {kind==='UBICACION'?<label><span>Potrero o corral de destino *</span>
-        <select value={destinationLocationId} required onChange={(event)=>setDestinationLocationId(event.target.value)}>
-          <option value="">Elige una ubicación diferente</option>
-          {locations.map((location)=><option key={location.id} value={location.id}>
-            {location.name} · {location.kind==='PASTURE'?'Potrero':'Corral'}</option>)}
-        </select><small>La rotación mueve todos los animales del grupo.</small></label>
+        <SearchableSelect value={destinationLocationId} onChange={setDestinationLocationId}
+          title="Potrero o corral de destino" placeholder="Elige una ubicación diferente"
+          searchPlaceholder="Buscar potrero o corral…" options={locations.map(location=>({value:location.id,
+            label:location.name,description:location.kind==='PASTURE'?'Potrero':'Corral'}))}/>
+        <small>La rotación mueve todos los animales del grupo.</small></label>
         :<label><span>Grupo de destino *</span>
-          <select value={destinationGroupId} required onChange={(event)=>setDestinationGroupId(event.target.value)}>
-            <option value="">Selecciona el grupo de destino</option>
-            {destinations.map((group)=><option key={group.id} value={group.id}>
-              {group.name}{group.locationName?` · ${group.locationName}`:''}</option>)}
-          </select><small>La ubicación se toma del grupo de destino.</small></label>}
-      {kind!=='UBICACION'&&<label><span>Selección</span><select value={mode} disabled={Boolean(onCompleted)}
-        onChange={(event)=>setMode(event.target.value as MovementRecord['selectionMode'])}>
-          <option value="GRUPO">Grupo completo</option><option value="MANUAL">Animales seleccionados</option>
-        </select></label>}
+          <SearchableSelect value={destinationGroupId} onChange={setDestinationGroupId}
+            title="Grupo de destino" placeholder="Selecciona el grupo de destino" searchPlaceholder="Buscar grupo…"
+            options={destinations.map(group=>({value:group.id,label:group.name,
+              description:group.locationName?`Ubicación: ${group.locationName}`:'Sin ubicación'}))}/>
+          <small>La ubicación se toma del grupo de destino.</small></label>}
+      {kind!=='UBICACION'&&<label><span>Selección</span><SearchableSelect value={mode}
+        disabled={Boolean(onCompleted)} title="Forma de mover animales"
+        onChange={value=>setMode(value as MovementRecord['selectionMode'])}
+        options={[{value:'GRUPO',label:'Grupo completo'},{value:'MANUAL',label:'Animales seleccionados'}]}/></label>}
       <label><span>Fecha *</span><input type="date" name="movementOn" required max={today()}
         defaultValue={editing?.movementOn??today()}/></label>
       <label className="movement-wide"><span>Motivo *</span><input name="reason" list="movement-reasons" required
