@@ -1,8 +1,8 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import {
-  ApiRequestError, createAnimal, createBrand, createCatalogItem, getAnimal, getAnimals, listBrands,
-  listCatalogItems, setBrandActive, updateAnimalBrands, updateAnimalCatalogs,
-  listOwners, listAccountUsers, createOwner, updateBrandOwners, updateAnimalOwners,
+  ApiRequestError, createAnimal, createCatalogItem, getAnimal, getAnimals, listBrands,
+  listCatalogItems, updateAnimalBrands, updateAnimalCatalogs,
+  listOwners, listAccountUsers, createOwner, updateAnimalOwners,
   updateAnimalDescription, updateAnimalParents,
   listGroups, type LivestockGroup,
   listLocations,type PhysicalLocation,type AnimalFilters,
@@ -115,9 +115,11 @@ function equalShares(ids:string[],fixed?:{id:string;value:number;raw:string}):Re
   return result;
 }
 
-function OwnerFields({ owners, selected, canManage, onCreate }: {
-  owners: LivestockOwner[]; selected?: Animal | null; canManage: boolean;
+function OwnerFields({ owners, accountUsers, selected, canManage, onCreate, onCreateUser }: {
+  owners: LivestockOwner[]; accountUsers: Array<{id:string;name:string}>;
+  selected?: Animal | null; canManage: boolean;
   onCreate: (kind:'EXTERNAL_PERSON'|'ORGANIZATION',name:string)=>Promise<LivestockOwner>;
+  onCreateUser: (userId:string)=>Promise<LivestockOwner>;
 }) {
   const [ids,setIds]=useState<string[]>(()=>selected?.owners?.map(owner=>owner.id)??[]);
   const [percentages,setPercentages]=useState<Record<string,string>>(()=>Object.fromEntries(
@@ -125,7 +127,8 @@ function OwnerFields({ owners, selected, canManage, onCreate }: {
   const [primary,setPrimary]=useState(()=>selected?.owners?.find(owner=>owner.isPrimary)?.id??'');
   const [adding,setAdding]=useState(false);const [name,setName]=useState('');
   const [kind,setKind]=useState<'EXTERNAL_PERSON'|'ORGANIZATION'>('EXTERNAL_PERSON');
-  const [saving,setSaving]=useState(false);const [error,setError]=useState('');
+  const [saving,setSaving]=useState(false);const [addingUserId,setAddingUserId]=useState('');
+  const [error,setError]=useState('');
   function toggle(id:string,checked:boolean){
     const next=checked?[...ids,id]:ids.filter(value=>value!==id);
     setIds(next);setPercentages(equalShares(next));
@@ -146,8 +149,16 @@ function OwnerFields({ owners, selected, canManage, onCreate }: {
     }catch(failure){setError(message(failure));}
     finally{setSaving(false);}
   }
+  async function addUser(userId:string){setAddingUserId(userId);setError('');
+    try{const owner=await onCreateUser(userId);const next=[...ids,owner.id];
+      setIds(next);setPercentages(equalShares(next));if(!primary)setPrimary(owner.id);
+    }catch(failure){setError(message(failure));}finally{setAddingUserId('');}
+  }
   const available = owners.filter((owner) => owner.active || selected?.owners?.some((entry) => entry.id === owner.id));
-  return <fieldset className="animal-colors"><legend>Propietarios (total 100%)</legend>
+  const availableUsers=accountUsers.filter(user=>!owners.some(owner=>owner.kind==='USER'&&
+    owner.name.trim().toLocaleLowerCase()===user.name.trim().toLocaleLowerCase()));
+  return <fieldset className="animal-colors animal-owner-fieldset"><legend>Propietarios (total 100%)</legend>
+    {!available.length&&<small>No hay propietarios creados. Puedes agregar una persona, organización o usuario de la cuenta aquí mismo.</small>}
     {available.map((owner) => <div key={owner.id} className="group-inline-form animal-owner-row">
       <label><input type="checkbox" name="ownerIds" value={owner.id}
         checked={ids.includes(owner.id)} onChange={event=>toggle(owner.id,event.target.checked)}/>
@@ -173,6 +184,12 @@ function OwnerFields({ owners, selected, canManage, onCreate }: {
       <button type="button" className="secondary-button compact" disabled={saving||name.trim().length<2}
         onClick={()=>void add()}>Guardar</button>
       <button type="button" className="text-button" onClick={()=>setAdding(false)}>Cancelar</button>
+    </div>}
+    {canManage&&availableUsers.length>0&&<div className="animal-owner-users">
+      <div><strong>Usuarios de la cuenta</strong><small>También pueden elegirse como propietarios del animal.</small></div>
+      {availableUsers.map(user=><button key={user.id} type="button" disabled={Boolean(addingUserId)}
+        onClick={()=>void addUser(user.id)}><span>{user.name}</span>
+        <small>{addingUserId===user.id?'Agregando…':'+ Agregar como propietario'}</small></button>)}
     </div>}
     {error&&<small className="form-error" role="alert">{error}</small>}
     <small>Los porcentajes se distribuyen automáticamente. Con varios propietarios puedes cambiarlos.</small>
@@ -336,7 +353,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     if(canViewLocations)void listLocations(accessToken).then(value=>{if(active)setLocations(value);})
       .catch((failure)=>{if(active)setError(message(failure));});
     return () => { active = false; };
-  }, [accessToken,canViewLocations]);
+  }, [accessToken,canManageBrands,canViewLocations]);
 
   function setFilter(key:keyof AnimalFilters,value:string){
     setFilters(current=>({...current,[key]:value||undefined}));setPage(1);
@@ -434,21 +451,13 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     } finally { setBusy(false); }
   }
 
-  async function addOwner(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const kind = String(data.get('kind'));
-    setBusy(true); setError(null);
-    try {
-      await createOwner(accessToken, kind === 'USER'
-        ? { kind: 'USER', userId: String(data.get('userId')) }
-        : { kind: kind as 'EXTERNAL_PERSON' | 'ORGANIZATION', name: String(data.get('name')).trim() });
-      setOwners(await listOwners(accessToken)); form.reset();
-    } catch (failure) { setError(message(failure)); } finally { setBusy(false); }
-  }
   async function addOwnerInline(kind:'EXTERNAL_PERSON'|'ORGANIZATION',name:string){
     const created=await createOwner(accessToken,{kind,name});
+    setOwners(current=>[...current,created].sort((left,right)=>left.name.localeCompare(right.name,'es')));
+    return created;
+  }
+  async function addUserOwnerInline(userId:string){
+    const created=await createOwner(accessToken,{kind:'USER',userId});
     setOwners(current=>[...current,created].sort((left,right)=>left.name.localeCompare(right.name,'es')));
     return created;
   }
@@ -457,13 +466,6 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     setChoices(current=>current?{...current,[code]:[...current[code],created]
       .sort((left,right)=>left.name.localeCompare(right.name,'es'))}:current);
     return created;
-  }
-  async function changeBrandOwners(event: FormEvent<HTMLFormElement>, id: string) {
-    event.preventDefault(); setBusy(true); setError(null);
-    try {
-      await updateBrandOwners(accessToken, id, new FormData(event.currentTarget).getAll('ownerIds').map(String));
-      setBrands(await listBrands(accessToken));
-    } catch (failure) { setError(message(failure)); } finally { setBusy(false); }
   }
   async function changeOwners(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!selected) return;
@@ -476,31 +478,6 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       { owners: ownersInput, expectedVersion: selected.version })); }
     catch (failure) { setError(message(failure)); } finally { setBusy(false); }
   }
-  async function addBrand(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const name = String(data.get('name') || '').trim();
-    const ownerIds = data.getAll('ownerIds').map(String);
-    if (!ownerIds.length) { setError('Selecciona al menos un propietario para la marquilla.'); return; }
-    setBusy(true); setError(null);
-    try {
-      await createBrand(accessToken, name, ownerIds);
-      setBrands(await listBrands(accessToken));
-      form.reset();
-    } catch (failure) { setError(message(failure)); }
-    finally { setBusy(false); }
-  }
-
-  async function changeBrandState(brand: LivestockBrand) {
-    setBusy(true); setError(null);
-    try {
-      await setBrandActive(accessToken, brand.id, !brand.active);
-      setBrands(await listBrands(accessToken));
-    } catch (failure) { setError(message(failure)); }
-    finally { setBusy(false); }
-  }
-
   async function changeBrands(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected) return;
@@ -566,94 +543,55 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         }}>{showCreate ? 'Cerrar' : '+ Animal'}</button>}
     </div>
     {error && <div className="form-error admin-error" role="alert">{error}</div>}
-    {!selected&&<><details className="animal-reference-config">
-      <summary>Propietarios y marquillas <span>Administrar opciones compartidas</span></summary>
-    <div className="animal-brand-manager">
-      <h3>Propietarios de la cuenta</h3>
-      {canManageBrands && <>
-        <form className="catalog-create" onSubmit={(event) => void addOwner(event)}>
-          <label><span>Tipo</span><select name="kind" defaultValue="EXTERNAL_PERSON">
-            <option value="EXTERNAL_PERSON">Persona externa</option>
-            <option value="ORGANIZATION">Organización</option>
-          </select></label>
-          <label><span>Nombre</span><input name="name" required maxLength={160} /></label>
-          <button className="secondary-button compact" disabled={busy}>Agregar propietario</button>
-        </form>
-        {accountUsers.length > 0 && <form className="catalog-create"
-          onSubmit={(event) => void addOwner(event)}>
-          <input type="hidden" name="kind" value="USER" />
-          <label><span>Usuario de la cuenta</span><select name="userId">
-            {accountUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
-          </select></label>
-          <button className="secondary-button compact" disabled={busy}>Agregar usuario propietario</button>
-        </form>}
-      </>}
-      <p className="muted">{owners.filter((owner) => owner.active).map((owner) => owner.name).join(', ')
-        || 'Sin propietarios registrados.'}</p>
-    </div>
-    <div className="animal-brand-manager">
-      <h3>Marquillas</h3>
-      <p className="muted">Regístralas aquí y después elígelas en los animales. El arete individual se registra aparte.</p>
-      {canManageBrands && <form className="catalog-create" onSubmit={(event) => void addBrand(event)}>
-        <label><span>Nombre o código de la marquilla</span>
-          <input name="name" required maxLength={160} disabled={busy} placeholder="Ej. M7L" /></label>
-        {owners.filter((owner) => owner.active).map((owner) => <label key={owner.id}>
-          <input type="checkbox" name="ownerIds" value={owner.id} /> {owner.name}
-        </label>)}
-        <button className="secondary-button compact" type="submit" disabled={busy || !owners.length}>
-          Agregar marquilla</button>
-      </form>}
-      {brands === null ? <p className="muted">Cargando marquillas…</p>
-        : brands.length === 0 ? <p className="muted">Todavía no hay marquillas registradas.</p>
-          : <div className="animal-brand-list">{brands.map((brand) =>
-            <div key={brand.id} className="animal-brand-row"><span>{brand.name}{brand.active ? '' : ' · Inactiva'}</span>
-              {canManageBrands && <form className="animal-colors" onSubmit={(event) => void changeBrandOwners(event, brand.id)}>
-                <strong>Propietarios de esta marquilla</strong>
-                {owners.filter((owner) => owner.active).map((owner) => <label key={owner.id}>
-                  <input type="checkbox" name="ownerIds" value={owner.id}
-                    defaultChecked={brand.owner_ids?.includes(owner.id)} /> {owner.name}
-                </label>)}
-                <button className="secondary-button compact" disabled={busy}>Guardar propietarios</button>
-              </form>}
-              {canManageBrands && <button className="secondary-button compact" type="button"
-                disabled={busy} onClick={() => void changeBrandState(brand)}>
-                {brand.active ? 'Desactivar' : 'Activar'}</button>}</div>)}</div>}
-    </div>
-    </details>
-    {showCreate && <form className="animal-create" onSubmit={(event) => void create(event)}>
-      <label><span>Nombre *</span><input name="name" maxLength={160} required disabled={busy} /></label>
-      <label className="animal-full-width"><span>Descripción</span>
-        <textarea name="description" maxLength={5000} rows={3} disabled={busy} /></label>
-      <label><span>Sexo *</span><select name="sex" required disabled={busy} defaultValue="">
-        <option value="" disabled>Selecciona</option><option value="FEMALE">Hembra</option>
-        <option value="MALE">Macho</option></select></label>
-      <label><span>Grupo *</span><select name="groupId" required disabled={busy} defaultValue="">
-        <option value="">Selecciona un grupo</option>{groups.filter(group=>group.active).map(group=><option
-          key={group.id} value={group.id}>{group.name}{group.location?` · ${group.location.name}`:''}</option>)}
-      </select><small>La ubicación se hereda del grupo cuando sus módulos están activos.</small></label>
-      <label><span>Arete individual</span><input name="earTagCode" maxLength={80} disabled={busy} /></label>
-      <label><span>Fecha de nacimiento</span><input type="date" name="birthDate" disabled={busy} /></label>
-      <label><span>Fecha de ingreso</span><input type="date" name="entryDate" disabled={busy} />
-        <small>Si queda vacía, se usa la fecha actual de la finca.</small></label>
-      <label><span>Peso inicial</span><input type="number" name="initialWeight" min="0.001"
-        max="999999999" step="0.001" disabled={busy} /></label>
-      <label><span>Unidad de peso</span><select name="weightUnit" disabled={busy} defaultValue="KILOGRAM">
-        <option value="KILOGRAM">kg</option><option value="POUND">lb</option>
-</select></label>
-      {choices && <CatalogFields choices={choices} canManage={canManageBrands}
-        onCreate={addCatalogInline}/>}
-      <OwnerFields owners={owners} canManage={canManageBrands} onCreate={addOwnerInline}/>
-      {brands && <BrandFields brands={brands} />}
-      {canManageMedia&&<><label><span>Foto de perfil</span><input name="profilePhoto" type="file"
-        accept="image/jpeg,image/png,image/webp,image/heic"/></label>
+    {!selected&&<>{showCreate && <form className="animal-create animal-registration-form"
+      onSubmit={(event) => void create(event)}>
+      <div className="animal-form-intro"><div><h3>Registrar animal</h3>
+        <p>Completa primero la identificación y después las relaciones del animal.</p></div>
+        <small>* Campos obligatorios</small></div>
+      <section className="animal-form-section"><header><span>1</span><div><h4>Identificación</h4>
+        <p>Datos principales y ubicación inicial.</p></div></header><div className="animal-form-grid">
+        <label><span>Nombre *</span><input name="name" maxLength={160} required disabled={busy} /></label>
+        <label><span>Sexo *</span><select name="sex" required disabled={busy} defaultValue="">
+          <option value="" disabled>Selecciona</option><option value="FEMALE">Hembra</option>
+          <option value="MALE">Macho</option></select></label>
+        <label><span>Grupo *</span><select name="groupId" required disabled={busy} defaultValue="">
+          <option value="">Selecciona un grupo</option>{groups.filter(group=>group.active).map(group=><option
+            key={group.id} value={group.id}>{group.name}{group.location?` · ${group.location.name}`:''}</option>)}
+        </select><small>La ubicación se hereda del grupo.</small></label>
+        <label><span>Arete individual</span><input name="earTagCode" maxLength={80} disabled={busy} /></label>
+        <label><span>Fecha de nacimiento</span><input type="date" name="birthDate" disabled={busy} /></label>
+        <label><span>Fecha de ingreso</span><input type="date" name="entryDate" disabled={busy} />
+          <small>Vacía: se usa la fecha actual de la finca.</small></label>
+        <label><span>Peso inicial</span><input type="number" name="initialWeight" min="0.001"
+          max="999999999" step="0.001" disabled={busy} /></label>
+        <label><span>Unidad de peso</span><select name="weightUnit" disabled={busy} defaultValue="KILOGRAM">
+          <option value="KILOGRAM">kg</option><option value="POUND">lb</option></select></label>
+        <label className="animal-form-wide"><span>Descripción</span>
+          <textarea name="description" maxLength={5000} rows={3} disabled={busy} /></label>
+      </div></section>
+      {choices&&<section className="animal-form-section"><header><span>2</span><div><h4>Raza y apariencia</h4>
+        <p>Selecciona una o varias opciones.</p></div></header><div className="animal-form-choice-grid">
+        <CatalogFields choices={choices} canManage={canManageBrands} onCreate={addCatalogInline}/>
+      </div></section>}
+      <section className="animal-form-section"><header><span>3</span><div><h4>Propiedad y marquillas</h4>
+        <p>Los porcentajes se distribuyen automáticamente.</p></div></header><div className="animal-form-stack">
+        <OwnerFields owners={owners} accountUsers={accountUsers} canManage={canManageBrands}
+          onCreate={addOwnerInline} onCreateUser={addUserOwnerInline}/>
+        {brands&&<BrandFields brands={brands}/>}
+        <small className="animal-form-note">Las opciones compartidas también se administran desde Catálogos.</small>
+      </div></section>
+      <section className="animal-form-section"><header><span>4</span><div><h4>Parentesco</h4>
+        <p>Relaciona los padres registrados o escribe un nombre externo.</p></div></header>
+        <div className="animal-parent-grid"><ParentField accessToken={accessToken} role="mother"/>
+          <ParentField accessToken={accessToken} role="father"/></div></section>
+      {canManageMedia&&<section className="animal-form-section"><header><span>5</span><div><h4>Fotografías</h4>
+        <p>Puedes agregarlas ahora o posteriormente desde la ficha.</p></div></header><div className="animal-form-grid">
+        <label><span>Foto de perfil</span><input name="profilePhoto" type="file"
+          accept="image/jpeg,image/png,image/webp,image/heic"/></label>
         <label><span>Foto de portada</span><input name="coverPhoto" type="file"
-          accept="image/jpeg,image/png,image/webp,image/heic"/></label></>}
-      <div className="animal-parent-grid animal-full-width">
-        <ParentField accessToken={accessToken} role="mother"/>
-        <ParentField accessToken={accessToken} role="father"/>
-      </div>
-      <button className="primary-button compact" type="submit" disabled={busy || brands === null}>
-        {busy ? 'Guardando…' : 'Registrar animal'}</button>
+          accept="image/jpeg,image/png,image/webp,image/heic"/></label></div></section>}
+      <div className="animal-form-actions"><button className="primary-button compact" type="submit"
+        disabled={busy||brands===null}>{busy?'Guardando…':'Registrar animal'}</button></div>
     </form>}
     <form className="animal-search" onSubmit={find} role="search">
       <label><span className="sr-only">Buscar por nombre, arete o marquilla</span><input value={searchInput}
@@ -840,8 +778,8 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       {canUpdate && <form className="animal-catalog-edit" key={`owners:${selected.id}:${selected.version}`}
         onSubmit={(event) => void changeOwners(event)}>
         <h4>Propietarios y participación</h4>
-        <OwnerFields owners={owners} selected={selected} canManage={canManageBrands}
-          onCreate={addOwnerInline}/>
+        <OwnerFields owners={owners} accountUsers={accountUsers} selected={selected}
+          canManage={canManageBrands} onCreate={addOwnerInline} onCreateUser={addUserOwnerInline}/>
         <button className="primary-button compact" disabled={busy}>Guardar propietarios</button>
       </form>}
       {canUpdate && choices && <form className="animal-catalog-edit" key={`${selected.id}:${selected.version}`}

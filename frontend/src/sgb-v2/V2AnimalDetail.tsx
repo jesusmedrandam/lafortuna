@@ -1,13 +1,14 @@
 import {useEffect,useRef,useState} from 'react';
-import {ArrowLeft,ArrowLeftRight,Baby,Beef,Camera,Droplets,Edit3,MapPin,Milk,Users,Weight,
+import {ArrowLeft,ArrowLeftRight,Baby,Beef,Camera,Edit3,HeartPulse,MapPin,Milk,Users,Weight,
   HeartCrack,ShoppingCart,ShoppingBag,X,ChevronRight} from 'lucide-react';
 import {useNavigate,useParams} from 'react-router-dom';
 import {Badge,Card,IconButton,LoadingState,ErrorState} from '../components/ui';
+import {ImageLightbox,type LightboxMedia} from '../components/ImageLightbox';
 import {formatDate} from '../utils';
 import {getAnimal,getMedia,uploadMedia,getMovements,getMovementOptions,getWeighings,getHealthConditions,getHealthMedicines,
   getHealthCampaigns,getReproduction,getProduction,getCommerce,getAnimalStatusEvents,
   getReproductionSettings,type Animal,type MediaItem,type MovementOptions,
-  type ReproductionRecords,type ReproductionSettings} from './api';
+  type ReproductionRecords,type ReproductionSettings,type HealthCondition} from './api';
 import {useV2Session} from './V2Session';
 import {MovementPanel} from './MovementPanel';
 import {HealthPanel} from './HealthPanel';
@@ -36,6 +37,7 @@ export function V2AnimalDetail(){
   const [movementOptions,setMovementOptions]=useState<MovementOptions|null>(null);
   const [inMilking,setInMilking]=useState(false);
   const [hasMedicines,setHasMedicines]=useState(false);
+  const [healthConditions,setHealthConditions]=useState<HealthCondition[]>([]);
   const [reproduction,setReproduction]=useState<ReproductionRecords|null>(null);
   const [reproductionSettings,setReproductionSettings]=useState<ReproductionSettings|null>(null);
   const fileRef=useRef<HTMLInputElement>(null);
@@ -57,6 +59,7 @@ export function V2AnimalDetail(){
     setReproduction(null);setReproductionSettings(null);
     setMovementOptions(null);
     setHasMedicines(false);
+    setHealthConditions([]);
     if(can('MOVEMENT_MANAGE','MOVEMENTS'))void getMovementOptions(token)
       .then(options=>{if(active)setMovementOptions(options);}).catch(()=>{});
     if(can('HEALTH_MANAGE','HEALTH'))void getHealthMedicines(token)
@@ -75,9 +78,10 @@ export function V2AnimalDetail(){
       recent('Pesajes','/pesajes',items.filter(item=>!item.voidedAt).map(item=>({
         id:item.id,date:item.weighedOn,label:`${item.weight} ${item.unitCode==='POUND'?'lb':'kg'}`})))));
     if(can('HEALTH_VIEW','HEALTH')){
-      jobs.push(getHealthConditions(token).then(items=>recent('Condiciones de salud','/sanidad',
-        items.filter(item=>item.animalId===id).map(item=>({id:item.id,date:item.detectedOn,
-          label:`${item.kind??'Condición'} · ${item.description}`})))));
+      jobs.push(getHealthConditions(token).then(items=>{const own=items.filter(item=>item.animalId===id);
+        if(active)setHealthConditions(own);
+        return recent('Condiciones de salud','/sanidad',own.map(item=>({id:item.id,date:item.detectedOn,
+          label:`${item.kind??'Condición'} · ${item.description}`})));}));
       jobs.push(getHealthCampaigns(token).then(items=>recent('Tratamientos','/sanidad?vista=tratamientos',
         items.filter(item=>item.animals.some(row=>row.animalId===id&&row.selected))
           .map(item=>({id:item.id,date:item.appliedOn,
@@ -162,6 +166,23 @@ export function V2AnimalDetail(){
     ...(rotate?[{label:'Rotación de potrero o corral · todo el grupo',
       run:()=>openAction('movement','UBICACION')}]:[]),
   ];
+  const movementHistory=sections.find(section=>section.title==='Movimientos');
+  const movementMenuActions:AnimalAction[]=[...movementActions,
+    {label:movementHistory?.entries.length?'Ver historial de movimientos':'Ver movimientos',
+      run:()=>go('/movimientos')}];
+  const activeHealthConditions=healthConditions.filter(condition=>condition.status!=='RESUELTA');
+  const hasHealthHistory=sections.some(section=>
+    (section.title==='Condiciones de salud'||section.title==='Tratamientos')&&section.entries.length>0);
+  const healthActions:AnimalAction[]=[
+    ...(usable&&can('HEALTH_MANAGE','HEALTH')?[{label:'Crear condición de salud',
+      run:()=>openAction('health','CONDICION')}]:[]),
+    ...(hasHealthHistory?[{label:'Ver historial de sanidad',run:()=>go('/sanidad')}]:[]),
+    ...(usable&&can('HEALTH_MANAGE','HEALTH')&&hasMedicines?[{label:'Aplicar tratamiento preventivo',
+      run:()=>openAction('health','TRATAMIENTO_PREVENTIVO')}]:[]),
+    ...(usable&&can('HEALTH_MANAGE','HEALTH')&&hasMedicines&&activeHealthConditions.length?[{
+      label:'Aplicar tratamiento sobre condición de salud',
+      run:()=>openAction('health','TRATAMIENTO_CONDICION')}]:[]),
+  ];
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil',
     year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   const birth=animal?.birthDate;
@@ -178,6 +199,15 @@ export function V2AnimalDetail(){
     {label:'Registrar inseminación o transferencia',run:()=>openAction('reproduction','SERVICIO')},
     {label:'Confirmar preñez',run:()=>openAction('reproduction','PRENEZ')},
   ]):[];
+  const lightboxItems:LightboxMedia[]=media.filter(item=>item.kind==='IMAGE').map(item=>({
+    key:item.id,url:item.url,type:'IMAGEN',title:animal?.name??'Animal',
+    subtitle:[item.relation_code==='PROFILE'?'Foto de perfil':item.relation_code==='COVER'?'Foto de portada':
+      item.description||'Galería',animal?.earTagCode?`Arete ${animal.earTagCode}`:null,
+      animal?.classification?.name,animal?.group?.name?`Grupo ${animal.group.name}`:null,
+      animal?.location?.name?`Ubicación ${animal.location.name}`:null].filter(Boolean).join(' · '),
+    date:item.captured_on??item.created_at.slice(0,10),filename:`${animal?.name??'animal'}-${item.relation_code.toLowerCase()}`,
+  }));
+  const viewerIndex=viewer?lightboxItems.findIndex(item=>item.key===viewer.id):-1;
   if(error&&!animal)return <ErrorState message={error} onRetry={()=>navigate('/animales')}/>;
   if(!animal)return <LoadingState text="Abriendo ficha…"/>;
   return <div className="animal-detail-page sgb-v2-animal-detail">
@@ -211,16 +241,14 @@ export function V2AnimalDetail(){
         onClick={()=>openAction('sale','NUEVA')}><ShoppingCart size={21}/></IconButton>}
       {usable&&can('COMMERCE_MANAGE','SALES_PURCHASES')&&<IconButton label="Compras"
         onClick={()=>openAction('purchase','NUEVA')}><ShoppingBag size={21}/></IconButton>}
-      {usable&&movementActions.length>0&&<IconButton label="Movimientos"
-        onClick={()=>choose('Movimiento de '+animal.name,movementActions)}>
+      {movementMenuActions.length>0&&can('MOVEMENT_VIEW','MOVEMENTS')&&<IconButton label="Movimientos"
+        onClick={()=>setMenu({title:'Movimientos de '+animal.name,actions:movementMenuActions})}>
         <ArrowLeftRight size={21}/></IconButton>}
       {usable&&can('WEIGHING_MANAGE','WEIGHING')&&<IconButton label="Registrar pesaje"
         onClick={()=>openAction('weighing','NUEVO')}><Weight size={21}/></IconButton>}
-      {usable&&can('HEALTH_MANAGE','HEALTH')&&<IconButton label="Sanidad"
-        onClick={()=>choose('Sanidad de '+animal.name,[
-          ...(hasMedicines?[{label:'Aplicar tratamiento',run:()=>openAction('health','TRATAMIENTO')}]:[]),
-          {label:'Crear condición de salud',run:()=>openAction('health','CONDICION')},
-        ])}><Droplets size={21}/></IconButton>}
+      {healthActions.length>0&&can('HEALTH_VIEW','HEALTH')&&<IconButton label="Sanidad"
+        onClick={()=>setMenu({title:'Sanidad de '+animal.name,actions:healthActions})}>
+        <HeartPulse size={21}/></IconButton>}
       {usable&&animal.sex==='FEMALE'&&can('REPRODUCTION_MANAGE','REPRODUCTION')&&
         reproductiveActions.length>0&&<IconButton label="Reproducción"
           onClick={()=>choose('Reproducción de '+animal.name,reproductiveActions)}>
@@ -270,9 +298,8 @@ export function V2AnimalDetail(){
       {gallery.map(item=><button key={item.id} type="button" onClick={()=>setViewer(item)}>
         <img src={item.thumbnailUrl??item.url} alt={item.description??animal.name}/></button>)}
     </div></section>}
-    {viewer&&<div className="v2-media-viewer" role="dialog" aria-modal="true" aria-label="Foto del animal"
-      onClick={()=>setViewer(null)}><button type="button" aria-label="Cerrar foto" onClick={()=>setViewer(null)}>×</button>
-      <img src={viewer.url} alt={viewer.description??animal.name} onClick={event=>event.stopPropagation()}/></div>}
+    {viewer&&viewerIndex>=0&&<ImageLightbox items={lightboxItems} initialIndex={viewerIndex}
+      onClose={()=>setViewer(null)}/>}
     {menu&&<div className="v2-animal-sheet-backdrop" role="presentation"
       onMouseDown={event=>{if(event.target===event.currentTarget)setMenu(null);}}>
       <section className="v2-animal-sheet" role="dialog" aria-modal="true" aria-label={menu.title}>

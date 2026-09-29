@@ -45,15 +45,22 @@ export function HealthPanel({accessToken,canManage,initialAnimalId,initialAction
   const [doses,setDoses]=useState<Record<string,string>>({});
   const [conditionIds,setConditionIds]=useState<Record<string,string>>({});
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
-  useEffect(()=>{const requested=initialAction??new URLSearchParams(window.location.search).get('accion');
-    if(!['CONDICION','TRATAMIENTO'].includes(requested??'')||
+  const requestedAction=initialAction??new URLSearchParams(window.location.search).get('accion');
+  const preventiveTreatment=requestedAction==='TRATAMIENTO_PREVENTIVO'&&Boolean(initialAnimalId)&&!editing;
+  const conditionTreatment=requestedAction==='TRATAMIENTO_CONDICION'&&Boolean(initialAnimalId)&&!editing;
+  useEffect(()=>{const requested=requestedAction;
+    if(!['CONDICION','TRATAMIENTO','TRATAMIENTO_PREVENTIVO','TRATAMIENTO_CONDICION'].includes(requested??'')||
       !initialAnimalId||initialAnimalId===prefilledAnimalId||
       !options?.animals.some(item=>item.id===initialAnimalId)||!canManage)return;
-    if(requested==='TRATAMIENTO'){
-      setTab('treatments');setMode('MANUAL');setSelected([initialAnimalId]);setShowCampaign(true);
+    if(requested!=='CONDICION'){
+      const active=conditions.filter(item=>item.animalId===initialAnimalId&&item.status!=='RESUELTA');
+      if(requested==='TRATAMIENTO_CONDICION'&&!active.length)return;
+      setTab('treatments');setMode('MANUAL');setSelected([initialAnimalId]);
+      setConditionIds(requested==='TRATAMIENTO_CONDICION'&&active.length===1
+        ?{[initialAnimalId]:active[0]!.id}:{});setShowCampaign(true);
     }else{setTab('conditions');setShowCondition(true);}
     setPrefilledAnimalId(initialAnimalId);
-  },[initialAnimalId,prefilledAnimalId,options?.animals,canManage,initialAction]);
+  },[initialAnimalId,prefilledAnimalId,options?.animals,conditions,canManage,requestedAction]);
   useEffect(()=>{if(new URLSearchParams(window.location.search).get('vista')==='tratamientos')
     setTab('treatments');},[initialAnimalId]);
 
@@ -255,8 +262,11 @@ export function HealthPanel({accessToken,canManage,initialAnimalId,initialAction
       </form></div></div>}
     {canManage&&showCampaign&&options&&<div className="health-overlay" role="presentation"
       onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)reset();}}>
-      <div className="health-dialog" role="dialog" aria-modal="true" aria-label={editing?'Editar borrador':tab==='treatments'?'Nuevo tratamiento':'Nueva jornada sanitaria'}>
-      <div className="health-dialog-heading"><h2>{editing?'Editar borrador':tab==='treatments'?'Nuevo tratamiento':'Nueva jornada sanitaria'}</h2>
+      <div className="health-dialog" role="dialog" aria-modal="true" aria-label={editing?'Editar borrador':
+        preventiveTreatment?'Tratamiento preventivo':conditionTreatment?'Tratamiento sobre condición de salud':
+          tab==='treatments'?'Nuevo tratamiento':'Nueva jornada sanitaria'}>
+      <div className="health-dialog-heading"><h2>{editing?'Editar borrador':preventiveTreatment?'Tratamiento preventivo':
+        conditionTreatment?'Tratamiento sobre condición de salud':tab==='treatments'?'Nuevo tratamiento':'Nueva jornada sanitaria'}</h2>
         <button type="button" aria-label="Cerrar formulario" disabled={busy} onClick={reset}>×</button></div>
       {error&&<div className="form-error health-dialog-error" role="alert">{error}</div>}
       <form className="movement-form" onSubmit={saveCampaign}
@@ -297,17 +307,19 @@ export function HealthPanel({accessToken,canManage,initialAnimalId,initialAction
               step="any" aria-label={`Dosis de ${animal.name}`} placeholder="Dosis individual"
               value={doses[animal.id]??''} onChange={(event)=>setDoses({...doses,
                 [animal.id]:event.target.value})}/>}
-            {selectedIds.includes(animal.id)&&conditions.some((item)=>item.animalId===animal.id
+            {selectedIds.includes(animal.id)&&!preventiveTreatment&&conditions.some((item)=>item.animalId===animal.id
               &&item.status!=='RESUELTA')&&<select aria-label={`Condición de ${animal.name}`}
+              required={conditionTreatment}
               value={conditionIds[animal.id]??''} onChange={(event)=>setConditionIds({...conditionIds,
                 [animal.id]:event.target.value})}>
-              <option value="">Sin condición vinculada</option>
+              <option value="">{conditionTreatment?'Selecciona la condición':'Sin condición vinculada'}</option>
               {conditions.filter((item)=>item.animalId===animal.id&&item.status!=='RESUELTA')
                 .map((item)=><option key={item.id} value={item.id}>{item.kind??item.description}</option>)}
             </select>}</div>)}</div>
       </div>
       <button className="primary-button compact" disabled={busy||!medicineId||!selectedIds.length
         ||individualTreatment&&selectedIds.length!==1
+        ||conditionTreatment&&selectedIds.some(id=>!conditionIds[id])
         ||selectedIds.length>500||mode==='GRUPO'&&!groupId}>
         {busy?'Guardando…':individualTreatment?'Registrar tratamiento':editing?'Guardar borrador':'Crear borrador'}</button>
       </form></div></div>}

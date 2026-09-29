@@ -13,6 +13,7 @@ import {CleaningPanel} from './CleaningPanel';
 import {V2GroupsPage,V2LocationsPage} from './V2GroupsLocations';
 import {HealthPanel} from './HealthPanel';
 import {HomeSummary} from './HomeSummary';
+import {HomeOperations,HomePendingTasks} from './HomeOperations';
 import {MediaPanel} from './MediaPanel';
 import {MovementPanel} from './MovementPanel';
 import {ProductionPanel} from './ProductionPanel';
@@ -22,6 +23,7 @@ import {ReproductionPanel} from './ReproductionPanel';
 import {SuperadminPanel} from './SuperadminPanel';
 import {V2Login,V2Recovery,V2Register,V2Verify} from './AuthPages';
 import {V2AnimalsPage} from './V2AnimalsPage';
+import {V2AnimalAttendancePage} from './V2AnimalAttendancePage';
 import {V2AnimalDetail} from './V2AnimalDetail';
 import {V2WeighingsPage} from './V2WeighingsPage';
 import {V2AuditPage} from './V2AuditPage';
@@ -225,15 +227,20 @@ function Panel({kind}:{kind:'animals'|'movements'|'reproduction'|'production'|'h
 function HomePage(){
   const {session,hasPermission}=useV2Session();const navigate=useNavigate();
   const property=activeProperty(session!.overview);
-  return <div className="module-no-header"><div className="welcome-card"><div><span className="eyebrow">Panel principal</span>
-    <h1>Hola, {session!.overview.user.displayName.split(' ')[0]}</h1>
-    <p>{property?`Trabajando en ${property.name}.`:'Selecciona una propiedad para gestionar tu ganado.'}</p></div>
-    <div className="access-badge"><span>✓</span><div><strong>Acceso verificado</strong>
-      <small>{session!.overview.user.email}</small></div></div></div>
+  const permissions=property?.roles.find(role=>role.id===session!.overview.activeContext?.roleId)?.permissions??[];
+  return <div className="module-no-header home-dashboard">
+    {property&&<HomePendingTasks accessToken={session!.accessToken} userId={session!.overview.user.id}
+      userName={session!.overview.user.displayName} propertyName={property.name}
+      enabled={hasPermission('AGENDA_TASK_VIEW')&&property.enabledModules.includes('TASKS')}
+      onNavigate={path=>navigate(path)}/>}
+    {property&&<HomeOperations accessToken={session!.accessToken} userId={session!.overview.user.id}
+      userName={session!.overview.user.displayName} propertyName={property.name}
+      modules={property.enabledModules} permissions={permissions} onNavigate={path=>navigate(path)}/>}
     {property&&hasPermission('ANIMAL_VIEW')&&<HomeSummary accessToken={session!.accessToken}
       onAnimals={()=>navigate('/animales')} onGroups={hasPermission('GROUP_VIEW')
         ?()=>navigate('/grupos'):undefined}
       onClassification={code=>navigate(`/animales?clasificacion=${encodeURIComponent(code)}`)}/>}
+    {!property&&!session!.overview.user.isSuperadmin&&<p className="muted">Selecciona una propiedad para gestionar tu ganado.</p>}
     {!property&&session!.overview.user.isSuperadmin&&<p><Link to="/administracion">Administrar cuentas</Link></p>}
   </div>;
 }
@@ -250,6 +257,7 @@ function V2Routes(){
     <Route element={<Protected/>}><Route element={<V2Shell/>}>
       <Route index element={<HomePage/>}/>
       <Route path="animales" element={<Feature permission="ANIMAL_VIEW"><V2AnimalsPage/></Feature>}/>
+      <Route path="animales/asistencia" element={<Feature permission="ANIMAL_VIEW"><V2AnimalAttendancePage/></Feature>}/>
       <Route path="animales/:id" element={<Feature permission="ANIMAL_VIEW"><V2AnimalDetail/></Feature>}/>
       <Route path="animales/gestionar" element={<Feature permission="ANIMAL_VIEW"><Panel kind="animals"/></Feature>}/>
       <Route path="grupos" element={<Feature permission="GROUP_VIEW"><V2GroupsPage/></Feature>}/>

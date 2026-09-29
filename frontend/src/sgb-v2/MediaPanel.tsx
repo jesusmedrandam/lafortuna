@@ -1,4 +1,5 @@
 import {useEffect,useMemo,useState,type CSSProperties,type FormEvent} from 'react';
+import {ImageLightbox,type LightboxMedia} from '../components/ImageLightbox';
 import {ApiRequestError,deleteMediaObject,getAnimals,getMedia,getMediaUsage,
   listCatalogItems,uploadMedia,type Animal,type CatalogItem,type MediaItem,type MediaUsage} from './api';
 
@@ -69,14 +70,15 @@ export function MediaPanel({accessToken,permissions}:{accessToken:string;permiss
   },[items,category,kind,query,newest]);
   const viewerIndex=gallery.findIndex(item=>item.id===viewerId);
   const viewer=viewerIndex>=0?gallery[viewerIndex]:null;
-  useEffect(()=>{if(!viewer)return;
-    const onKey=(event:KeyboardEvent)=>{
-      if(event.key==='Escape')setViewerId(null);
-      if(event.key==='ArrowLeft')setViewerId(gallery[(viewerIndex-1+gallery.length)%gallery.length]!.id);
-      if(event.key==='ArrowRight')setViewerId(gallery[(viewerIndex+1)%gallery.length]!.id);
-    };
-    window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);
-  },[viewerId,viewerIndex,gallery,viewer]);
+  const lightboxItems=useMemo<LightboxMedia[]>(()=>gallery.map(({id,main,attachments})=>{
+    const animals=attachments.filter(item=>item.entity_type==='ANIMAL').map(item=>item.entity_name)
+      .filter(Boolean).join(', ');
+    const categoryName=categories.find(item=>item.code===categoryOf(main.entity_type))?.label??'Registro';
+    return {key:id,url:main.url,type:main.kind==='VIDEO'?'VIDEO':'IMAGEN',
+      title:animals||'Multimedia de la propiedad',date:main.captured_on??main.created_at.slice(0,10),
+      subtitle:[main.description,animals?categoryName:null,main.tags.map(tag=>tag.name).join(', ')||null,
+        size(main.byteSize)].filter(Boolean).join(' · '),filename:animals||categoryName};
+  }),[gallery]);
   useEffect(()=>{if(!uploadOpen)return;
     const onKey=(event:KeyboardEvent)=>{if(event.key==='Escape'&&!busy)setUploadOpen(false);};
     window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);
@@ -146,29 +148,10 @@ export function MediaPanel({accessToken,permissions}:{accessToken:string;permiss
     {permissions.includes('MEDIA_MANAGE')&&<button className="media-fab" type="button"
       aria-label="Subir foto o video" onClick={()=>setUploadOpen(true)}>＋</button>}
 
-    {viewer&&<div className="media-overlay" role="presentation" onMouseDown={event=>{
-      if(event.target===event.currentTarget)setViewerId(null);}}>
-      <div className="media-viewer" role="dialog" aria-modal="true" aria-label="Archivo multimedia">
-        <div className="media-viewer-stage">
-          <button type="button" className="media-viewer-close" aria-label="Cerrar visor"
-            onClick={()=>setViewerId(null)}>×</button>
-          {viewer.main.kind==='IMAGE'?<img src={viewer.main.url} alt={viewer.main.description||'Archivo multimedia'}/>:
-            <video key={viewer.id} src={viewer.main.url} controls autoPlay/>}
-          {gallery.length>1&&<><button type="button" className="media-viewer-prev" aria-label="Archivo anterior"
-            onClick={()=>setViewerId(gallery[(viewerIndex-1+gallery.length)%gallery.length]!.id)}>‹</button>
-            <button type="button" className="media-viewer-next" aria-label="Archivo siguiente"
-              onClick={()=>setViewerId(gallery[(viewerIndex+1)%gallery.length]!.id)}>›</button></>}
-        </div>
-        <div className="media-viewer-info"><strong>{viewer.attachments.filter(item=>item.entity_type==='ANIMAL')
-          .map(item=>item.entity_name).filter(Boolean).join(', ')||'Multimedia de la propiedad'}</strong>
-          <span>{shownDate(viewer.main)} · {size(viewer.main.byteSize)} · {viewerIndex+1} de {gallery.length}</span>
-          {viewer.main.description&&<p>{viewer.main.description}</p>}
-          {viewer.main.tags.length>0&&<div className="media-viewer-tags">{viewer.main.tags.map(tag=><span key={tag.id}>{tag.name}</span>)}</div>}
-          {permissions.includes('MEDIA_MANAGE')&&<button type="button" className="media-delete"
-            disabled={busy} onClick={()=>void remove(viewer.id)}>Eliminar archivo</button>}
-        </div>
-      </div>
-    </div>}
+    {viewer&&viewerIndex>=0&&<ImageLightbox items={lightboxItems} initialIndex={viewerIndex}
+      onClose={()=>setViewerId(null)} actions={item=>permissions.includes('MEDIA_MANAGE')?
+        <button type="button" className="media-delete" disabled={busy}
+          onClick={()=>void remove(item.key)}>Eliminar archivo</button>:null}/>}
 
     {uploadOpen&&<div className="media-overlay" role="presentation" onMouseDown={event=>{
       if(event.target===event.currentTarget)closeUpload();}}>

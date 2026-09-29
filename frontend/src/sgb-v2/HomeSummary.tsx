@@ -10,7 +10,7 @@ export function HomeSummary({accessToken,onAnimals,onGroups,onClassification}:{a
   onAnimals:()=>void;onGroups:(()=>void)|undefined;onClassification:(code:string)=>void}){
   const [data,setData]=useState<AnimalSummary|null>(null);
   const [error,setError]=useState<string|null>(null);
-  useEffect(()=>{let active=true;void getAnimalSummary(accessToken)
+  useEffect(()=>{let active=true;setData(null);setError(null);void getAnimalSummary(accessToken)
     .then(value=>{if(active)setData(value);})
     .catch(()=>{if(active)setError('No se pudo cargar el resumen ganadero.');});
     return()=>{active=false;};},[accessToken]);

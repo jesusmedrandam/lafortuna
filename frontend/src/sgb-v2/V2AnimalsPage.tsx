@@ -141,7 +141,8 @@ export function V2AnimalsPage(){
     <div className="animal-floating-actions">
       {hasPermission('ANIMAL_CREATE')&&<IconButton label="Agregar animal" onClick={()=>navigate('/animales/gestionar?create=1')}>
         <Plus size={23}/></IconButton>}
-      <IconButton label="Volver al panel" onClick={()=>navigate('/')}><ClipboardCheck size={22}/></IconButton>
+      <IconButton label="Tomar lista de animales" onClick={()=>navigate('/animales/asistencia')}>
+        <ClipboardCheck size={22}/></IconButton>
     </div>
   </div>;
 }
