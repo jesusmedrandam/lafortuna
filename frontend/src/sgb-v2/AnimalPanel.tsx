@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import {
-  ApiRequestError, createAnimal, createBrand, getAnimal, getAnimals, listBrands,
+  ApiRequestError, createAnimal, createBrand, createCatalogItem, getAnimal, getAnimals, listBrands,
   listCatalogItems, setBrandActive, updateAnimalBrands, updateAnimalCatalogs,
   listOwners, listAccountUsers, createOwner, updateBrandOwners, updateAnimalOwners,
   updateAnimalDescription, updateAnimalParents,
@@ -24,9 +24,31 @@ async function loadAnimalChoices(accessToken: string): Promise<AnimalChoices> {
   return { BREEDS: breeds, COLORS: colors };
 }
 
-function CatalogFields({ choices, selected }: { choices: AnimalChoices; selected?: Animal | null }) {
+function CatalogFields({ choices, selected, canManage, onCreate }: {
+  choices: AnimalChoices; selected?: Animal | null; canManage: boolean;
+  onCreate: (code: keyof AnimalChoices, name: string) => Promise<CatalogItem>;
+}) {
   const breeds = selected?.breeds || (selected?.breed ? [selected.breed] : []);
   const colors = selected?.colors || [];
+  const [selectedBreeds,setSelectedBreeds]=useState<string[]>(()=>breeds.map(item=>item.id));
+  const [selectedColors,setSelectedColors]=useState<string[]>(()=>colors.map(item=>item.id));
+  const [adding,setAdding]=useState<keyof AnimalChoices|null>(null);
+  const [newName,setNewName]=useState('');
+  const [saving,setSaving]=useState(false);
+  const [error,setError]=useState('');
+  async function add(code:keyof AnimalChoices){
+    const name=newName.trim();if(name.length<2)return;
+    setSaving(true);setError('');
+    try{const item=await onCreate(code,name);
+      (code==='BREEDS'?setSelectedBreeds:setSelectedColors)(current=>[...current,item.id]);
+      setAdding(null);setNewName('');
+    }catch(failure){setError(message(failure));}
+    finally{setSaving(false);}
+  }
+  const toggle=(id:string,checked:boolean,code:keyof AnimalChoices)=>{
+    (code==='BREEDS'?setSelectedBreeds:setSelectedColors)(current=>checked
+      ?[...current,id]:current.filter(value=>value!==id));
+  };
   const availableBreed = choices.BREEDS.filter((entry) => entry.active &&
     (!entry.speciesCode || entry.speciesCode === 'BOVINE'));
   const availableColors = choices.COLORS.filter((entry) => entry.active &&
@@ -46,34 +68,114 @@ function CatalogFields({ choices, selected }: { choices: AnimalChoices; selected
     <fieldset className="animal-colors"><legend>Razas</legend>
       {availableBreed.map((entry) => <label key={entry.id}>
         <input type="checkbox" name="breedIds" value={entry.id}
-          defaultChecked={breeds.some((breed) => breed.id === entry.id)} />
+          checked={selectedBreeds.includes(entry.id)} onChange={event=>toggle(entry.id,event.target.checked,'BREEDS')}/>
         <span>{entry.name}{entry.active ? '' : ' (inactiva)'}</span>
       </label>)}
+      {canManage&&<button type="button" className="v2-catalog-add"
+        onClick={()=>{setAdding('BREEDS');setNewName('');setError('');}}>+ Añadir raza</button>}
+      {adding==='BREEDS'&&<div className="animal-inline-add">
+        <input aria-label="Nombre de la nueva raza" value={newName} minLength={2} maxLength={160}
+          onChange={event=>setNewName(event.target.value)} disabled={saving} autoFocus
+          onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void add('BREEDS');}}}/>
+        <button type="button" className="secondary-button compact" disabled={saving||newName.trim().length<2}
+          onClick={()=>void add('BREEDS')}>Guardar</button>
+        <button type="button" className="text-button" onClick={()=>setAdding(null)}>Cancelar</button>
+      </div>}
     </fieldset>
     <fieldset className="animal-colors"><legend>Colores</legend>
       {availableColors.length === 0 && <small>No hay colores disponibles.</small>}
       {availableColors.map((entry) => <label key={entry.id}>
         <input type="checkbox" name="colorIds" value={entry.id}
-          defaultChecked={colors.some((color) => color.id === entry.id)} />
+          checked={selectedColors.includes(entry.id)} onChange={event=>toggle(entry.id,event.target.checked,'COLORS')}/>
         <span>{entry.name}{entry.active ? '' : ' (inactivo)'}</span>
       </label>)}
+      {canManage&&<button type="button" className="v2-catalog-add"
+        onClick={()=>{setAdding('COLORS');setNewName('');setError('');}}>+ Añadir color</button>}
+      {adding==='COLORS'&&<div className="animal-inline-add">
+        <input aria-label="Nombre del nuevo color" value={newName} minLength={2} maxLength={160}
+          onChange={event=>setNewName(event.target.value)} disabled={saving} autoFocus
+          onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void add('COLORS');}}}/>
+        <button type="button" className="secondary-button compact" disabled={saving||newName.trim().length<2}
+          onClick={()=>void add('COLORS')}>Guardar</button>
+        <button type="button" className="text-button" onClick={()=>setAdding(null)}>Cancelar</button>
+      </div>}
     </fieldset>
+    {error&&<div className="form-error animal-catalog-error" role="alert">{error}</div>}
   </>;
 }
 
-function OwnerFields({ owners, selected }: { owners: LivestockOwner[]; selected?: Animal | null }) {
+function equalShares(ids:string[],fixed?:{id:string;value:number;raw:string}):Record<string,string>{
+  const result:Record<string,string>={};if(!ids.length)return result;
+  const fixedCents=fixed?Math.round(fixed.value*100):0;
+  const remaining=ids.filter(id=>id!==fixed?.id);
+  if(fixed)result[fixed.id]=fixed.raw;
+  const cents=10000-fixedCents;
+  remaining.forEach((id,index)=>{result[id]=String((Math.floor(cents/remaining.length)+
+    (index<cents%remaining.length?1:0))/100);});
+  return result;
+}
+
+function OwnerFields({ owners, selected, canManage, onCreate }: {
+  owners: LivestockOwner[]; selected?: Animal | null; canManage: boolean;
+  onCreate: (kind:'EXTERNAL_PERSON'|'ORGANIZATION',name:string)=>Promise<LivestockOwner>;
+}) {
+  const [ids,setIds]=useState<string[]>(()=>selected?.owners?.map(owner=>owner.id)??[]);
+  const [percentages,setPercentages]=useState<Record<string,string>>(()=>Object.fromEntries(
+    selected?.owners?.map(owner=>[owner.id,String(owner.percent)])??[]));
+  const [primary,setPrimary]=useState(()=>selected?.owners?.find(owner=>owner.isPrimary)?.id??'');
+  const [adding,setAdding]=useState(false);const [name,setName]=useState('');
+  const [kind,setKind]=useState<'EXTERNAL_PERSON'|'ORGANIZATION'>('EXTERNAL_PERSON');
+  const [saving,setSaving]=useState(false);const [error,setError]=useState('');
+  function toggle(id:string,checked:boolean){
+    const next=checked?[...ids,id]:ids.filter(value=>value!==id);
+    setIds(next);setPercentages(equalShares(next));
+    if(!next.includes(primary))setPrimary(next[0]??'');
+  }
+  function changePercent(id:string,value:string){
+    const amount=Number(value);
+    if(value===''||!Number.isFinite(amount)||amount<0.01||amount>100-(ids.length-1)*0.01){
+      setPercentages(current=>({...current,[id]:value}));return;
+    }
+    setPercentages(equalShares(ids,{id,value:amount,raw:value}));
+  }
+  async function add(){if(name.trim().length<2)return;setSaving(true);setError('');
+    try{const owner=await onCreate(kind,name.trim());const next=[...ids,owner.id];
+      setIds(next);setPercentages(equalShares(next));
+      if(!primary)setPrimary(owner.id);
+      setName('');setAdding(false);
+    }catch(failure){setError(message(failure));}
+    finally{setSaving(false);}
+  }
   const available = owners.filter((owner) => owner.active || selected?.owners?.some((entry) => entry.id === owner.id));
   return <fieldset className="animal-colors"><legend>Propietarios (total 100%)</legend>
-    {available.map((owner) => <div key={owner.id} className="group-inline-form">
+    {available.map((owner) => <div key={owner.id} className="group-inline-form animal-owner-row">
       <label><input type="checkbox" name="ownerIds" value={owner.id}
-        defaultChecked={selected?.owners?.some((entry) => entry.id === owner.id)} /> {owner.name}</label>
-      <label><span>Porcentaje</span><input type="number" name={`percent:${owner.id}`}
-        min="0.01" max="100" step="0.01"
-        defaultValue={selected?.owners?.find((entry) => entry.id === owner.id)?.percent ?? ''} /></label>
-      <label><input type="radio" name="primary" value={owner.id}
-        defaultChecked={selected?.owners?.find((entry) => entry.id === owner.id)?.isPrimary} /> Principal</label>
+        checked={ids.includes(owner.id)} onChange={event=>toggle(owner.id,event.target.checked)}/>
+        {owner.name}</label>
+      {ids.includes(owner.id)&&<><label><span>Porcentaje</span><input type="number"
+        name={`percent:${owner.id}`} min="0.01" max="100" step="0.01"
+        value={percentages[owner.id]??''} readOnly={ids.length===1}
+        onChange={event=>changePercent(owner.id,event.target.value)} /></label>
+      {ids.length>1&&<label><input type="radio" name="primary" value={owner.id}
+        checked={primary===owner.id} onChange={()=>setPrimary(owner.id)}/> Principal</label>}</>}
     </div>)}
-    <small>Selecciona al menos uno; indica porcentajes que sumen 100% y uno principal.</small>
+    {ids.length===1&&<input type="hidden" name="primary" value={ids[0]}/>}
+    {canManage&&<button type="button" className="v2-catalog-add"
+      onClick={()=>setAdding(true)}>+ Añadir propietario</button>}
+    {adding&&<div className="animal-inline-add">
+      <select aria-label="Tipo de propietario" value={kind}
+        onChange={event=>setKind(event.target.value as typeof kind)}>
+        <option value="EXTERNAL_PERSON">Persona externa</option><option value="ORGANIZATION">Organización</option>
+      </select>
+      <input aria-label="Nombre del nuevo propietario" value={name} maxLength={160} minLength={2}
+        onChange={event=>setName(event.target.value)} disabled={saving} autoFocus
+        onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void add();}}}/>
+      <button type="button" className="secondary-button compact" disabled={saving||name.trim().length<2}
+        onClick={()=>void add()}>Guardar</button>
+      <button type="button" className="text-button" onClick={()=>setAdding(false)}>Cancelar</button>
+    </div>}
+    {error&&<small className="form-error" role="alert">{error}</small>}
+    <small>Los porcentajes se distribuyen automáticamente. Con varios propietarios puedes cambiarlos.</small>
   </fieldset>;
 }
 function ownerInput(data: FormData) {
@@ -81,7 +183,8 @@ function ownerInput(data: FormData) {
   if (!ids.length) throw new Error('Selecciona al menos un propietario.');
   const owners = ids.map((partyId) => ({ partyId,
     percent: Number(data.get(`percent:${partyId}`)), isPrimary: data.get('primary') === partyId }));
-  if (owners.filter((owner) => owner.isPrimary).length !== 1 ||
+  if (owners.some(owner=>!Number.isFinite(owner.percent)||owner.percent<=0||owner.percent>100)||
+    owners.filter((owner) => owner.isPrimary).length !== 1 ||
     Math.abs(owners.reduce((sum, owner) => sum + owner.percent, 0) - 100) > 0.001)
     throw new Error('Indica un propietario principal y porcentajes que sumen 100%.');
   return owners;
@@ -344,6 +447,17 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       setOwners(await listOwners(accessToken)); form.reset();
     } catch (failure) { setError(message(failure)); } finally { setBusy(false); }
   }
+  async function addOwnerInline(kind:'EXTERNAL_PERSON'|'ORGANIZATION',name:string){
+    const created=await createOwner(accessToken,{kind,name});
+    setOwners(current=>[...current,created].sort((left,right)=>left.name.localeCompare(right.name,'es')));
+    return created;
+  }
+  async function addCatalogInline(code:keyof AnimalChoices,name:string){
+    const created=await createCatalogItem(accessToken,code,name);
+    setChoices(current=>current?{...current,[code]:[...current[code],created]
+      .sort((left,right)=>left.name.localeCompare(right.name,'es'))}:current);
+    return created;
+  }
   async function changeBrandOwners(event: FormEvent<HTMLFormElement>, id: string) {
     event.preventDefault(); setBusy(true); setError(null);
     try {
@@ -526,8 +640,9 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       <label><span>Unidad de peso</span><select name="weightUnit" disabled={busy} defaultValue="KILOGRAM">
         <option value="KILOGRAM">kg</option><option value="POUND">lb</option>
 </select></label>
-      {choices && <CatalogFields choices={choices} />}
-      <OwnerFields owners={owners} />
+      {choices && <CatalogFields choices={choices} canManage={canManageBrands}
+        onCreate={addCatalogInline}/>}
+      <OwnerFields owners={owners} canManage={canManageBrands} onCreate={addOwnerInline}/>
       {brands && <BrandFields brands={brands} />}
       {canManageMedia&&<><label><span>Foto de perfil</span><input name="profilePhoto" type="file"
         accept="image/jpeg,image/png,image/webp,image/heic"/></label>
@@ -725,12 +840,14 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       {canUpdate && <form className="animal-catalog-edit" key={`owners:${selected.id}:${selected.version}`}
         onSubmit={(event) => void changeOwners(event)}>
         <h4>Propietarios y participación</h4>
-        <OwnerFields owners={owners} selected={selected} />
+        <OwnerFields owners={owners} selected={selected} canManage={canManageBrands}
+          onCreate={addOwnerInline}/>
         <button className="primary-button compact" disabled={busy}>Guardar propietarios</button>
       </form>}
       {canUpdate && choices && <form className="animal-catalog-edit" key={`${selected.id}:${selected.version}`}
         onSubmit={(event) => void changeCatalogs(event)}>
-        <h4>Raza y colores</h4><CatalogFields choices={choices} selected={selected} />
+        <h4>Raza y colores</h4><CatalogFields choices={choices} selected={selected}
+          canManage={canManageBrands} onCreate={addCatalogInline}/>
         <button className="primary-button compact" type="submit" disabled={busy}>
           {busy ? 'Guardando…' : 'Guardar cambios'}</button>
       </form>}
