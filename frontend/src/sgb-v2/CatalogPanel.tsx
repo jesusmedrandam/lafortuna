@@ -6,6 +6,7 @@ import {
   type AnimalClassificationPolicy,type CatalogItem,type CatalogReference,type EditableCatalogCode,
   type LivestockBrand,type LivestockOwner,
 } from './api';
+import {Select} from '../components/ui';
 
 const catalogs:Array<{code:EditableCatalogCode;name:string;description:string}>=[
   {code:'BREEDS',name:'Razas',description:'Razas disponibles para los animales'},
@@ -163,8 +164,8 @@ export function CatalogPanel({accessToken,canManage,commerceEnabled=false}:{
         {tab==='OWNERS'&&<><header><div><h3>Propietarios</h3>
           <p>Personas, organizaciones y usuarios que pueden tener participación en los animales.</p></div></header>
           {canManage&&<form className="catalog-create catalog-owner-create" onSubmit={addNamedOwner}>
-            <label><span>Tipo</span><select name="kind"><option value="EXTERNAL_PERSON">Persona externa</option>
-              <option value="ORGANIZATION">Organización</option></select></label>
+            <label><span>Tipo</span><Select name="kind"><option value="EXTERNAL_PERSON">Persona externa</option>
+              <option value="ORGANIZATION">Organización</option></Select></label>
             <label><span>Nombre</span><input name="name" minLength={2} maxLength={160} required
               placeholder="Nombre del propietario"/></label>
             <button className="primary-button compact" disabled={busy}>Agregar</button>

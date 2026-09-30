@@ -1,7 +1,7 @@
 import {type FormEvent,useEffect,useMemo,useState} from 'react';
 import {ArrowUpDown,ChevronRight,Edit3,ImagePlus,MapPin,Plus,Sprout} from 'lucide-react';
 import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
-  IconButton,LoadingState,Modal} from '../components/ui';
+  IconButton,LoadingState,Modal,Select} from '../components/ui';
 import {formatDate} from '../utils';
 import {ApiRequestError,applyCleaning,cancelCleaning,createCleaning,createCleaningProduct,
   getCleaningOptions,getCleaningProducts,getCleanings,listCatalogItems,updateCleaning,uploadMedia,
@@ -119,9 +119,9 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
         onClick={()=>setShowProduct(false)}>Cerrar</Button>}><form className="movement-form" onSubmit={saveProduct}>
       {error&&<div role="alert" className="form-error movement-wide">{error}</div>}
       <label><span>Nombre *</span><input name="name" required minLength={2} maxLength={160}/></label>
-      <label><span>Categoría *</span><select name="category" required><option value="">Selecciona</option>
+      <label><span>Categoría *</span><Select name="category" required><option value="">Selecciona</option>
         {categories.filter(item=>item.active).map(item=><option key={item.id} value={item.name}>{item.name}</option>)}
-      </select><small>Agrega categorías nuevas desde Catálogos.</small></label>
+      </Select><small>Agrega categorías nuevas desde Catálogos.</small></label>
       <label><span>Principio activo</span><textarea name="activeIngredient" maxLength={2000}/></label>
       <label><span>Formulado por</span><input name="formulatedBy" maxLength={200}/></label>
       <label className="movement-wide"><span>Descripción</span><textarea name="description" maxLength={2000}/></label>
@@ -130,16 +130,16 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
       onClose={reset} footer={<Button variant="ghost" onClick={reset}>Cerrar</Button>}>
       <form className="movement-form" onSubmit={save} key={editing?.id??'new'}>
       {error&&<div role="alert" className="form-error movement-wide">{error}</div>}
-      <label><span>Potrero *</span><select required value={locationId}
+      <label><span>Potrero *</span><Select required value={locationId}
         onChange={(event)=>setLocationId(event.target.value)}><option value="">Selecciona</option>
-        {options.locations.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        {options.locations.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>
       <label><span>Inicio *</span><input name="startedOn" type="date" max={today()} required
         defaultValue={editing?.startedOn??today()}/></label>
       <label><span>Finalización</span><input name="finishedOn" type="date" max={today()}
         defaultValue={editing?.finishedOn??''}/></label>
-      <label><span>Área intervenida</span><select value={areaType}
+      <label><span>Área intervenida</span><Select value={areaType}
         onChange={(event)=>setAreaType(event.target.value as CleaningInput['areaType'])}>
-        <option value="TOTAL">Total</option><option value="PARCIAL">Parcial</option></select></label>
+        <option value="TOTAL">Total</option><option value="PARCIAL">Parcial</option></Select></label>
       {areaType==='PARCIAL'&&<label><span>Porcentaje del potrero *</span>
         <input name="partialPercent" type="number" min="0.01" max="99.99" step="0.01"
           required defaultValue={editing?.partialPercent??''}/></label>}
@@ -151,9 +151,9 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
           onChange={(event)=>setActivities(event.target.checked
             ?[...activities,code as CleaningInput['activities'][number]]
             :activities.filter((item)=>item!==code))}/>{label}</label>)}</fieldset>
-      {activities.includes('FUMIGACION')&&<><label><span>Unidad de aplicación</span><select value={applicationUnit}
+      {activities.includes('FUMIGACION')&&<><label><span>Unidad de aplicación</span><Select value={applicationUnit}
         onChange={(event)=>setApplicationUnit(event.target.value as 'TANQUES'|'BOMBADAS')}>
-        <option value="TANQUES">Tanques</option><option value="BOMBADAS">Bombadas</option></select></label>
+        <option value="TANQUES">Tanques</option><option value="BOMBADAS">Bombadas</option></Select></label>
       <label><span>Cantidad de {applicationUnit==='TANQUES'?'tanques':'bombadas'}</span>
         <input type="number" min="0.01" max="100000" step="0.01" value={applicationCount}
           onChange={(event)=>setApplicationCount(event.target.value)}/></label>
@@ -165,16 +165,16 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
         <button type="button" className="secondary-button compact" onClick={()=>setLines([...lines,
           {productId:'',unitCode:'MILLILITER',quantityPerApplication:1}])}>+ Producto aplicado</button></div>
         {lines.map((line,index)=><div className="cleaning-line" key={index}>
-          <select aria-label="Producto" value={line.productId} required onChange={(event)=>setLines(lines.map(
+          <Select aria-label="Producto" value={line.productId} required onChange={(event)=>setLines(lines.map(
             (item,i)=>i===index?{...item,productId:event.target.value}:item))}>
             <option value="">Selecciona</option>{products.filter((item)=>item.active).map((item)=><option
-              key={item.id} value={item.id}>{item.name}</option>)}</select>
+              key={item.id} value={item.id}>{item.name}</option>)}</Select>
           <input type="number" min="0.0001" max="1000000" step="any" value={line.quantityPerApplication}
             aria-label="Cantidad por aplicación" required onChange={(event)=>setLines(lines.map((item,i)=>
               i===index?{...item,quantityPerApplication:Number(event.target.value)}:item))}/>
-          <select aria-label="Unidad" value={line.unitCode} onChange={(event)=>setLines(lines.map((
+          <Select aria-label="Unidad" value={line.unitCode} onChange={(event)=>setLines(lines.map((
             item,i)=>i===index?{...item,unitCode:event.target.value}:item))}>
-            {options.units.map((unit)=><option key={unit.code} value={unit.code}>{unit.symbol}</option>)}</select>
+            {options.units.map((unit)=><option key={unit.code} value={unit.code}>{unit.symbol}</option>)}</Select>
           <strong>Total: {applicationCount?Number((Number(applicationCount)*line.quantityPerApplication)
             .toFixed(4)):'—'}</strong><button type="button" className="secondary-button compact"
               onClick={()=>setLines(lines.filter((_,i)=>i!==index))}>Quitar</button>

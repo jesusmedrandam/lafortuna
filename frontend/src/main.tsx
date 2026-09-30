@@ -12,6 +12,10 @@ import './styles/settings-hub.css';
 import './styles/patch-1.2.8.35.css';
 import './sgb-v2/v2.css';
 
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => void navigator.serviceWorker.register('/sw.js'));
+}
+
 const root=createRoot(document.getElementById('root')!);
 if (import.meta.env.VITE_SGB_V2 !== 'false') {
   void import('./sgb-v2/V2App').then(({V2App})=>root.render(

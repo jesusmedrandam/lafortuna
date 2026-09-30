@@ -10,6 +10,7 @@ import {
   type PlatformOverview,
 } from './api';
 import {SystemCatalogAdmin} from './SystemCatalogAdmin';
+import {Select} from '../components/ui';
 
 const message = (error: unknown) => error instanceof ApiRequestError
   ? error.message
@@ -158,9 +159,9 @@ export function SuperadminPanel({ accessToken, onSettingsChanged }: {
             <p>{detail.account.owner.name} · {detail.account.owner.email}</p></div></div>
 
           <form className="account-settings" onSubmit={saveAccount}>
-            <label><span>Estado</span><select name="status" defaultValue={detail.account.status} disabled={busy}>
+            <label><span>Estado</span><Select name="status" defaultValue={detail.account.status} disabled={busy}>
               <option value="ACTIVE">Activa</option><option value="SUSPENDED">Suspendida</option>
-              <option value="DISABLED">Deshabilitada</option></select></label>
+              <option value="DISABLED">Deshabilitada</option></Select></label>
             <label><span>Máximo de propiedades</span><input name="maxProperties" type="number" min="1" max="1000"
               defaultValue={detail.account.maxProperties} disabled={busy} /></label>
             <button className="primary-button compact" type="submit" disabled={busy}>Guardar cuenta</button>

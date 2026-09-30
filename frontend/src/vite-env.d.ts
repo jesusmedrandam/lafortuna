@@ -10,6 +10,7 @@ interface Window {
     setAuthenticatedSession?: (active: boolean) => void;
     isOnline?: () => boolean;
     isWifiConnected?: () => boolean;
+    retryHome?: () => void;
     setPendingMutations?: (count: number) => void;
     downloadMedia?: (urlsJson: string) => void;
     saveOptimizedMedia?: (originalUrl: string, optimizedUrl: string, filename: string, mimeType: string) => boolean;
@@ -37,5 +38,9 @@ interface Window {
     scheduleLocalReminder?: (key:string,title:string,message:string,triggerAt:number,notificationId:number,route:string) => void;
     cancelAgendaReminder?: (key:string,notificationId:number) => void;
     requestLocalDevice?: (requestId: string, baseUrl: string, method: string, path: string, formBody: string) => void;
+    configureOfflineSync?: (apiUrl:string,accessToken:string,userId:string,propertyId:string,roleId:string) => void;
+    clearOfflineSyncSession?: () => void;
+    mirrorOfflineMutation?: (mutationJson:string) => void;
+    removeMirroredMutation?: (mutationId:string) => void;
   };
 }

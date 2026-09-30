@@ -61,10 +61,10 @@ Auditoría y Pesajes y aplicó automáticamente la migración `0025`.
 | Ventas y compras | Registro de animales y productos, detalle y anulación auditada; la salida por venta y su reversión son transaccionales. Para asociar una compra de animal se registra primero el animal en su grupo |
 | Agenda | Tareas y eventos con usuarios y animales, aceptación, rechazo, realización y cancelación; falta la creación automática de tratamientos y avisos externos |
 | Ingresos y egresos / Mis finanzas | Cuentas, movimientos, transferencias, saldo y anulación; el ámbito personal queda separado por usuario. Faltan deudas, programaciones y conciliación automática con ventas y compras |
-| Historial y acciones adicionales de la ficha antigua | Pendientes de trasladar al modelo nuevo |
+| Historial y acciones adicionales de la ficha antigua | La ficha ya ofrece menús contextuales de movimientos, sanidad, reproducción y producción, incluidos cambio de grupo/propiedad, tratamiento preventivo o por condición, resolución e historial/cierre de lactancia. Quedan por revisar flujos secundarios durante las pruebas de campo |
 | Notificaciones | Buzón de asignaciones, realización y cancelación de agenda con lectura individual o general; faltan recordatorios programados, push y dispositivos Android |
-| Sincronización Android sin conexión | Pendiente de contrato de sincronización, cola y resolución de conflictos en la API nueva |
-| Android y sincronización sin conexión | Pendiente de un contrato con la API nueva |
+| Sincronización sin conexión | Base implementada: caché por usuario/propiedad/rol, proyección local inmediata, cola FIFO, reintentos idempotentes y conflictos visibles. Falta ampliar las pruebas de campo y multimedia grande |
+| Android | Proyecto nativo en `android/`, paquete `com.jdmedranda.sgb`, WebView, conectividad, cola nativa de respaldo y WorkManager. Firebase queda pendiente de una configuración emitida para el paquete nuevo |
 
 No habilitar pantallas del sistema anterior que todavía enviarían datos al
 servidor antiguo ni señalar esos módulos como terminados. Integrar cada área

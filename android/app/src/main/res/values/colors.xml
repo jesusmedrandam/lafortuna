@@ -1,0 +1,6 @@
+<resources>
+    <color name="sgb_primary">#1F6F4A</color>
+    <color name="sgb_background">#0C1210</color>
+    <color name="sgb_surface">#15201B</color>
+    <color name="white">#FFFFFF</color>
+</resources>

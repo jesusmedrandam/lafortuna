@@ -10,6 +10,7 @@ import {
   getAnimalClassificationPolicy,type AnimalClassificationPolicy,
   type Animal, type AnimalList, type CatalogItem, type LivestockBrand, type LivestockOwner, type ParentSelection,
 } from './api';
+import {Select} from '../components/ui';
 import {ShellIcon} from './ShellIcon';
 
 interface AnimalChoices { BREEDS: CatalogItem[]; COLORS: CatalogItem[] }
@@ -174,10 +175,10 @@ function OwnerFields({ owners, accountUsers, selected, canManage, onCreate, onCr
     {canManage&&<button type="button" className="v2-catalog-add"
       onClick={()=>setAdding(true)}>+ Añadir propietario</button>}
     {adding&&<div className="animal-inline-add">
-      <select aria-label="Tipo de propietario" value={kind}
+      <Select aria-label="Tipo de propietario" value={kind}
         onChange={event=>setKind(event.target.value as typeof kind)}>
         <option value="EXTERNAL_PERSON">Persona externa</option><option value="ORGANIZATION">Organización</option>
-      </select>
+      </Select>
       <input aria-label="Nombre del nuevo propietario" value={name} maxLength={160} minLength={2}
         onChange={event=>setName(event.target.value)} disabled={saving} autoFocus
         onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void add();}}}/>
@@ -245,23 +246,23 @@ function ParentField({ accessToken, child, role }: {
     && entry.sex === (role === 'mother' ? 'FEMALE' : 'MALE')
     && (!child?.birthDate || !entry.birthDate || entry.birthDate < child.birthDate));
   return <fieldset className="animal-parent-field"><legend>{label}</legend>
-    <label><span>Tipo de registro</span><select name={`${role}Mode`} value={mode}
+    <label><span>Tipo de registro</span><Select name={`${role}Mode`} value={mode}
       onChange={(event) => setMode(event.target.value as typeof mode)}>
       <option value="none">Sin registrar</option>
       <option value="animal">Animal registrado en esta propiedad</option>
       <option value="reported">Nombre informado (externo)</option>
-    </select></label>
+    </Select></label>
     {mode === 'animal' && <>
       <label><span>Buscar {label.toLowerCase()}</span><input value={search}
         onChange={(event) => setSearch(event.target.value)} maxLength={80} /></label>
-      <label><span>Animal</span><select name={`${role}AnimalId`} defaultValue={current?.animalId || ''} required>
+      <label><span>Animal</span><Select name={`${role}AnimalId`} defaultValue={current?.animalId || ''} required>
         <option value="">Selecciona un animal</option>
         {current?.animalId && !eligible.some((entry) => entry.id === current.animalId)
           && <option value={current.animalId}>{current.name} (actual)</option>}
         {eligible.map((entry) => <option key={entry.id} value={entry.id}>
           {entry.name}{entry.earTagCode ? ` · ${entry.earTagCode}` : ''}
         </option>)}
-      </select></label>
+      </Select></label>
       {loadError && <small>No se pudieron cargar los animales; intenta buscar de nuevo.</small>}
     </>}
     {mode === 'reported' && <label><span>Nombre informado</span>
@@ -551,21 +552,21 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       <section className="animal-form-section"><header><span>1</span><div><h4>Identificación</h4>
         <p>Datos principales y ubicación inicial.</p></div></header><div className="animal-form-grid">
         <label><span>Nombre *</span><input name="name" maxLength={160} required disabled={busy} /></label>
-        <label><span>Sexo *</span><select name="sex" required disabled={busy} defaultValue="">
+        <label><span>Sexo *</span><Select name="sex" required disabled={busy} defaultValue="">
           <option value="" disabled>Selecciona</option><option value="FEMALE">Hembra</option>
-          <option value="MALE">Macho</option></select></label>
-        <label><span>Grupo *</span><select name="groupId" required disabled={busy} defaultValue="">
+          <option value="MALE">Macho</option></Select></label>
+        <label><span>Grupo *</span><Select name="groupId" required disabled={busy} defaultValue="">
           <option value="">Selecciona un grupo</option>{groups.filter(group=>group.active).map(group=><option
             key={group.id} value={group.id}>{group.name}{group.location?` · ${group.location.name}`:''}</option>)}
-        </select><small>La ubicación se hereda del grupo.</small></label>
+        </Select><small>La ubicación se hereda del grupo.</small></label>
         <label><span>Arete individual</span><input name="earTagCode" maxLength={80} disabled={busy} /></label>
         <label><span>Fecha de nacimiento</span><input type="date" name="birthDate" disabled={busy} /></label>
         <label><span>Fecha de ingreso</span><input type="date" name="entryDate" disabled={busy} />
           <small>Vacía: se usa la fecha actual de la finca.</small></label>
         <label><span>Peso inicial</span><input type="number" name="initialWeight" min="0.001"
           max="999999999" step="0.001" disabled={busy} /></label>
-        <label><span>Unidad de peso</span><select name="weightUnit" disabled={busy} defaultValue="KILOGRAM">
-          <option value="KILOGRAM">kg</option><option value="POUND">lb</option></select></label>
+        <label><span>Unidad de peso</span><Select name="weightUnit" disabled={busy} defaultValue="KILOGRAM">
+          <option value="KILOGRAM">kg</option><option value="POUND">lb</option></Select></label>
         <label className="animal-form-wide"><span>Descripción</span>
           <textarea name="description" maxLength={5000} rows={3} disabled={busy} /></label>
       </div></section>
@@ -599,11 +600,11 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         onChange={(event) => setSearchInput(event.target.value)} /></label>
       <button className="secondary-button compact animal-toolbar-button" type="submit"
         aria-label="Buscar" title="Buscar"><ShellIcon name="search"/></button>
-      <select className="animal-sex-select" aria-label="Filtrar por sexo"
+      <Select className="animal-sex-select" aria-label="Filtrar por sexo"
         value={filters.sex??''} onChange={event=>setFilter('sex',event.target.value)}>
         <option value="">Todos los sexos</option><option value="FEMALE">Hembras</option>
         <option value="MALE">Machos</option>
-      </select>
+      </Select>
       <button type="button" className={`secondary-button compact animal-toolbar-button${advancedOpen?' active':''}`}
         aria-label="Filtros avanzados" title="Filtros avanzados" aria-expanded={advancedOpen}
         onClick={()=>setAdvancedOpen(open=>!open)}><ShellIcon name="filter"/>
@@ -612,37 +613,37 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       <span className="animal-total" aria-live="polite">{result?.total??0} animales</span>
     </form>
     <div className="animal-quick-filters">
-      <label><span className="sr-only">Grupo</span><select value={filters.groupId??''}
+      <label><span className="sr-only">Grupo</span><Select value={filters.groupId??''}
         onChange={event=>setFilter('groupId',event.target.value)}><option value="">Todos los grupos</option>
-        {groups.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <label><span className="sr-only">Clasificación</span><select value={classification} onChange={event=>{
+        {groups.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>
+      <label><span className="sr-only">Clasificación</span><Select value={classification} onChange={event=>{
         setClassification(event.target.value);setPage(1);}}><option value="">Todas</option>
         {(['VACA','VACONA','TERNERA','TORO','TORETE','TERNERO'] as const)
           .map(code=><option key={code} value={code}>{classificationNames?.[code]
             ??code.charAt(0)+code.slice(1).toLowerCase()}</option>)}
-      </select></label>
+      </Select></label>
     </div>
     {advancedOpen&&<div className="animal-advanced-filters">
       <div className="animal-filter-grid">
-        <label><span>Estado</span><select value={filters.status??''} onChange={event=>setFilter('status',event.target.value)}>
+        <label><span>Estado</span><Select value={filters.status??''} onChange={event=>setFilter('status',event.target.value)}>
           <option value="">Todos</option><option value="ACTIVE">Activo</option><option value="INACTIVE">Inactivo</option>
           <option value="DEAD">Fallecido</option><option value="MISSING">Desaparecido</option>
-        </select></label>
+        </Select></label>
         {canViewLocations&&modules.includes('MOVEMENTS')&&<label><span>Potrero o corral</span>
-          <select value={filters.locationId??''} onChange={event=>setFilter('locationId',event.target.value)}>
+          <Select value={filters.locationId??''} onChange={event=>setFilter('locationId',event.target.value)}>
             <option value="">Todos</option>{locations.map(item=><option key={item.id} value={item.id}>
               {item.kind==='PASTURE'?'Potrero':'Corral'}: {item.name}</option>)}
-          </select></label>}
-        <label><span>Propietario</span><select value={filters.ownerId??''} onChange={event=>setFilter('ownerId',event.target.value)}>
+          </Select></label>}
+        <label><span>Propietario</span><Select value={filters.ownerId??''} onChange={event=>setFilter('ownerId',event.target.value)}>
           <option value="">Todos</option>{owners.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
-        </select></label>
+        </Select></label>
         {canViewCatalogs&&(['breedId','colorId'] as const).map(key=><label key={key}><span>{key==='breedId'?'Raza':'Color'}</span>
-          <select value={filters[key]??''} onChange={event=>setFilter(key,event.target.value)}><option value="">Todos</option>
+          <Select value={filters[key]??''} onChange={event=>setFilter(key,event.target.value)}><option value="">Todos</option>
             {choices?.[key==='breedId'?'BREEDS':'COLORS'].map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
-          </select></label>)}
-        <label><span>Marquilla</span><select value={filters.brandId??''} onChange={event=>setFilter('brandId',event.target.value)}>
+          </Select></label>)}
+        <label><span>Marquilla</span><Select value={filters.brandId??''} onChange={event=>setFilter('brandId',event.target.value)}>
           <option value="">Todas</option>{brands?.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
-        </select></label>
+        </Select></label>
         <label><span>Nacimiento desde</span><input type="date" value={filters.birthFrom??''}
           max={filters.birthTo||undefined} onChange={event=>setFilter('birthFrom',event.target.value)}/></label>
         <label><span>Nacimiento hasta</span><input type="date" value={filters.birthTo??''}
@@ -761,8 +762,8 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
             relationCode:String(data.get('role')) as 'GENERAL'|'PROFILE'|'COVER'})
             .then(()=>{form.reset();setMediaRevision(n=>n+1);}).catch(failure=>setError(message(failure)))
             .finally(()=>setBusy(false));
-        }}><select name="role" aria-label="Uso de la foto"><option value="GENERAL">Galería</option>
-          <option value="PROFILE">Perfil</option><option value="COVER">Portada</option></select>
+        }}><Select name="role" aria-label="Uso de la foto"><option value="GENERAL">Galería</option>
+          <option value="PROFILE">Perfil</option><option value="COVER">Portada</option></Select>
           <input name="file" type="file" accept="image/jpeg,image/png,image/webp,image/heic" required/>
           <button className="secondary-button compact" disabled={busy}>Agregar foto</button></form>}
       </div>}

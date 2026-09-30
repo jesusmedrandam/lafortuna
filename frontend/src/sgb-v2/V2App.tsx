@@ -1,10 +1,11 @@
 import {useMemo,useState,type ReactNode} from 'react';
 import {Baby,Beef,ChevronRight,Droplets,HeartPulse,Home,Images,LayoutDashboard,LogOut,
   Menu,Moon,Settings2,ShieldCheck,SlidersHorizontal,Sun,Users,Warehouse,ArrowLeftRight,
-  Activity,ClipboardList,Sprout,Milk,UserCircle,Weight,HeartCrack,ShoppingCart,ShoppingBag,CalendarDays,WalletCards,X} from 'lucide-react';
+  Activity,ClipboardList,Sprout,Milk,UserCircle,Weight,HeartCrack,ShoppingCart,ShoppingBag,CalendarDays,WalletCards,
+  CloudDownload,X} from 'lucide-react';
 import {BrowserRouter,Link,NavLink,Navigate,Outlet,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
 import {AuthLayout} from '../pages/auth/AuthLayout';
-import {IconButton,LoadingState} from '../components/ui';
+import {IconButton,LoadingState,Select} from '../components/ui';
 import {useTheme} from '../theme/ThemeContext';
 import {ActivityPanel} from './ActivityPanel';
 import {AnimalPanel} from './AnimalPanel';
@@ -33,6 +34,7 @@ import {V2AgendaPage} from './V2AgendaPage';
 import {V2FinancesPage} from './V2FinancesPage';
 import {V2NotificationCenter} from './V2NotificationCenter';
 import {V2SessionProvider,useV2Session} from './V2Session';
+import {OfflineStatusButton,V2OfflinePage,V2OfflineProvider,useV2Offline} from './offline/V2Offline';
 import type {SessionOverview} from './api';
 
 type Section='principal'|'operaciones'|'configuracion';
@@ -58,6 +60,7 @@ const destinations:Destination[]=[
   {to:'/produccion',label:'Producción',icon:Milk,section:'operaciones',permission:'PRODUCTION_VIEW',module:'PRODUCTION'},
   {to:'/actividades',label:'Actividades',icon:Activity,section:'operaciones',permission:'ACTIVITY_VIEW',module:'TASKS'},
   {to:'/catalogos',label:'Catálogos',icon:SlidersHorizontal,section:'configuracion',permission:'CATALOG_VIEW'},
+  {to:'/sin-conexion',label:'Datos sin conexión',icon:CloudDownload,section:'configuracion'},
   {to:'/equipo',label:'Equipo y roles',icon:Users,section:'configuracion',permission:'MEMBERSHIP_VIEW'},
   {to:'/auditoria',label:'Auditoría',icon:ClipboardList,section:'configuracion',permission:'AUDIT_VIEW'},
   {to:'/configuracion',label:'Configuración',icon:Settings2,section:'configuracion',permission:'MODULE_VIEW'},
@@ -78,6 +81,7 @@ function Protected(){
 
 function V2Shell(){
   const {session,signOut,selectContext,hasPermission}=useV2Session();const {theme,toggleTheme}=useTheme();
+  const {dataRevision}=useV2Offline();
   const [open,setOpen]=useState(false);const [changing,setChanging]=useState(false);
   const [error,setError]=useState('');const location=useLocation();const navigate=useNavigate();
   const overview=session!.overview;const property=activeProperty(overview);
@@ -118,22 +122,22 @@ function V2Shell(){
         <IconButton label="Cerrar menú" className="sidebar-close" onClick={()=>setOpen(false)}><X size={20}/></IconButton></div>
       {overview.user.isSuperadmin&&<div className="v2-scope-picker">
         <label htmlFor="active-scope">Trabajar como</label>
-        <select id="active-scope" value={platformMode?'PLATFORM':'PROPERTY'}
+        <Select id="active-scope" value={platformMode?'PLATFORM':'PROPERTY'}
           onChange={event=>navigate(event.target.value==='PLATFORM'?'/administracion':'/')}>
           <option value="PLATFORM">Superadministrador</option>
           <option value="PROPERTY">Rol en una propiedad</option>
-        </select>
+        </Select>
       </div>}
       {!platformMode&&<div className="v2-property-picker"><label htmlFor="active-property">Propiedad activa</label>
-        <select id="active-property" value={property?.id??''} disabled={changing||!overview.properties.length}
+        <Select id="active-property" value={property?.id??''} disabled={changing||!overview.properties.length}
           onChange={event=>void switchProperty(event.target.value)}>
           {!property&&<option value="">Selecciona una propiedad</option>}
           {overview.properties.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>{property?<><label htmlFor="active-role">Rol en la propiedad</label>
-          <select id="active-role" value={role?.id??''}
+        </Select>{property?<><label htmlFor="active-role">Rol en la propiedad</label>
+          <Select id="active-role" value={role?.id??''}
           disabled={changing||!property.roles.length} onChange={event=>void switchRole(event.target.value)}>
           {property.roles.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
-        </select></>:<small>Elige una propiedad para seleccionar un rol.</small>}</div>}
+        </Select></>:<small>Elige una propiedad para seleccionar un rol.</small>}</div>}
       <nav className="sidebar-nav" aria-label="Secciones">
         {(['principal','operaciones','configuracion'] as const).map(section=>{
           const items=visible.filter(item=>item.section===section);
@@ -154,12 +158,13 @@ function V2Shell(){
       <IconButton label="Abrir menú" className="mobile-menu-button" onClick={()=>setOpen(true)}><Menu size={22}/></IconButton>
       <div><span className="breadcrumb">Sistema de Gestión Bovina</span><h2>{current?.label??'Gestión ganadera'}</h2></div>
     </div><div className="topbar-actions"><span className="v2-current-property">{platformMode?'Administración global':property?.name??'Sin propiedad'}</span>
+      <OfflineStatusButton/>
       <V2NotificationCenter/>
       <IconButton label={theme==='dark'?'Usar tema claro':'Usar tema oscuro'} onClick={toggleTheme}>
         {theme==='dark'?<Sun size={19}/>:<Moon size={19}/>}</IconButton>
       <span className="profile-link"><UserCircle size={21}/><span>{overview.user.displayName}</span></span>
     </div></header><main className="page-content">{error&&<div className="form-alert form-alert-error" role="alert">{error}</div>}
-      <Outlet key={`${overview.activeContext?.propertyId??'none'}:${overview.activeContext?.roleId??'none'}`}/></main>
+      <Outlet key={`${overview.activeContext?.propertyId??'none'}:${overview.activeContext?.roleId??'none'}:${dataRevision}`}/></main>
       <footer className="app-footer"><Home size={14}/><span>SGB · Sistema de Gestión Bovina</span></footer>
     </div>
   </div>;
@@ -279,6 +284,7 @@ function V2Routes(){
       <Route path="actividades" element={<Feature permission="ACTIVITY_VIEW" module="TASKS"><Panel kind="activities"/></Feature>}/>
       <Route path="multimedia" element={<Feature permission="MEDIA_VIEW" module="MULTIMEDIA"><Panel kind="media"/></Feature>}/>
       <Route path="catalogos" element={<Feature permission="CATALOG_VIEW"><Panel kind="catalogs"/></Feature>}/>
+      <Route path="sin-conexion" element={<V2OfflinePage/>}/>
       <Route path="equipo" element={<Feature permission="MEMBERSHIP_VIEW"><Panel kind="team"/></Feature>}/>
       <Route path="auditoria" element={<Feature permission="AUDIT_VIEW"><V2AuditPage/></Feature>}/>
       <Route path="configuracion" element={<Feature permission="MODULE_VIEW"><Panel kind="settings"/></Feature>}/>
@@ -294,5 +300,5 @@ export function V2App(){
   const reset=url.searchParams.get('reset-password');
   if(verification&&url.pathname!=='/activar')window.history.replaceState({},'',`/activar${url.search}`);
   else if(reset&&url.pathname!=='/recuperar')window.history.replaceState({},'',`/recuperar${url.search}`);
-  return <V2SessionProvider><V2Routes/></V2SessionProvider>;
+  return <V2SessionProvider><V2OfflineProvider><V2Routes/></V2OfflineProvider></V2SessionProvider>;
 }

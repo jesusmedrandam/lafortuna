@@ -4,6 +4,7 @@ import {
   listGroups, listLocations, setGroupState, updateGroup, updateLocation,
   type CatalogItem,type LivestockGroup, type PhysicalLocation, type LocationInput,
 } from './api';
+import {Select} from '../components/ui';
 
 const label = (place: { kind: 'PASTURE' | 'CORRAL'; name: string }) =>
   `${place.kind === 'PASTURE' ? 'Potrero' : 'Corral'}: ${place.name}`;
@@ -39,41 +40,41 @@ export function LocationFields({ place,grassCatalog }: { place?: PhysicalLocatio
   return <>
     <label><span>Área</span><input type="number" name="area" step="0.0001" min="0.0001"
       defaultValue={place?.area ?? ''} /></label>
-    <label><span>Unidad de área</span><select name="areaUnitCode" defaultValue={place?.areaUnitCode ?? ''}>
+    <label><span>Unidad de área</span><Select name="areaUnitCode" defaultValue={place?.areaUnitCode ?? ''}>
       <option value="">Sin área</option><option value="HECTARE">ha</option>
       <option value="SQUARE_METER">m²</option>
-    </select></label>
+    </Select></label>
     <label><span>Capacidad estimada (animales)</span><input type="number" name="capacityEstimate"
       min="0" step="1" defaultValue={place?.capacityEstimate ?? ''} /></label>
     <label><span>Agua disponible</span><input type="checkbox" name="waterAvailable"
       defaultChecked={place?.waterAvailable ?? false} /></label>
     {pasture ? <>
-      <label><span>Tipo de uso</span><select name="pastureUse" defaultValue={place?.pastureUse ?? ''}>
+      <label><span>Tipo de uso</span><Select name="pastureUse" defaultValue={place?.pastureUse ?? ''}>
         <option value="">Sin especificar</option><option value="PASTOREO">Pastoreo</option>
         <option value="CORTE">Corte</option><option value="MIXTO">Mixto</option>
         <option value="DESCANSO">Descanso</option>
-      </select></label>
+      </Select></label>
       <label><span>Último descanso</span><input type="date" name="lastRestDate"
         defaultValue={place?.lastRestDate ?? ''} /></label>
       <fieldset className="animal-colors"><legend>Pastos</legend>
         {Array.from({ length: grassCount }, (_, index) => <div key={index} className="group-inline-form">
-          <label><span>Pasto</span><select name="grassName"
+          <label><span>Pasto</span><Select name="grassName"
             defaultValue={place?.grasses?.[index]?.name ?? ''}>
             <option value="">Selecciona</option>
             {place?.grasses?.[index]?.name&&!grassCatalog.some(item=>item.name===place.grasses[index]?.name)
               && <option value={place.grasses[index]?.name}>{place.grasses[index]?.name} (anterior)</option>}
             {grassCatalog.filter(item=>item.active).map(item=><option key={item.id}
               value={item.name}>{item.name}</option>)}
-          </select></label>
+          </Select></label>
           <label><span>% estimado</span><input type="number" name="grassPercent" min="0"
             max="100" step="0.01" defaultValue={place?.grasses?.[index]?.percent ?? ''} /></label>
           <label><span>Área estimada</span><input type="number" name="grassArea" min="0.0001"
             step="0.0001" defaultValue={place?.grasses?.[index]?.area ?? ''} /></label>
-          <label><span>Unidad</span><select name="grassAreaUnit"
+          <label><span>Unidad</span><Select name="grassAreaUnit"
             defaultValue={place?.grasses?.[index]?.areaUnitCode ?? ''}>
             <option value="">Sin área</option><option value="HECTARE">ha</option>
             <option value="SQUARE_METER">m²</option>
-          </select></label>
+          </Select></label>
           <label><span>Siembra</span><input type="date" name="grassSowing"
             defaultValue={place?.grasses?.[index]?.sowingDate ?? ''} /></label>
           <label><span>Observaciones</span><input name="grassNotes" maxLength={300}
@@ -180,10 +181,10 @@ export function GroupPanel({ accessToken, modules, canManage, canViewLocations,
       {canManageLocations && availableKinds.length > 0 && <details className="group-create-toggle">
         <summary>+ Agregar potrero o corral</summary>
         <form className="group-new-form" onSubmit={addLocation}>
-          <label><span>Tipo</span><select name="kind" disabled={busy} value={locationKind}
+          <label><span>Tipo</span><Select name="kind" disabled={busy} value={locationKind}
               onChange={(event) => setNewLocationKind(event.target.value as PhysicalLocation['kind'])}>
             {availableKinds.map((kind) => <option key={kind} value={kind}>
-              {kind === 'PASTURE' ? 'Potrero' : 'Corral'}</option>)}</select></label>
+              {kind === 'PASTURE' ? 'Potrero' : 'Corral'}</option>)}</Select></label>
           <label><span>Nombre *</span><input name="name" required maxLength={160} disabled={busy} /></label>
           <label className="group-description"><span>Descripción</span>
             <textarea name="description" rows={2} maxLength={5000} disabled={busy} /></label>

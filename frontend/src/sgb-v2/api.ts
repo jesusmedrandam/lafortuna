@@ -1,7 +1,11 @@
+import {offlineRequest,OfflineUnavailableError,setOfflineApiBase,
+  type OfflineTransportResponse} from './offline/runtime';
+
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
 
 export const API_URL = (configuredApiUrl || (import.meta.env.PROD
   ? 'https://appsgb.onrender.com' : 'http://localhost:3000')).replace(/\/$/, '');
+setOfflineApiBase(API_URL);
 
 export interface SessionUser {
   id: string;
@@ -272,7 +276,7 @@ export class ApiRequestError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function networkRequest<T>(path: string, init: RequestInit = {}): Promise<OfflineTransportResponse<T>> {
   let response: Response;
   try {
     // Header names are case-insensitive. Sending both content-type and Content-Type
@@ -292,6 +296,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     );
   }
 
+  const etag=response.headers.get('etag');
+  if(response.status===304)return {data:undefined as T,etag,notModified:true};
   const text = await response.text();
   const body = text ? JSON.parse(text) as ApiEnvelope<T> | ApiErrorEnvelope : null;
   if (!response.ok) {
@@ -307,8 +313,16 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     );
   }
 
-  if (response.status === 204) return undefined as T;
-  return (body as ApiEnvelope<T>).data;
+  if (response.status === 204) return {data:undefined as T,etag,notModified:false};
+  return {data:(body as ApiEnvelope<T>).data,etag,notModified:false};
+}
+
+async function request<T>(path:string,init:RequestInit={}):Promise<T>{
+  try{return await offlineRequest<T>(path,init,networkRequest);}
+  catch(error){
+    if(error instanceof OfflineUnavailableError)throw new ApiRequestError(error.message,error.status,error.code);
+    throw error;
+  }
 }
 
 export function login(email: string, password: string, deviceId: string) {

@@ -7,6 +7,7 @@ import {
   updateMembershipStatus,
   type PropertyTeam,
 } from './api';
+import {Select} from '../components/ui';
 
 const errorMessage = (error: unknown) => error instanceof ApiRequestError
   ? error.message
@@ -100,9 +101,9 @@ export function PropertyTeamPanel({ accessToken }: { accessToken: string }) {
       </div></fieldset>
       <div className="field-pair">
         <label><span>Pago en USD (opcional)</span><input name="payAmount" type="number" min="0" step="0.01" disabled={busy} /></label>
-        <label><span>Frecuencia</span><select name="payFrequency" defaultValue="MONTHLY" disabled={busy}>
+        <label><span>Frecuencia</span><Select name="payFrequency" defaultValue="MONTHLY" disabled={busy}>
           {Object.entries(frequencyNames).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-        </select></label>
+        </Select></label>
       </div>
       <label><span>Notas laborales (opcional)</span><textarea name="employmentNotes" maxLength={2000} disabled={busy} /></label>
       <button className="primary-button" type="submit" disabled={busy || team.assignableRoles.length === 0}>

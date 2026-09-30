@@ -35,11 +35,15 @@ export function PasswordInput({ className = '', ...props }: Omit<InputHTMLAttrib
     </button>
   </div>;
 }
-export function Select({ className = '', children, value, defaultValue, onChange, disabled, multiple, size, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+export function Select({ className = '', children, value, defaultValue, onChange, disabled, multiple, size,
+  id:providedId,...props }: SelectHTMLAttributes<HTMLSelectElement>) {
   const nativeRef = useRef<HTMLSelectElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const id = useId();
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const generatedId = useId();
+  const id=providedId??generatedId;
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const [internalValue, setInternalValue] = useState(String(defaultValue ?? ''));
   const [position, setPosition] = useState({ left: 0, top: 0, width: 0, maxHeight: 280 });
   const controlled = value !== undefined;
@@ -73,7 +77,12 @@ export function Select({ className = '', children, value, defaultValue, onChange
     return collector;
   }, [children]);
   const active = options.find((option) => option.value === selectedValue) ?? options[0];
-  const androidCustom = Boolean(window.SGBAndroid) && !multiple && !size;
+  const customSelect = !multiple && !size;
+  const searchable = options.length >= 5;
+  const normalizedQuery = query.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es');
+  const visibleOptions = normalizedQuery
+    ? options.filter((option) => option.label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es').includes(normalizedQuery))
+    : options;
 
   useEffect(() => {
     if (!open) return;
@@ -88,15 +97,16 @@ export function Select({ className = '', children, value, defaultValue, onChange
       setPosition({ left: Math.max(margin, Math.min(rect.left, window.innerWidth - rect.width - margin)), top: useAbove ? Math.max(margin, rect.top - Math.min(maxHeight, options.length * 48 + 12) - 6) : rect.bottom + 6, width: rect.width, maxHeight });
     };
     updatePosition();
+    if (searchable) window.setTimeout(() => searchRef.current?.focus(), 0);
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
     return () => {
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
-  }, [open, options.length]);
+  }, [open, options.length, searchable]);
 
-  if (!androidCustom) return <select ref={nativeRef} className={`input ${className}`} value={value} defaultValue={defaultValue} onChange={onChange} disabled={disabled} multiple={multiple} size={size} {...props}>{children}</select>;
+  if (!customSelect) return <select ref={nativeRef} id={providedId} className={`input ${className}`} value={value} defaultValue={defaultValue} onChange={onChange} disabled={disabled} multiple={multiple} size={size} {...props}>{children}</select>;
 
   const choose = (next: string) => {
     if (!controlled) setInternalValue(next);
@@ -105,18 +115,25 @@ export function Select({ className = '', children, value, defaultValue, onChange
       select.value = next;
       select.dispatchEvent(new Event('change', { bubbles: true }));
     }
+    setQuery('');
     setOpen(false);
     window.setTimeout(() => buttonRef.current?.focus(), 0);
   };
 
   return <>
-    <select ref={nativeRef} className="sgb-select-native" aria-hidden tabIndex={-1} value={selectedValue} onChange={onChange} disabled={disabled} {...props}>{children}</select>
-    <button ref={buttonRef} id={id} type="button" className={`input sgb-select-button ${className}`} disabled={disabled} aria-haspopup="listbox" aria-expanded={open} onClick={(event) => { event.preventDefault(); setOpen((current) => !current); }}>
+    <select ref={nativeRef} id={providedId?`${providedId}-native`:undefined} className="sgb-select-native" aria-hidden tabIndex={-1} value={selectedValue} onChange={onChange} disabled={disabled} {...props}>{children}</select>
+    <button ref={buttonRef} id={id} type="button" className={`input sgb-select-button ${className}`} disabled={disabled}
+      aria-label={props['aria-label']} aria-haspopup="listbox" aria-expanded={open}
+      onClick={(event) => { event.preventDefault(); setQuery(''); setOpen((current) => !current); }}>
       <span>{active?.label || 'Selecciona'}</span><span className="sgb-select-chevron" aria-hidden>⌄</span>
     </button>
     {open ? createPortal(<div className="sgb-select-backdrop" onMouseDown={() => setOpen(false)}>
       <div className="sgb-select-menu" role="listbox" aria-labelledby={id} style={{ left: position.left, top: position.top, width: position.width, maxHeight: position.maxHeight }} onMouseDown={(event) => event.stopPropagation()}>
-        {options.map((option, index) => <button key={`${option.value}-${index}`} type="button" role="option" aria-selected={option.value === selectedValue} className={option.value === selectedValue ? 'selected' : ''} disabled={option.disabled} onClick={() => choose(option.value)}>{option.label}</button>)}
+        {searchable ? <label className="sgb-select-search"><Search size={17}/><input ref={searchRef} type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar opción…" aria-label="Buscar opción"/></label> : null}
+        <div className="sgb-select-options">
+          {visibleOptions.map((option, index) => <button key={`${option.value}-${index}`} type="button" role="option" aria-selected={option.value === selectedValue} className={option.value === selectedValue ? 'selected' : ''} disabled={option.disabled} onClick={() => choose(option.value)}>{option.label}</button>)}
+          {!visibleOptions.length ? <p className="sgb-select-empty">No hay opciones que coincidan.</p> : null}
+        </div>
       </div>
     </div>, document.body) : null}
   </>;
