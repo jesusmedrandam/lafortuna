@@ -1,7 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#1F6F4A" android:pathData="M18,18h72v72h-72z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M29,35h50v12h-18v31h-14v-31h-18z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M27,28h14l-7,9zM67,28h14l-7,9z" />
-</vector>
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_sgb_logo"
+    android:inset="8%" />

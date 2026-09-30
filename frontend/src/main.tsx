@@ -12,7 +12,7 @@ import './styles/settings-hub.css';
 import './styles/patch-1.2.8.35.css';
 import './sgb-v2/v2.css';
 
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+if ('serviceWorker' in navigator && import.meta.env.PROD && !window.SGBAndroid) {
   window.addEventListener('load', () => void navigator.serviceWorker.register('/sw.js'));
 }
 

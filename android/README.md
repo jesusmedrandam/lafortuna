@@ -9,13 +9,17 @@ Aplicación Android de SGB con identificador `com.jdmedranda.sgb`.
 - Las escrituras pendientes se sincronizan en orden FIFO con una clave de idempotencia.
 - La cola se refleja también en almacenamiento privado de Android; WorkManager puede enviarla
   cuando la actividad está en segundo plano y vuelve la conexión.
-- El Service Worker conserva el shell de la aplicación para abrirla sin señal después de la
-  primera conexión.
+- El APK incluye una copia compilada de toda la interfaz. La pantalla abre desde esos recursos
+  locales con el origen seguro de la aplicación web, aunque Render o internet no estén disponibles.
 - Los GET usan revalidación HTTP/ETag para evitar volver a descargar respuestas sin cambios.
 
 ## Compilación
 
 ```bash
+cd ../frontend
+npm ci
+npm run build
+cd ../android
 ./gradlew :app:assembleDebug
 ```
 

@@ -23,6 +23,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -30,12 +31,15 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 
 public final class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 4001;
     private static final int NOTIFICATION_PERMISSION_REQUEST = 4002;
     private static final String OFFLINE_PAGE = "file:///android_asset/offline.html";
+    private static final String WEB_APP_HOST = Uri.parse(BuildConfig.WEB_APP_URL).getHost();
     private WebView webView;
     private ProgressBar pageProgress;
     private TextView offlineBanner;
@@ -110,6 +114,12 @@ public final class MainActivity extends Activity {
         });
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                WebResourceResponse bundled = bundledWebResponse(request);
+                return bundled == null ? super.shouldInterceptRequest(view, request) : bundled;
+            }
+
+            @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
                 if (isTrusted(url)) return false;
@@ -124,6 +134,43 @@ public final class MainActivity extends Activity {
             }
         });
         webView.setDownloadListener(downloadListener());
+    }
+
+    private WebResourceResponse bundledWebResponse(WebResourceRequest request) {
+        Uri url = request.getUrl();
+        if (!"GET".equalsIgnoreCase(request.getMethod()) || !"https".equalsIgnoreCase(url.getScheme())
+                || WEB_APP_HOST == null || !WEB_APP_HOST.equalsIgnoreCase(url.getHost())) return null;
+        String path = url.getPath();
+        path = path == null ? "" : path.replaceFirst("^/+", "");
+        if (path.contains("..") || path.contains("\\")) return null;
+        if (path.isEmpty()) path = "index.html";
+        try { return assetResponse(path); }
+        catch (IOException missing) {
+            if (!path.substring(path.lastIndexOf('/') + 1).contains(".")) {
+                try { return assetResponse("index.html"); }
+                catch (IOException ignored) { return null; }
+            }
+            return null;
+        }
+    }
+
+    private WebResourceResponse assetResponse(String path) throws IOException {
+        InputStream content = getAssets().open(path);
+        String mimeType;
+        if (path.endsWith(".html")) mimeType = "text/html";
+        else if (path.endsWith(".js")) mimeType = "application/javascript";
+        else if (path.endsWith(".css")) mimeType = "text/css";
+        else if (path.endsWith(".webmanifest")) mimeType = "application/manifest+json";
+        else if (path.endsWith(".svg")) mimeType = "image/svg+xml";
+        else if (path.endsWith(".woff2")) mimeType = "font/woff2";
+        else {
+            String extension = MimeTypeMap.getFileExtensionFromUrl(path);
+            mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
+            if (mimeType == null) mimeType = "application/octet-stream";
+        }
+        String encoding = mimeType.startsWith("text/") || mimeType.contains("javascript")
+                || mimeType.contains("json") || mimeType.contains("manifest") ? "UTF-8" : null;
+        return new WebResourceResponse(mimeType, encoding, content);
     }
 
     private DownloadListener downloadListener() {
