@@ -13,6 +13,12 @@ const routes={ORAL:'Oral',INTRAMUSCULAR:'Intramuscular',SUBCUTANEA:'Subcutánea'
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 const message=(error:unknown)=>error instanceof ApiRequestError?error.message:
   error instanceof Error?error.message:'No se pudo guardar el registro sanitario.';
+const healthAnimalOption=(animal:HealthOptions['animals'][number])=>({
+  value:animal.id,label:animal.name,imageUrl:animal.profilePhotoUrl,
+  description:[animal.earTagCode?`Arete ${animal.earTagCode}`:null,animal.groupName,
+    animal.locationName].filter(Boolean).join(' · ')||null,
+  keywords:[animal.earTagCode,animal.groupName,animal.locationName].filter(Boolean).join(' '),
+});
 type HealthTab='conditions'|'treatments'|'campaigns';
 
 export function HealthPanel({accessToken,canManage,initialAnimalId,initialAction,onCompleted}:{
@@ -242,8 +248,8 @@ export function HealthPanel({accessToken,canManage,initialAnimalId,initialAction
           ?`Arete ${options.animals.find(item=>item.id===(editingCondition?.animalId??initialAnimalId))?.earTagCode}`:
             'Animal seleccionado desde su ficha'}</small></div>:<SearchableSelect value={conditionAnimalId}
           onChange={setConditionAnimalId} title="Seleccionar animal" placeholder="Selecciona un animal"
-          searchPlaceholder="Buscar por nombre o arete…" options={options.animals.map(animal=>({
-            value:animal.id,label:animal.name,description:animal.earTagCode?`Arete ${animal.earTagCode}`:null}))}/>}</label>
+          searchPlaceholder="Buscar por nombre, arete, grupo o ubicación…"
+          options={options.animals.map(healthAnimalOption)}/>}</label>
       <label><span>Tipo de problema *</span><SearchableSelect value={conditionKind}
         onChange={setConditionKind} title="Tipo de problema" placeholder="Selecciona el problema"
         searchPlaceholder="Buscar problema de salud…" options={[
@@ -256,7 +262,10 @@ export function HealthPanel({accessToken,canManage,initialAnimalId,initialAction
         max={today()} defaultValue={editingCondition?.detectedOn??today()}/></label>
       <label className="movement-wide"><span>Descripción *</span><textarea name="description"
         required minLength={2} maxLength={2000} defaultValue={editingCondition?.description??''}/></label>
-      <button className="primary-button compact" disabled={busy||!conditionAnimalId||!conditionKind}>Guardar condición</button>
+      <div className="reference-dialog-footer movement-wide"><button type="button"
+        className="secondary-button compact" onClick={closeDialogs} disabled={busy}>Cancelar</button>
+        <button className="primary-button compact" disabled={busy||!conditionAnimalId||!conditionKind}>
+          {busy?'Guardando…':'Guardar condición'}</button></div>
       </form></div></div>}
     {canManage&&showMedicine&&<div className="health-overlay" role="presentation"
       onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)closeDialogs();}}>
@@ -284,7 +293,10 @@ export function HealthPanel({accessToken,canManage,initialAnimalId,initialAction
         max={10000} defaultValue={0} required/></label>
       <label><span>Retiro de carne (días)</span><input name="meatDays" type="number" min={0}
         max={10000} defaultValue={0} required/></label>
-      <button className="primary-button compact" disabled={busy||!medicineUnit}>Guardar medicamento</button>
+      <div className="reference-dialog-footer movement-wide"><button type="button"
+        className="secondary-button compact" onClick={closeDialogs} disabled={busy}>Cancelar</button>
+        <button className="primary-button compact" disabled={busy||!medicineUnit}>
+          {busy?'Guardando…':'Guardar medicamento'}</button></div>
       </form></div></div>}
     {canManage&&showCampaign&&options&&<div className="health-overlay" role="presentation"
       onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)reset();}}>
@@ -327,9 +339,8 @@ export function HealthPanel({accessToken,canManage,initialAnimalId,initialAction
             ?`Arete ${selectedAnimal.earTagCode}`:'Seleccionado desde su ficha'}</small></div>
           :<SearchableSelect value={selectedAnimal?.id??''} onChange={value=>{
             setSelected(value?[value]:[]);setConditionIds({});}} title="Seleccionar animal"
-            placeholder="Selecciona un animal" searchPlaceholder="Buscar por nombre o arete…"
-            options={candidates.map(animal=>({value:animal.id,label:animal.name,
-              description:animal.earTagCode?`Arete ${animal.earTagCode}`:null}))}/>}
+            placeholder="Selecciona un animal" searchPlaceholder="Buscar por nombre, arete, grupo o ubicación…"
+            options={candidates.map(healthAnimalOption)}/>}
         {selectedAnimal&&!preventiveTreatment&&selectedAnimalConditions.length>0&&<label>
           <span>Condición relacionada{conditionTreatment?' *':''}</span>
           <SearchableSelect value={conditionIds[selectedAnimal.id]??''}
@@ -361,11 +372,13 @@ export function HealthPanel({accessToken,canManage,initialAnimalId,initialAction
               options={conditions.filter(item=>item.animalId===animal.id&&item.status!=='RESUELTA')
                 .map(item=>({value:item.id,label:item.kind??'Condición de salud',description:item.description}))}/>}</div>)}</div>
       </div>}
-      <button className="primary-button compact" disabled={busy||!medicineId||!selectedIds.length
-        ||individualTreatment&&selectedIds.length!==1
-        ||conditionTreatment&&selectedIds.some(id=>!conditionIds[id])
-        ||selectedIds.length>500||mode==='GRUPO'&&!groupId}>
-        {busy?'Guardando…':individualTreatment?'Registrar tratamiento':editing?'Guardar borrador':'Crear borrador'}</button>
+      <div className="reference-dialog-footer movement-wide"><button type="button"
+        className="secondary-button compact" onClick={reset} disabled={busy}>Cancelar</button>
+        <button className="primary-button compact" disabled={busy||!medicineId||!selectedIds.length
+          ||individualTreatment&&selectedIds.length!==1
+          ||conditionTreatment&&selectedIds.some(id=>!conditionIds[id])
+          ||selectedIds.length>500||mode==='GRUPO'&&!groupId}>
+          {busy?'Guardando…':individualTreatment?'Guardar':editing?'Guardar borrador':'Crear borrador'}</button></div>
       </form></div></div>}
     {loading?<p className="muted">Cargando registros sanitarios…</p>:<div className="health-record-list">
       {tab==='conditions'&&visible.conditions.map(condition=><button type="button" className="health-record-row"

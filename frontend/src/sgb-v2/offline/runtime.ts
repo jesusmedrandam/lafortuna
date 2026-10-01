@@ -2,6 +2,7 @@ import {
   getCache,getOfflineSize,getSetting,listCache,listOutbox,offlineScopeKey,putCache,putOutbox,
   putSetting,removeOutbox,type OfflineScope,type OutboxEntry,type StoredFormPart,
 } from './database';
+import {mediaThumbnailUrl,optimizedCloudinaryMediaUrl} from '../../media';
 
 export interface OfflineTransportResponse<T> {
   data:T;
@@ -24,6 +25,10 @@ export interface OfflineRuntimeState {
   syncing:boolean;
   cachedEntries:number;
   cachedBytes:number;
+  mediaFiles:number;
+  mediaBytes:number;
+  mediaPending:number;
+  mediaFailed:number;
   lastDownload:number|null;
 }
 
@@ -51,11 +56,12 @@ export function setOfflineApiBase(value:string){apiBase=value.replace(/\/$/,'');
 
 export async function configureOfflineRuntime(scope:OfflineScope|null,token:string|null){
   activeScope=scope;activeToken=token;
-  automaticDownloads=scope?await getSetting<boolean>(`automatic-downloads:${scope.userId}`)??false:false;
+  automaticDownloads=scope?await getSetting<boolean>(`automatic-downloads:${scope.userId}`)??Boolean(window.SGBAndroid):false;
   try{
     if(scope&&token)window.SGBAndroid?.configureOfflineSync?.(apiBase,token,scope.userId,
       scope.propertyId??'',scope.roleId??'');
     else window.SGBAndroid?.clearOfflineSyncSession?.();
+    window.SGBAndroid?.setAutomaticMediaDownloads?.(Boolean(scope&&automaticDownloads));
   }catch{/* Solo Android. */}
   await publishState();
 }
@@ -63,6 +69,7 @@ export async function configureOfflineRuntime(scope:OfflineScope|null,token:stri
 export async function setAutomaticDownloads(enabled:boolean){
   automaticDownloads=enabled;
   if(activeScope)await putSetting(`automatic-downloads:${activeScope.userId}`,enabled);
+  try{window.SGBAndroid?.setAutomaticMediaDownloads?.(enabled);}catch{/* Solo Android. */}
   await publishState();
 }
 
@@ -447,6 +454,10 @@ async function backgroundRefresh<T>(scope:OfflineScope,path:string,init:RequestI
     const headers=new Headers(init.headers);
     if(current?.etag)headers.set('if-none-match',current.etag);
     const response=await transport<T>(path,{...init,headers,cache:'no-cache'});
+    if(automaticDownloads&&activeScope&&sameScope(scope,activeScope)){
+      try{window.SGBAndroid?.downloadMedia?.(JSON.stringify(collectNativeMedia(
+        response.notModified&&current?current.payload:response.data)));}catch{/* Solo Android. */}
+    }
     if(response.notModified&&current){await putCache(scope,path,current.payload,response.etag??current.etag);return;}
     const fresh=response.data;
     if(JSON.stringify(current?.payload)!==JSON.stringify(fresh)){
@@ -511,6 +522,15 @@ async function derivedCache<T>(scope:OfflineScope,path:string):Promise<T|null>{
   }
   const queryRoot=path.split('?')[0];
   const candidates=entries.filter(item=>item.path.split('?')[0]===queryRoot);
+  if(queryRoot==='/media'&&candidates.length){
+    const query=new URLSearchParams(path.split('?')[1]??'');
+    const all=candidates.find(item=>item.path==='/media');
+    const rows=all&&Array.isArray(all.payload)?all.payload:
+      [...new Map(candidates.sort((a,b)=>a.savedAt-b.savedAt).flatMap(entry=>
+        Array.isArray(entry.payload)?entry.payload:[]).map(row=>[bodyRecord(row).id,row])).values()];
+    return rows.filter(row=>(!query.get('entityType')||bodyRecord(row).entity_type===query.get('entityType'))
+      &&(!query.get('entityId')||bodyRecord(row).entity_id===query.get('entityId'))) as T;
+  }
   if(candidates.length){
     const payload=candidates.sort((a,b)=>b.savedAt-a.savedAt)[0]!.payload;
     const animalId=new URLSearchParams(path.split('?')[1]??'').get('animalId');
@@ -532,7 +552,11 @@ export async function offlineRequest<T>(path:string,init:RequestInit,send:Transp
     if(derived!==null){if(isRuntimeOnline())void backgroundRefresh<T>(activeScope,path,init);return derived;}
     if(!isRuntimeOnline())throw new OfflineUnavailableError('Este contenido todavía no se descargó para usarlo sin conexión.');
     const response=await send<T>(path,{...init,cache:'no-cache'});
-    if(automaticDownloads)await putCache(activeScope,path,response.data,response.etag);
+    if(automaticDownloads){
+      await putCache(activeScope,path,response.data,response.etag);
+      try{window.SGBAndroid?.downloadMedia?.(JSON.stringify(collectNativeMedia(response.data)));}
+      catch{/* Solo Android. */}
+    }
     return response.data;
   }
   if(!mutationAllowed(path,init))return (await send<T>(path,init)).data;
@@ -565,42 +589,139 @@ export async function offlineRequest<T>(path:string,init:RequestInit,send:Transp
   return optimistic as T;
 }
 
+interface NativeMediaDownload {
+  source:string;
+  url:string;
+  aliases:string[];
+}
+
+interface NativeMediaInfo {
+  count?:number;
+  bytes?:number;
+  pending?:number;
+  failed?:number;
+}
+
+function isRemoteMedia(value:unknown):value is string{
+  return typeof value==='string'&&/^https?:\/\//i.test(value)&&(
+    value.includes('/image/upload/')||value.includes('/video/upload/')||
+    /\.(?:jpe?g|png|webp|gif|avif|heic|mp4|m4v|mov|webm)(?:[?#].*)?$/i.test(value));
+}
+
+function collectNativeMedia(payload:unknown){
+  const downloads=new Map<string,NativeMediaDownload>();
+  const visited=new Set<unknown>();
+  const add=(source:string,url=source,aliases:string[]=[])=>{
+    const current=downloads.get(source);
+    downloads.set(source,{source,url:current?.url??url,aliases:[...new Set([...(current?.aliases??[]),...aliases]
+      .filter(alias=>alias!==source&&isRemoteMedia(alias)))]});
+  };
+  const visit=(value:unknown,key='')=>{
+    if(isRemoteMedia(value)){
+      if(/(?:photo|image|thumbnail|cover|media|video).*url/i.test(key)||isRemoteMedia(value))add(value);
+      return;
+    }
+    if(!value||typeof value!=='object'||visited.has(value))return;
+    visited.add(value);
+    if(Array.isArray(value)){for(const item of value)visit(item);return;}
+    const row=value as Record<string,unknown>;
+    if(isRemoteMedia(row.url)&&(row.kind==='IMAGE'||row.kind==='VIDEO')){
+      const type=row.kind==='VIDEO'?'VIDEO':'IMAGEN';
+      const thumbnail=isRemoteMedia(row.thumbnailUrl)?row.thumbnailUrl:null;
+      add(row.url,optimizedCloudinaryMediaUrl(row.url,type,'offline'),[
+        optimizedCloudinaryMediaUrl(row.url,type,'display'),
+        optimizedCloudinaryMediaUrl(row.url,type,'download'),
+      ]);
+      if(thumbnail&&thumbnail!==row.url)add(thumbnail);
+      else if(row.kind==='IMAGE')add(mediaThumbnailUrl(row.url));
+    }
+    for(const [field,item] of Object.entries(row)){
+      if(isRemoteMedia(row.url)&&(row.kind==='IMAGE'||row.kind==='VIDEO')&&
+        (field==='url'||field==='thumbnailUrl'))continue;
+      visit(item,field);
+    }
+  };
+  visit(payload);
+  return [...downloads.values()];
+}
+
+function readNativeMediaInfo():NativeMediaInfo{
+  try{return JSON.parse(window.SGBAndroid?.getMediaCacheInfo?.()??'{}') as NativeMediaInfo;}
+  catch{return {};}
+}
+
+async function waitForNativeMedia(){
+  if(!window.SGBAndroid?.getMediaCacheInfo)return;
+  const deadline=Date.now()+12*60_000;
+  while(Date.now()<deadline){
+    const info=readNativeMediaInfo();
+    await publishState();
+    if(Number(info.pending??0)<=0){
+      if(Number(info.failed??0)>0)throw new Error(
+        `${Number(info.failed)} archivo(s) no pudieron guardarse para uso sin conexión.`);
+      return;
+    }
+    await new Promise(resolve=>window.setTimeout(resolve,300));
+  }
+  throw new Error('La descarga de fotos y videos tardó demasiado. Intenta actualizar nuevamente.');
+}
+
+async function downloadNativeMedia(items:NativeMediaDownload[]){
+  if(!items.length||!window.SGBAndroid?.downloadMedia)return;
+  const unique=[...new Map(items.map(item=>[item.source,item])).values()];
+  for(let index=0;index<unique.length;index+=30){
+    window.SGBAndroid.downloadMedia(JSON.stringify(unique.slice(index,index+30)));
+    await waitForNativeMedia();
+  }
+}
+
 export async function downloadPaths(paths:string[]){
   if(!activeScope||!activeToken||!transport||!isRuntimeOnline())throw new OfflineUnavailableError(
     'Conéctate a internet para descargar los datos.');
-  let downloaded=0;let failed=0;
+  const scope={...activeScope};const token=activeToken;
+  let downloaded=0;let failed=0;const media=new Map<string,NativeMediaDownload>();
   for(const requestedPath of paths){
     let path=requestedPath;let more=true;let page=1;
     while(more){
+      if(!activeScope||!sameScope(activeScope,scope)||activeToken!==token)throw new Error(
+        'La sesión o propiedad cambió. Actualiza los datos de la propiedad seleccionada.');
       try{
         if(requestedPath.startsWith('/animals?')){
           const query=new URLSearchParams(requestedPath.split('?')[1]??'');query.set('page',String(page));
           path=`/animals?${query}`;
         }
-        const current=await getCache(activeScope,path);
-        const headers=new Headers({authorization:`Bearer ${activeToken}`});
+        const current=await getCache(scope,path);
+        const headers=new Headers({authorization:`Bearer ${token}`});
         if(current?.etag)headers.set('if-none-match',current.etag);
         const response=await transport(path,{headers,cache:'no-cache'});
         const payload=response.notModified&&current?current.payload:response.data;
-        await putCache(activeScope,path,payload,response.etag??current?.etag??null);downloaded+=1;
+        await putCache(scope,path,payload,response.etag??current?.etag??null);downloaded+=1;
+        for(const item of collectNativeMedia(payload))media.set(item.source,item);
         const record=bodyRecord(payload);more=requestedPath.startsWith('/animals?')&&record.hasMore===true&&page<500;
         page+=1;
       }catch{failed+=1;more=false;}
     }
   }
-  await reprojectQueued(activeScope);
-  emit('sgb-v2-cache-updated',{scopeKey:offlineScopeKey(activeScope)});await publishState();
+  if(!activeScope||!sameScope(activeScope,scope)||activeToken!==token)throw new Error(
+    'La sesión o propiedad cambió. Actualiza los datos de la propiedad seleccionada.');
+  try{await downloadNativeMedia([...media.values()]);}
+  finally{
+    await reprojectQueued(scope);
+    emit('sgb-v2-cache-updated',{scopeKey:offlineScopeKey(scope)});await publishState();
+  }
   if(!downloaded&&failed)throw new Error('No fue posible descargar los datos de esta propiedad.');
   return {downloaded,failed};
 }
 
 export async function runtimeState():Promise<OfflineRuntimeState>{
   if(!activeScope)return {online:isRuntimeOnline(),automaticDownloads:false,pending:0,failed:0,syncing,
-    cachedEntries:0,cachedBytes:0,lastDownload:null};
+    cachedEntries:0,cachedBytes:0,mediaFiles:0,mediaBytes:0,mediaPending:0,mediaFailed:0,lastDownload:null};
   const [entries,size]=await Promise.all([listOutbox(activeScope.userId),getOfflineSize(activeScope)]);
+  const nativeMedia=readNativeMediaInfo();
   return {online:isRuntimeOnline(),automaticDownloads,pending:entries.filter(item=>item.state==='PENDING').length,
     failed:entries.filter(item=>item.state==='FAILED').length,syncing,cachedEntries:size.entries,
-    cachedBytes:size.bytes,lastDownload:size.savedAt};
+    cachedBytes:size.bytes,mediaFiles:Number(nativeMedia.count??0),mediaBytes:Number(nativeMedia.bytes??0),
+    mediaPending:Number(nativeMedia.pending??0),mediaFailed:Number(nativeMedia.failed??0),lastDownload:size.savedAt};
 }
 
 async function publishState(){

@@ -38,15 +38,20 @@ import java.net.URI;
 public final class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 4001;
     private static final int NOTIFICATION_PERMISSION_REQUEST = 4002;
+    private static final int MEDIA_EXPORT_REQUEST = 4003;
     private static final String OFFLINE_PAGE = "file:///android_asset/offline.html";
     private static final String WEB_APP_HOST = Uri.parse(BuildConfig.WEB_APP_URL).getHost();
     private WebView webView;
     private ProgressBar pageProgress;
     private TextView offlineBanner;
     private ConnectivityManager connectivityManager;
+    private MediaCacheManager mediaCache;
     private ConnectivityManager.NetworkCallback networkCallback;
     private ValueCallback<Uri[]> fileCallback;
     private int pendingCount;
+    private String exportSource;
+    private String exportDelivery;
+    private String exportScope;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -58,6 +63,7 @@ public final class MainActivity extends Activity {
         pageProgress = findViewById(R.id.page_progress);
         offlineBanner = findViewById(R.id.offline_banner);
         connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        mediaCache = new MediaCacheManager(this);
         configureWebView();
         registerConnectivity();
         requestNotificationPermission();
@@ -83,7 +89,7 @@ public final class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
         webView.setBackgroundColor(Color.parseColor("#0C1210"));
-        webView.addJavascriptInterface(new SgbJavascriptBridge(this), "SGBAndroid");
+        webView.addJavascriptInterface(new SgbJavascriptBridge(this, mediaCache), "SGBAndroid");
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onProgressChanged(WebView view, int progress) {
@@ -116,7 +122,13 @@ public final class MainActivity extends Activity {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 WebResourceResponse bundled = bundledWebResponse(request);
-                return bundled == null ? super.shouldInterceptRequest(view, request) : bundled;
+                if (bundled != null) return bundled;
+                if ("GET".equalsIgnoreCase(request.getMethod())) {
+                    WebResourceResponse media = mediaCache.responseOrDownload(
+                            request.getUrl().toString(), request.getRequestHeaders().get("Range"));
+                    if (media != null) return media;
+                }
+                return super.shouldInterceptRequest(view, request);
             }
 
             @Override
@@ -278,9 +290,37 @@ public final class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == MEDIA_EXPORT_REQUEST) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && exportSource != null) {
+                mediaCache.exportTo(data.getData(), exportSource, exportDelivery, exportScope,
+                        success -> runOnUiThread(() -> Toast.makeText(this, success ? "Archivo guardado"
+                                : "No se pudo guardar. Descarga el archivo para uso sin conexión primero.",
+                                Toast.LENGTH_LONG).show()));
+            }
+            exportSource = null;
+            exportDelivery = null;
+            exportScope = null;
+            return;
+        }
         if (requestCode != FILE_CHOOSER_REQUEST || fileCallback == null) return;
         fileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
         fileCallback = null;
+    }
+
+    void exportMedia(String source, String delivery, String filename, String mimeType) {
+        runOnUiThread(() -> {
+            if (exportSource != null) return;
+            exportSource = source;
+            exportDelivery = delivery;
+            exportScope = mediaCache.userScope();
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType(mimeType).putExtra(Intent.EXTRA_TITLE, filename);
+            try { startActivityForResult(intent, MEDIA_EXPORT_REQUEST); }
+            catch (ActivityNotFoundException error) {
+                exportSource = null;
+                Toast.makeText(this, "No se puede abrir el selector de archivos.", Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     @Override
@@ -313,6 +353,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (networkCallback != null) connectivityManager.unregisterNetworkCallback(networkCallback);
+        if (mediaCache != null) mediaCache.shutdown();
         webView.removeJavascriptInterface("SGBAndroid");
         webView.destroy();
         super.onDestroy();

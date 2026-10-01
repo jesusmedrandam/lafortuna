@@ -215,12 +215,14 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
             <span>{animal.name}{animal.earTagCode?` · ${animal.earTagCode}`:''}</span></label>)}</div>
         </>}
       </div>}
-      <div className="movement-actions movement-wide"><button className="primary-button compact" disabled={busy
+      <div className="movement-actions reference-dialog-footer movement-wide">
+        <button type="button" className="secondary-button compact" onClick={reset} disabled={busy}>
+          {editing?'Cancelar edición':'Cancelar'}</button>
+        <button className="primary-button compact" disabled={busy
         || !sourceGroupId || kind!=='UBICACION'&&!groupAnimals.length || mode==='MANUAL'&&!selected.length
         || kind!=='UBICACION'&&!destinationGroupId || kind==='UBICACION'&&!destinationLocationId
         || kind==='PROPIEDAD'&&!cross}>
         {busy?'Guardando…':editing?'Guardar borrador':onCompleted?'Guardar y aplicar':'Crear borrador'}</button>
-        {editing&&<button type="button" className="secondary-button compact" onClick={reset}>Cancelar edición</button>}
       </div>
       </form></div></div>}
     {records&&(visible.length?<Card className="record-list movements-record-list">

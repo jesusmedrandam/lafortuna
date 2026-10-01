@@ -1,5 +1,5 @@
 import {createContext,useCallback,useContext,useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
-import {AlertTriangle,Check,CloudDownload,CloudOff,Database,RefreshCw,Wifi} from 'lucide-react';
+import {AlertTriangle,Check,CloudDownload,CloudOff,Database,Images,RefreshCw,Wifi} from 'lucide-react';
 import {Button,Card,PageHeader} from '../../components/ui';
 import {useV2Session} from '../V2Session';
 import {downloadPaths,isRuntimeOnline,retryFailedMutations,runtimeState,setAutomaticDownloads,
@@ -15,7 +15,7 @@ interface OfflineContextValue extends OfflineRuntimeState {
 }
 
 const empty:OfflineRuntimeState={online:true,automaticDownloads:false,pending:0,failed:0,syncing:false,
-  cachedEntries:0,cachedBytes:0,lastDownload:null};
+  cachedEntries:0,cachedBytes:0,mediaFiles:0,mediaBytes:0,mediaPending:0,mediaFailed:0,lastDownload:null};
 const OfflineContext=createContext<OfflineContextValue|null>(null);
 
 function propertyDownloadPaths(modules:string[],permissions:string[],personalFinance:boolean){
@@ -29,6 +29,7 @@ function propertyDownloadPaths(modules:string[],permissions:string[],personalFin
     '/catalogs/BREEDS/items','/catalogs/COLORS/items','/catalogs/MOVEMENT_REASONS/items',
     '/catalogs/HEALTH_CONDITION_TYPES/items','/catalogs/TREATMENT_TYPES/items',
     '/catalogs/GRASS_TYPES/items');
+  if(modules.includes('MULTIMEDIA')&&can('MEDIA_VIEW'))paths.push('/media','/media/usage');
   if(modules.includes('MOVEMENTS')&&can('MOVEMENT_VIEW'))paths.push('/movements','/movements/options');
   if(modules.includes('WEIGHING')&&can('WEIGHING_VIEW'))paths.push('/weighings','/weighings/options');
   if(modules.includes('HEALTH')&&can('HEALTH_VIEW'))paths.push('/health-records/conditions',
@@ -127,6 +128,8 @@ export function V2OfflinePage(){
     <div className="offline-summary-grid">
       <Card><Database size={22}/><div><span>Datos guardados</span><strong>{state.cachedEntries}</strong>
         <small>{formatBytes(state.cachedBytes)}</small></div></Card>
+      <Card><Images size={22}/><div><span>Fotos y videos</span><strong>{state.mediaFiles}</strong>
+        <small>{state.mediaPending?`${state.mediaPending} descargando…`:formatBytes(state.mediaBytes)}</small></div></Card>
       <Card>{state.online?<Wifi size={22}/>:<CloudOff size={22}/>}<div><span>Conexión</span>
         <strong>{state.online?'Disponible':'Sin conexión'}</strong><small>La lectura local continúa disponible</small></div></Card>
       <Card>{state.failed?<AlertTriangle size={22}/>:<Check size={22}/>}<div><span>Cambios locales</span>

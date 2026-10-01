@@ -1,5 +1,6 @@
 import {useEffect,useMemo,useState,type CSSProperties,type FormEvent} from 'react';
 import {ImageLightbox,type LightboxMedia} from '../components/ImageLightbox';
+import {mediaThumbnailUrl} from '../media';
 import {ApiRequestError,deleteMediaObject,getAnimals,getMedia,getMediaUsage,
   listCatalogItems,uploadMedia,type Animal,type CatalogItem,type MediaItem,type MediaUsage} from './api';
 
@@ -137,7 +138,7 @@ export function MediaPanel({accessToken,permissions}:{accessToken:string;permiss
           return <article className="media-tile" key={id}>
             <button className="media-tile-open" type="button" onClick={()=>setViewerId(id)}
               aria-label={`Ver ${main.kind==='VIDEO'?'video':'foto'} de ${title}`}>
-              {main.kind==='IMAGE'?<img src={main.thumbnailUrl??main.url} loading="lazy" alt=""/>:
+              {main.kind==='IMAGE'?<img src={main.thumbnailUrl??mediaThumbnailUrl(main.url)} loading="lazy" decoding="async" alt=""/>:
                 <span className="media-video-placeholder">▶<small>Toca para reproducir</small></span>}
               <span className="media-tile-type" aria-hidden="true">{main.kind==='VIDEO'?'▶':'▣'}</span>
               <span className="media-tile-caption"><strong>{title}</strong>

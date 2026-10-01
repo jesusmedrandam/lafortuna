@@ -45,18 +45,30 @@ export function V2SessionProvider({children}:{children:ReactNode}){
 
   useEffect(()=>{
     let active=true;
-    void refreshSession().then(payload=>active?complete(payload):undefined).catch(async reason=>{
-      if(!active)return;
-      if(reason instanceof ApiRequestError&&reason.status===401){await clearSessionSnapshot();return;}
+    void (async()=>{
       const snapshot=await getSessionSnapshot<ActiveSession>();
+      if(!active)return;
       if(snapshot){
         await configureOfflineRuntime({userId:snapshot.payload.overview.user.id,
           propertyId:snapshot.payload.overview.activeContext?.propertyId??null,
           roleId:snapshot.payload.overview.activeContext?.roleId??null},snapshot.payload.accessToken);
         setSession(snapshot.payload);setError(null);
         try{window.SGBAndroid?.setAuthenticatedSession?.(true);}catch{/* Solo Android. */}
-      }else setError('No se pudo restablecer la sesión. Conéctate al menos una vez en este dispositivo.');
-    }).finally(()=>{if(active)setReady(true);});
+        setReady(true);
+      }
+      if(!isRuntimeOnline()){
+        if(!snapshot)setError('Conéctate al menos una vez para iniciar sesión en este dispositivo.');
+        return;
+      }
+      try{const payload=await refreshSession();if(active)await complete(payload);}
+      catch(reason){
+        if(!active)return;
+        if(reason instanceof ApiRequestError&&reason.status===401){
+          await clearSessionSnapshot();await configureOfflineRuntime(null,null);setSession(null);
+          try{window.SGBAndroid?.setAuthenticatedSession?.(false);}catch{/* Solo Android. */}
+        }else if(!snapshot)setError('No se pudo restablecer la sesión. Conéctate al menos una vez en este dispositivo.');
+      }
+    })().finally(()=>{if(active)setReady(true);});
     return()=>{active=false;};
   },[complete]);
 

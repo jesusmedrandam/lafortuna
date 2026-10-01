@@ -978,7 +978,8 @@ export interface HealthMedicine {
   indications:string|null;withdrawalMilkDays:number;withdrawalMeatDays:number;active:boolean;
 }
 export interface HealthOptions {
-  animals:Array<{id:string;name:string;earTagCode:string|null;groupId:string|null}>;
+  animals:Array<{id:string;name:string;earTagCode:string|null;groupId:string|null;groupName:string|null;
+    locationId:string|null;locationName:string|null;profilePhotoUrl:string|null}>;
   groups:Array<{id:string;name:string}>;
   units:Array<{code:string;name:string;symbol:string}>;
 }

@@ -12,6 +12,7 @@ interface Window {
     isWifiConnected?: () => boolean;
     retryHome?: () => void;
     setPendingMutations?: (count: number) => void;
+    setAutomaticMediaDownloads?: (enabled: boolean) => void;
     downloadMedia?: (urlsJson: string) => void;
     saveOptimizedMedia?: (originalUrl: string, optimizedUrl: string, filename: string, mimeType: string) => boolean;
     saveMedia?: (url: string, filename: string, mimeType: string) => boolean;
