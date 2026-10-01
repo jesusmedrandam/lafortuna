@@ -206,13 +206,13 @@ final class MediaCacheManager {
             if (partial) {
                 String range = rangeHeader.substring("bytes=".length()).split(",", 2)[0];
                 String[] bounds = range.split("-", 2);
-                if (bounds[0].isBlank()) {
+                if (bounds[0].trim().isEmpty()) {
                     long suffix = Long.parseLong(bounds[1]);
                     if (suffix <= 0) return rangeNotSatisfiable(total);
                     start = Math.max(0, total - suffix);
                 } else {
                     start = Long.parseLong(bounds[0]);
-                    if (bounds.length > 1 && !bounds[1].isBlank()) end = Long.parseLong(bounds[1]);
+                    if (bounds.length > 1 && !bounds[1].trim().isEmpty()) end = Long.parseLong(bounds[1]);
                 }
                 if (start < 0 || start >= total || end < start) return rangeNotSatisfiable(total);
                 end = Math.min(end, total - 1);
@@ -309,7 +309,7 @@ final class MediaCacheManager {
     }
 
     private CacheReference cachedReference(String source, String scope) {
-        if (source == null || source.isBlank()) return null;
+        if (source == null || source.trim().isEmpty()) return null;
         String metadata = index.getString(entryKey(scope, source), null);
         if (metadata == null) return null;
         File file = new File(directory(scope), filePart(metadata));
@@ -321,7 +321,7 @@ final class MediaCacheManager {
     }
 
     private void remember(String scope, String source, String metadata) {
-        if (source == null || source.isBlank()) return;
+        if (source == null || source.trim().isEmpty()) return;
         index.edit().putString(entryKey(scope, source), metadata).apply();
     }
 
@@ -329,7 +329,7 @@ final class MediaCacheManager {
         if (aliases.isEmpty()) return;
         SharedPreferences.Editor editor = index.edit();
         for (String alias : aliases) {
-            if (alias != null && !alias.isBlank()) editor.putString(entryKey(scope, alias), metadata);
+            if (alias != null && !alias.trim().isEmpty()) editor.putString(entryKey(scope, alias), metadata);
         }
         editor.apply();
     }
@@ -383,7 +383,7 @@ final class MediaCacheManager {
     }
 
     private static String normalizedMime(String value) {
-        if (value == null || value.isBlank()) return "application/octet-stream";
+        if (value == null || value.trim().isEmpty()) return "application/octet-stream";
         return value.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
     }
 
