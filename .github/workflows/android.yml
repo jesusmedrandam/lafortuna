@@ -36,10 +36,14 @@ jobs:
       - name: Build bundled frontend
         working-directory: frontend
         run: npm run build
+      - name: Configure Chrome for isolated CI tests
+        run: |
+          printf '#!/bin/sh\nexec /usr/bin/google-chrome --no-sandbox "$@"\n' > "$RUNNER_TEMP/sgb-test-chrome"
+          chmod +x "$RUNNER_TEMP/sgb-test-chrome"
       - name: Verify offline data and mobile screens
         working-directory: frontend
         env:
-          CHROME_PATH: /usr/bin/google-chrome
+          CHROME_PATH: ${{ runner.temp }}/sgb-test-chrome
         run: |
           npm run test:offline
           node tests/service-worker.test.mjs
@@ -58,3 +62,4 @@ jobs:
         with:
           name: sgb-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
