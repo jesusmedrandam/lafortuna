@@ -86,6 +86,7 @@ export type EditableCatalogCode = 'BREEDS' | 'COLORS' | 'GRASS_TYPES' |
   'MOVEMENT_REASONS' | 'TREATMENT_TYPES' | 'ADMINISTRATION_ROUTES' | 'BUYERS' | 'SALE_PRODUCTS';
 export interface CatalogItem {
   id: string;
+  version?:number;
   catalogCode: EditableCatalogCode;
   name: string;
   speciesCode: string | null;
@@ -268,7 +269,7 @@ interface ApiEnvelope<T> {
 
 interface ApiErrorEnvelope {
   ok: false;
-  error?: { code?: string; message?: string;
+  error?: { code?: string; message?: string;retryAfterSeconds?:number;
     fields?: Array<{path:string;message:string}> };
 }
 
@@ -307,6 +308,7 @@ export class ApiRequestError extends Error {
     message: string,
     readonly status: number,
     readonly code: string,
+    readonly retryAt:number=0,
   ) {
     super(message);
   }
@@ -373,7 +375,10 @@ async function networkRequest<T>(path: string, init: OfflineTransportRequest = {
   const etag=response.headers.get('etag');
   if(response.status===304)return {data:undefined as T,etag,notModified:true};
   const text = await response.text();
-  const body = text ? JSON.parse(text) as ApiEnvelope<T> | ApiErrorEnvelope : null;
+  let body:ApiEnvelope<T>|ApiErrorEnvelope|null=null;
+  try{body=text?JSON.parse(text):null;}catch{
+    if(response.ok)throw new ApiRequestError('El servidor devolvió una respuesta incompleta. Intenta actualizar nuevamente.',response.status,'INVALID_SERVER_RESPONSE');
+  }
   if (!response.ok) {
     const failure = body as ApiErrorEnvelope | null;
     const fields=failure?.error?.fields;
@@ -384,6 +389,7 @@ async function networkRequest<T>(path: string, init: OfflineTransportRequest = {
       details || failure?.error?.message || 'No fue posible completar la solicitud.',
       response.status,
       failure?.error?.code || 'REQUEST_FAILED',
+      response.status===429?Date.now()+Math.max(1,Number(failure?.error?.retryAfterSeconds)||Number(response.headers.get('retry-after'))||60)*1000:0,
     );
   }
 
@@ -460,8 +466,12 @@ export function resetPassword(token:string,password:string){
 
 let refreshInFlight:Promise<SessionPayload>|null=null;
 let lastRenewed:SessionPayload|null=null;
+let refreshBlocked:ApiRequestError|null=null;
 export function refreshSession():Promise<SessionPayload> {
-  if(!refreshInFlight)refreshInFlight=request<SessionPayload>('/auth/refresh',{method:'POST'}).then(payload=>{lastRenewed=payload;return payload;}).finally(()=>{refreshInFlight=null;});
+  if(refreshBlocked&&Date.now()<refreshBlocked.retryAt)return Promise.reject(refreshBlocked);
+  if(!refreshInFlight)refreshInFlight=request<SessionPayload>('/auth/refresh',{method:'POST'}).then(payload=>{
+    refreshBlocked=null;lastRenewed=payload;return payload;
+  }).catch(reason=>{if(reason instanceof ApiRequestError&&reason.status===429)refreshBlocked=reason;throw reason;}).finally(()=>{refreshInFlight=null;});
   return refreshInFlight;
 }
 
@@ -822,6 +832,9 @@ export function setCatalogItemActive(accessToken: string, code: EditableCatalogC
     method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify({ active }),
   });
 }
+export function updateCatalogItem(accessToken:string,code:EditableCatalogCode,id:string,input:{name:string;active:boolean;expectedVersion:number}){
+  return request<CatalogItem>(`/catalogs/${code}/items/${encodeURIComponent(id)}`,{method:'PATCH',headers:bearer(accessToken),body:JSON.stringify(input)});
+}
 
 export interface ReproductionHeat {
   id: string; cowId: string; cowName: string; bullId: string | null;
@@ -1137,9 +1150,10 @@ export function cancelHealthCampaign(accessToken:string,id:string){
   return request<HealthCampaign>(`/health-records/campaigns/${encodeURIComponent(id)}/cancel`,{
     method:'POST',headers:bearer(accessToken)});}
 
-export interface CleaningProduct {id:string;name:string;category:string|null;active:boolean;
+export interface CleaningProduct {id:string;version?:number;name:string;category:string|null;active:boolean;
   activeIngredient:string|null;formulatedBy:string|null;description:string|null}
 export interface CleaningOptions {
+  categories?:CatalogItem[];
   locations:Array<{id:string;name:string;areaValue:number|null;areaUnitCode:string|null}>;
   units:Array<{code:string;name:string;symbol:string}>;
 }
@@ -1163,12 +1177,16 @@ export function getCleanings(accessToken:string){return request<CleaningRecord[]
   '/cleanings',{headers:bearer(accessToken)});}
 export function getCleaningOptions(accessToken:string){return request<CleaningOptions>(
   '/cleanings/options',{headers:bearer(accessToken)});}
-export function getCleaningProducts(accessToken:string){return request<CleaningProduct[]>(
-  '/cleanings/products',{headers:bearer(accessToken)});}
+export function getCleaningProducts(accessToken:string,catalog=false){return request<CleaningProduct[]>(
+  catalog?'/catalogs/products':'/cleanings/products',{headers:bearer(accessToken)});}
 export function createCleaningProduct(accessToken:string,input:{name:string;category?:string|null;
-  activeIngredient?:string|null;formulatedBy?:string|null;description?:string|null}){
-  return request<CleaningProduct>('/cleanings/products',{
+  activeIngredient?:string|null;formulatedBy?:string|null;description?:string|null},catalog=false){
+  return request<CleaningProduct>(catalog?'/catalogs/products':'/cleanings/products',{
     method:'POST',headers:{...bearer(accessToken),'Content-Type':'application/json'},body:JSON.stringify(input)});}
+export function updateCleaningProduct(accessToken:string,id:string,input:Omit<CleaningProduct,'id'|'version'>&{expectedVersion:number},catalog=false){
+  return request<CleaningProduct>(`${catalog?'/catalogs':'/cleanings'}/products/${encodeURIComponent(id)}`,{
+    method:'PATCH',headers:bearer(accessToken),body:JSON.stringify(input)});
+}
 export function createCleaning(accessToken:string,input:CleaningInput){return request<CleaningRecord>(
   '/cleanings',{method:'POST',headers:{...bearer(accessToken),'Content-Type':'application/json'},
     body:JSON.stringify(input)});}

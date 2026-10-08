@@ -10,15 +10,16 @@ const root=fileURLToPath(new URL('../',import.meta.url));
 const entry=`
 import {createElement as h} from 'react';import {createRoot} from 'react-dom/client';
 import {V2SessionProvider,useV2Session} from './src/sgb-v2/V2Session';
-import {getPropertySettings} from './src/sgb-v2/api';
+import {getPropertySettings,refreshSession} from './src/sgb-v2/api';
 import {getSessionSnapshot,putSessionSnapshot} from '${root.replaceAll('\\','/')}src/sgb-v2/offline/database.ts';
 const user={id:'cached-user',displayName:'Usuario guardado',email:'cached@example.test',isSuperadmin:false};
 const context={propertyId:'property-a',roleId:'role-a'};
 const overview={user,activeContext:context,supportMode:false,enabledUserModules:[],ownedAccount:null,
   properties:[{id:'property-a',name:'Propiedad guardada',enabledModules:[],roles:[{id:'role-a',code:'OWNER',permissions:['ANIMAL_VIEW']}]}]};
+let clock=Date.now();Date.now=()=>clock;
 const payload=token=>({user,activeContext:context,accessToken:token,accessExpiresAt:new Date(Date.now()+3600000).toISOString()});
 let online=true,nativeCalls=0,networkCalls=0,freshToken='renewed-token-1';const waiting=[];
-const respond=(id,status,data)=>window.dispatchEvent(new CustomEvent('sgb-native-auth-response',{detail:{id,status,body:JSON.stringify(status===200?{data}:{error:{code:'UNAUTHORIZED',message:'Sesión inválida'}})}}));
+const respond=(id,status,data)=>window.dispatchEvent(new CustomEvent('sgb-native-auth-response',{detail:{id,status,body:JSON.stringify(status===200?{data}:{error:status===429?{code:'SESSION_REFRESH_RATE_LIMIT',message:'Espera dos minutos. Tus cambios siguen guardados.',retryAfterSeconds:120}:{code:'UNAUTHORIZED',message:'Sesión inválida'}})}}));
 window.SGBAndroid={isOnline:()=>online,isWifiConnected:()=>false,configureOfflineSync(){},clearOfflineSyncSession(){},
   setOfflineUserScope(){},setAutomaticMediaDownloads(){},setAuthenticatedSession(){},
   requestAuthentication:(id,path)=>{nativeCalls++;if(path==='/auth/logout'){setTimeout(()=>respond(id,200,{}),0);return;}waiting.push(id);}};
@@ -43,12 +44,18 @@ try{
   check(results.every(result=>result.account.name==='Actualizada'),'Stale access requests retry automatically with fresh credentials');
   check(nativeCalls===1,'Concurrent stale requests share renewal and do not rotate cookies twice');
   window.dispatchEvent(new Event('sgb-app-resumed'));window.dispatchEvent(new Event('focus'));window.dispatchEvent(new Event('online'));
-  await until(()=>waiting.length===1);check(nativeCalls===2,'Resume/focus/network share one refresh');
+  await tick();await tick();check(nativeCalls===1,'Valid session survives focus/resume without rotating cookies');
+  clock+=3600000;window.dispatchEvent(new Event('sgb-app-resumed'));window.dispatchEvent(new Event('focus'));
+  await until(()=>waiting.length===1);check(nativeCalls===2,'Expired resume/focus share one refresh');
   freshToken='renewed-token-2';respond(waiting.shift(),200,payload(freshToken));await until(()=>window.harness.session?.accessToken===freshToken);
-  online=false;window.dispatchEvent(new Event('sgb-app-resumed'));await tick();check(nativeCalls===2,'Offline resume preserves local session without network');
+  const rate=refreshSession().catch(error=>error);await until(()=>waiting.length===1);respond(waiting.shift(),429,null);
+  const blocked=await rate;check(blocked.status===429&&blocked.retryAt>Date.now(),'Native rate limit preserves retry timing');const before=nativeCalls;
+  await refreshSession().catch(error=>check(error.status===429,'Repeated renewal keeps server error'));check(nativeCalls===before,'Refresh cooldown prevents repeat native calls');
+  clock+=121000;const recovered=refreshSession();await until(()=>waiting.length===1);respond(waiting.shift(),200,payload(freshToken));await recovered;
+  online=false;window.dispatchEvent(new Event('sgb-app-resumed'));await tick();check(nativeCalls===4,'Offline resume preserves local session without network');
   root.render(h('div'));await tick();online=false;mount();await until(()=>window.harness?.ready&&window.harness.session?.accessToken===freshToken);
-  check(nativeCalls===2,'Offline cold restart uses the saved session');
-  online=true;window.dispatchEvent(new Event('online'));await until(()=>waiting.length===1);
+  check(nativeCalls===4,'Offline cold restart uses the saved session');
+  clock+=3600000;online=true;window.dispatchEvent(new Event('online'));await until(()=>waiting.length===1);
   await window.harness.signOut();respond(waiting.shift(),200,payload('late-token'));await tick();await tick();
   check(window.harness.session===null&&(await getSessionSnapshot())===null,'Late refresh cannot restore a signed-out account');
   document.getElementById('result').textContent='PASS: real API/native auth bridge, nonblocking cached startup, automatic 401 renewal, deduplication, resume/offline restart and logout race';

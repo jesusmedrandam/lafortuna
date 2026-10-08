@@ -14,6 +14,7 @@ const actions:Record<string,string>={
   GROUP_STATE_CHANGED:'Cambió el estado de un grupo',OWNER_CREATED:'Registró un propietario',
   LIVESTOCK_BRAND_CREATED:'Creó una marquilla',LIVESTOCK_BRAND_STATE_CHANGED:'Activó o desactivó una marquilla',
   CATALOG_ITEM_CREATED:'Añadió una opción al catálogo',CATALOG_ITEM_STATE_CHANGED:'Activó o desactivó una opción del catálogo',
+  CATALOG_ITEM_UPDATED:'Editó una opción del catálogo',CLEANING_PRODUCT_UPDATED:'Editó un producto de limpieza',
   CLASSIFICATION_POLICY_UPDATED:'Cambió la clasificación de los animales',
   MOVEMENT_DRAFT_CREATED:'Preparó un traslado',MOVEMENT_DRAFT_UPDATED:'Editó un traslado pendiente',
   MOVEMENT_COMPLETED:'Completó un traslado',MOVEMENT_CANCELLED:'Anuló un traslado',

@@ -55,18 +55,23 @@ export function V2OfflineProvider({children}:{children:ReactNode}){
   useEffect(()=>{if(!session||!state.online||!state.pending)return;
     const timer=window.setInterval(()=>void syncOfflineMutations(),30000);return()=>window.clearInterval(timer);
   },[session,state.online,state.pending]);
+  useEffect(()=>{if(!state.retryAt)return;
+    const timer=window.setTimeout(()=>{automaticScope.current='';void syncOfflineMutations();void refresh();},Math.max(0,state.retryAt-Date.now())+100);
+    return()=>window.clearTimeout(timer);
+  },[state.retryAt,refresh]);
   useEffect(()=>{
+    if(state.retryAt&&state.retryAt>Date.now())return;
     if(!state.automaticDownloads||!state.online||!state.wifi){automaticScope.current='';return;}
     if(!automaticKey||!paths.length||busy.current||automaticScope.current===automaticKey)return;
     automaticScope.current=automaticKey;busy.current=true;setDownloading(true);setDownloadError('');
     void downloadPaths(paths,{automatic:true}).then(result=>{
-      if(result.failed)setDownloadError(`${result.failed} consultas no pudieron descargarse. Puedes reintentarlo.`);
+      if(result.failed)setDownloadError(result.errors.slice(0,3).join(' '));
     }).catch(reason=>setDownloadError(message(reason))).finally(()=>{busy.current=false;setDownloading(false);void refresh();});
-  },[automaticKey,state.automaticDownloads,state.online,state.wifi,paths,refresh,downloading]);
+  },[automaticKey,state.automaticDownloads,state.online,state.wifi,paths,refresh,downloading,state.retryAt]);
   const setAutomatic=useCallback(async(enabled:boolean)=>{await setAutomaticDownloads(enabled);await refresh();},[refresh]);
   const setPreferences=useCallback(async(value:DownloadPreferences)=>{await setDownloadPreferences(value);await refresh();},[refresh]);
   const downloadNow=useCallback(async()=>{if(busy.current)return;busy.current=true;setDownloading(true);setDownloadError('');
-    try{const result=await downloadPaths(paths);if(result.failed)throw new Error(`${result.failed} consultas no pudieron descargarse. Puedes reintentarlo.`);}
+    try{const result=await downloadPaths(paths);if(result.failed)throw new Error(result.errors.slice(0,3).join(' '));}
     finally{busy.current=false;setDownloading(false);await refresh();}},[paths,refresh]);
   const synchronize=useCallback(async()=>{await syncOfflineMutations();await refresh();},[refresh]);
   const retryFailed=useCallback(async()=>{await retryFailedMutations();await refresh();},[refresh]);
@@ -115,7 +120,7 @@ function PendingFields({value,path=[],change}:{value:unknown;path?:(string|numbe
 }
 const titles:Record<DetailKind,string>={data:'Datos guardados',media:'Fotos y videos',connection:'Conexión',changes:'Cambios locales'};
 export function V2OfflinePage(){
-  const state=useV2Offline();const {session}=useV2Session();const [error,setError]=useState('');
+  const state=useV2Offline();const paused=Boolean(state.retryAt&&state.retryAt>Date.now());const {session}=useV2Session();const [error,setError]=useState('');
   const [detail,setDetail]=useState<DetailKind|null>(null);const [details,setDetails]=useState<OfflineDetails|null>(null);
   const [deleting,setDeleting]=useState(false);
   const [confirmation,setConfirmation]=useState<{label:string;action:()=>Promise<void>;discard?:boolean}|null>(null);
@@ -153,8 +158,9 @@ export function V2OfflinePage(){
       <button className="card offline-summary-button" onClick={()=>open('connection')}>{state.online?<Wifi size={22}/>:<CloudOff size={22}/>}<div>
         <span>Conexión</span><strong>{state.online?'Disponible':'Sin conexión'}</strong><small>{state.wifi?'Wi-Fi':state.online?'Otra red':'Lectura local disponible'}</small></div></button>
       <button className="card offline-summary-button" onClick={()=>open('changes')}>{state.failed?<AlertTriangle size={22}/>:<Check size={22}/>}<div>
-        <span>Cambios locales</span><strong>{state.pending} pendientes</strong><small>{state.failed?`${state.failed} requieren revisión`:'Sin errores de sincronización'}</small></div></button>
+        <span>Cambios locales</span><strong>{state.pending} pendientes</strong><small>{state.failed?`${state.failed} requieren revisión`:paused?'Esperando para sincronizar':'Sin errores de sincronización'}</small></div></button>
     </div>
+    {paused&&<p role="status" className="offline-note">El servidor pidió una pausa. Tus cambios siguen guardados y se reintentarán automáticamente cuando termine.</p>}
     <Card className="offline-settings-card"><div><h3>Descargas automáticas con Wi-Fi</h3>
       <p>Actualiza las categorías elegidas al conectarte a una red Wi-Fi.</p></div>
       <label className="offline-switch"><input type="checkbox" aria-label="Descargas automáticas con Wi-Fi" checked={state.automaticDownloads}
@@ -181,9 +187,9 @@ export function V2OfflinePage(){
     </Card>
     <Card className="offline-actions-card"><div><h3>{property?.name??'Mis datos'}</h3><p>Descarga únicamente las opciones elegidas.</p>
       <small>{state.lastDownload?`Última actualización: ${new Date(state.lastDownload).toLocaleString('es-EC')}`:'Aún no has descargado datos.'}</small></div>
-      <div className="offline-buttons"><Button onClick={()=>run(state.downloadNow)} loading={state.downloading} disabled={!state.online||!paths.length||deleting}>
-        <CloudDownload size={18}/> Descargar ahora</Button><Button variant="secondary" onClick={()=>run(state.synchronize)} loading={state.syncing} disabled={!state.online}>
-        <RefreshCw size={18}/> Sincronizar</Button>{state.failed>0&&<Button variant="secondary" onClick={()=>run(state.retryFailed)} disabled={!state.online}>Reintentar con errores</Button>}</div></Card>
+      <div className="offline-buttons"><Button onClick={()=>run(state.downloadNow)} loading={state.downloading} disabled={!state.online||paused||!paths.length||deleting}>
+        <CloudDownload size={18}/> Descargar ahora</Button><Button variant="secondary" onClick={()=>run(state.synchronize)} loading={state.syncing} disabled={!state.online||paused}>
+        <RefreshCw size={18}/> Sincronizar</Button>{state.failed>0&&<Button variant="secondary" onClick={()=>run(state.retryFailed)} disabled={!state.online||paused}>Reintentar con errores</Button>}</div></Card>
     <p className="offline-note">Tus opciones se guardan por usuario. Los cambios pendientes se conservan hasta enviarse al servidor.</p>
     {detail&&<Modal title={editing?'Corregir cambio pendiente':titles[detail]} onClose={()=>{if(!deleting){setDetail(null);setConfirmation(null);setEditing(null);}}} wide>
       {errorBox}{editing?<div className="pending-edit"><h3>{editing.summary}</h3>
@@ -228,8 +234,8 @@ export function V2OfflinePage(){
             onClick={()=>{setError('');setEditing(item);setDraft(pendingMutationFields(item));}}><Pencil size={18}/></IconButton>
           <IconButton label={`Descartar ${item.summary??'cambio pendiente'}`} disabled={state.syncing||deleting||item.serverResult!==undefined}
             onClick={()=>setConfirmation({label:item.summary??'pendiente',discard:true,action:()=>discardPendingMutation(item.id)})}><Trash2 size={18}/></IconButton>
-        </div></div>)}<SyncProgressBar/><div className="offline-buttons"><Button loading={state.syncing} disabled={!state.online} onClick={()=>run(state.synchronize)}>Sincronizar</Button>
-          {state.failed>0&&<Button variant="secondary" disabled={!state.online} onClick={()=>run(state.retryFailed)}>Reintentar con errores</Button>}</div></div>}
+        </div></div>)}<SyncProgressBar/><div className="offline-buttons"><Button loading={state.syncing} disabled={!state.online||paused} onClick={()=>run(state.synchronize)}>Sincronizar</Button>
+          {state.failed>0&&<Button variant="secondary" disabled={!state.online||paused} onClick={()=>run(state.retryFailed)}>Reintentar con errores</Button>}</div></div>}
     </Modal>}
   </div>;
 }

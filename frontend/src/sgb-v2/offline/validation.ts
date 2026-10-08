@@ -58,6 +58,50 @@ export function validateLocalMutation(entry:OutboxEntry,current:Record<string,un
   for(const key of ['birthDate','entryDate','capturedOn','performedOn','occurredOn','resolvedOn','startedOn','endedOn',
     'startsOn','endsOn','weighedOn','detectedOn','appliedOn','finishedOn','tradedOn','producedOn','confirmedOn'])
     if(input[key]!=null)requireValue(date(input[key]),'Ingresa una fecha válida.');
+  if(entry.method==='POST'&&entry.path==='/cleanings'||entry.method==='PUT'&&/^\/cleanings\/[^/]+$/.test(entry.path)){
+    const text=(value:unknown,min:number,max:number)=>typeof value==='string'&&value.trim().length>=min&&value.trim().length<=max;
+    const positive=(value:unknown,max:number)=>typeof value==='number'&&value>0&&value<=max;
+    requireValue(text(input.locationId,1,100),'Selecciona un potrero para la limpieza.');
+    requireValue(date(input.startedOn),'Indica la fecha de inicio de la limpieza.');
+    requireValue(input.finishedOn==null||String(input.finishedOn)>=String(input.startedOn),'La finalización no puede ser anterior al inicio.');
+    const today=new Date();const localToday=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+    requireValue(String(input.startedOn)<=localToday&&(input.finishedOn==null||String(input.finishedOn)<=localToday),'Las fechas de limpieza no pueden ser futuras.');
+    const activities=input.activities;
+    requireValue(Array.isArray(activities)&&activities.length>0&&activities.length<=4&&new Set(activities).size===activities.length
+      &&activities.every(value=>['FUMIGACION','TALA_SELECTIVA','DESBROCE','OTRA'].includes(value)),'Selecciona al menos una labor sin repetirla.');
+    requireValue(input.areaType==='TOTAL'||input.areaType==='PARCIAL','Selecciona el área intervenida.');
+    requireValue(input.areaType==='PARCIAL'?positive(input.partialPercent,100)&&Number(input.partialPercent)<100:input.partialPercent==null,
+      'Indica un porcentaje mayor a 0 y menor a 100 para el área parcial.');
+    const products=input.products;const operators=input.operators;const spray=activities.includes('FUMIGACION');
+    requireValue(Array.isArray(products)&&products.length<=30,'Selecciona hasta 30 productos.');
+    requireValue(Array.isArray(operators)&&operators.length<=30,'Registra hasta 30 responsables.');
+    requireValue(spray||(!input.applicationUnit&&!input.applicationCount&&!input.tankCapacityLiters&&!products.length),
+      'Tanques, bombadas y productos solo corresponden a fumigación.');
+    requireValue(input.applicationUnit==null||['TANQUES','BOMBADAS'].includes(String(input.applicationUnit)),'Selecciona tanques o bombadas.');
+    requireValue(input.applicationCount==null||positive(input.applicationCount,100000),'Indica una cantidad de aplicaciones mayor a cero.');
+    requireValue(input.tankCapacityLiters==null||positive(input.tankCapacityLiters,100000),'Indica una capacidad mayor a cero.');
+    requireValue(!input.applicationCount||input.applicationUnit,'Selecciona tanques o bombadas para la aplicación.');
+    requireValue(!products.length||positive(input.applicationCount,100000),'Indica cuántos tanques o bombadas se aplicaron para calcular los productos.');
+    requireValue(new Set(products.map(value=>value?.productId)).size===products.length&&products.every(value=>value
+      &&text(value.productId,1,100)&&['MILLIGRAM','GRAM','KILOGRAM','MILLILITER','LITER','UNIT','DOSE'].includes(value.unitCode)
+      &&positive(value.quantityPerApplication,1000000)&&(value.notes==null||text(value.notes,0,300))),
+      'Selecciona productos distintos, con una cantidad válida y observaciones de hasta 300 caracteres.');
+    requireValue(new Set(operators.map(value=>String(value?.name??'').trim().toLocaleLowerCase())).size===operators.length
+      &&operators.every(value=>value&&text(value.name,2,160)&&(value.function==null||text(value.function,0,100))
+      &&(value.notes==null||text(value.notes,0,300))),'Registra responsables distintos con nombres de 2 a 160 caracteres y observaciones de hasta 300.');
+    requireValue(input.notes==null||text(input.notes,0,5000),'Las observaciones de limpieza admiten hasta 5000 caracteres.');
+    if(entry.method==='PUT')requireValue(Number.isInteger(input.expectedVersion)&&Number(input.expectedVersion)>0,'Vuelve a abrir el borrador antes de editarlo.');
+  }
+  if(/^(\/cleanings|\/catalogs)\/products(?:\/[^/]+)?$/.test(entry.path)&&['POST','PATCH'].includes(entry.method)){
+    requireValue(typeof input.name==='string'&&input.name.trim().length>=2&&input.name.trim().length<=160,'El nombre del producto debe tener entre 2 y 160 caracteres.');
+    for(const [key,max] of [['description',2000],['activeIngredient',2000],['formulatedBy',200],['category',160]] as const)
+      requireValue(input[key]==null||typeof input[key]==='string'&&String(input[key]).trim().length<=max,`El campo ${key==='category'?'categoría':key==='formulatedBy'?'formulado por':key==='activeIngredient'?'principio activo':'descripción'} admite hasta ${max} caracteres.`);
+    if(entry.method==='PATCH')requireValue(typeof input.active==='boolean'&&Number.isInteger(input.expectedVersion),'Vuelve a abrir el producto antes de editarlo.');
+  }
+  if(entry.method==='PATCH'&&/^\/catalogs\/[^/]+\/items\/[^/]+$/.test(entry.path)&&input.name!==undefined){
+    requireValue(typeof input.name==='string'&&input.name.trim().length>=2&&input.name.trim().length<=160,'El nombre debe tener entre 2 y 160 caracteres.');
+    requireValue(Number.isInteger(input.expectedVersion),'Vuelve a abrir la opción antes de editarla.');
+  }
   if(entry.path.startsWith('/animals')){
     if(entry.path==='/animals'){
       requireValue(typeof input.name==='string'&&input.name.trim().length>0&&input.name.trim().length<=160,

@@ -33,6 +33,7 @@ export const getAnimalClassificationPolicy=async()=>({femaleAdultMonths:24,maleA
 export const listOwners=async()=>[];export const listBrands=async()=>[];
 export const listAccountUsers=async()=>[];export const createBrand=async()=>{};export const createCatalogItem=async()=>{};
 export const createOwner=async()=>{};export const setBrandActive=async()=>{};export const setCatalogItemActive=async()=>{};
+export const getCleaningProducts=async()=>[];export const createCleaningProduct=async()=>{};export const updateCleaningProduct=async()=>{};export const updateCatalogItem=async()=>{};
 export const updateAnimalClassificationPolicy=async()=>{};export const updateBrandOwners=async()=>{};
 `;
 export const entry=`

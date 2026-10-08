@@ -4,6 +4,7 @@ import {Link} from 'react-router-dom';
 import {Pencil,Trash2} from 'lucide-react';
 import {formatDate} from '../utils';
 import {IconButton} from '../components/ui';
+import {ShellIcon,type ShellIconName} from './ShellIcon';
 import {ImageLightbox,type LightboxMedia} from '../components/ImageLightbox';
 import {mediaThumbnailUrl} from '../media';
 import {ApiRequestError,deleteMediaObject,getAnimals,getMedia,getMediaUsage,
@@ -23,6 +24,10 @@ const categoryOf=(type:string):Category=>type==='REPRODUCTION_BIRTH'?'REPRODUCTI
   type==='LIVESTOCK_MOVEMENT'||type==='LIVESTOCK_ACTIVITY'||type==='CLEANING'?type:
   type==='ANIMAL'?'ANIMAL':'ALL';
 const shownDate=(item:MediaItem)=>formatDate(item.captured_on??item.created_at.slice(0,10));
+const mediaIcon=(type:string):ShellIconName=>type.startsWith('REPRODUCTION_')?'reproduction':
+  type==='LIVESTOCK_MOVEMENT'?'movements':type==='CLEANING'?'cleanings':
+  type==='LIVESTOCK_ACTIVITY'?'activities':type.startsWith('MILK_')?'production':
+  type==='HEALTH_CAMPAIGN'?'health':'animals';
 
 export function MediaPanel({accessToken,permissions}:{accessToken:string;permissions:string[]}){
   const [items,setItems]=useState<MediaItem[]>([]);
@@ -197,7 +202,8 @@ export function MediaPanel({accessToken,permissions}:{accessToken:string;permiss
               aria-label={`Ver ${main.kind==='VIDEO'?'video':'foto'} de ${title}`}>
               {main.kind==='IMAGE'?<img src={main.thumbnailUrl??mediaThumbnailUrl(main.url)} loading="lazy" decoding="async" alt=""/>:
                 <span className="media-video-placeholder">▶<small>Toca para reproducir</small></span>}
-              <span className="media-tile-type" aria-hidden="true">{main.kind==='VIDEO'?'▶':'▣'}</span>
+              <span className="media-tile-type" data-media-module={mediaIcon((attachments.find(item=>item.entity_type!=='ANIMAL')??main).entity_type)} aria-hidden="true">
+                <ShellIcon name={mediaIcon((attachments.find(item=>item.entity_type!=='ANIMAL')??main).entity_type)} size={23}/></span>
               <span className="media-tile-caption"><strong>{title}</strong>
                 {thumbnailSize>=132&&<small>{shownDate(main)} · {size(main.byteSize)}</small>}</span>
             </button>
