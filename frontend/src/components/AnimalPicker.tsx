@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Beef, Check, Search } from 'lucide-react';
+import { Check, Search } from 'lucide-react';
+import {AnimalIcon} from './AnimalIcon';
 import { apiRequestAllPages } from '../api/client';
 import type { Animal } from '../types/api';
 import { Button, EmptyState, LoadingState, Modal, SearchBox } from './ui';
@@ -25,7 +26,7 @@ export function useAnimalDirectory(enabled = true) {
 }
 
 export function AnimalThumb({ photoUrl, name, size = 'normal' }: { photoUrl?: string | null; name: string; size?: 'small' | 'normal' }) {
-  return <span className={`animal-thumb animal-thumb-${size}`} title={name} aria-hidden="true">{photoUrl ? <img src={photoUrl} alt="" /> : <Beef size={size === 'small' ? 15 : 19} />}</span>;
+  return <span className={`animal-thumb animal-thumb-${size}`} title={name} aria-hidden="true">{photoUrl ? <img src={photoUrl} alt="" /> : <AnimalIcon size={size === 'small' ? 22 : 28} />}</span>;
 }
 
 export function AnimalIdentity({ option, secondary }: { option: AnimalPickerOption; secondary?: string | null }) {
@@ -56,7 +57,7 @@ export function AnimalSelect({ value, options, onChange, placeholder = 'Seleccio
     {open ? <Modal title="Seleccionar animal" wide onClose={() => setOpen(false)} footer={<Button variant="ghost" onClick={() => setOpen(false)}>Cerrar</Button>}>
       <div className="animal-select-dialog">
         <SearchBox value={search} onChange={setSearch} placeholder="Buscar por nombre, arete, grupo o ubicación…" />
-        {emptyLabel ? <button type="button" className={!value ? 'animal-select-option selected' : 'animal-select-option'} onClick={() => choose('')}><span className="animal-select-empty"><Beef size={18} /><strong>{emptyLabel}</strong></span>{!value ? <Check size={18} /> : null}</button> : null}
+        {emptyLabel ? <button type="button" className={!value ? 'animal-select-option selected' : 'animal-select-option'} onClick={() => choose('')}><span className="animal-select-empty"><AnimalIcon size={24} /><strong>{emptyLabel}</strong></span>{!value ? <Check size={18} /> : null}</button> : null}
         {!options.length ? <LoadingState text="Cargando animales…" /> : visible.length ? <div className="animal-select-options">{visible.map((item) => <button type="button" className={item.id === value ? 'animal-select-option selected' : 'animal-select-option'} key={item.id} onClick={() => choose(item.id)}><AnimalIdentity option={item} />{item.id === value ? <Check size={18} /> : null}</button>)}</div> : <EmptyState icon={Search} title="Sin coincidencias" description="Prueba con otro nombre, arete, grupo o ubicación." />}
       </div>
     </Modal> : null}

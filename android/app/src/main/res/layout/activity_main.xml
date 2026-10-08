@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root_container"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/sgb_background">
@@ -18,18 +19,4 @@
         android:max="100"
         android:progressTint="@color/sgb_primary" />
 
-    <TextView
-        android:id="@+id/offline_banner"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|center_horizontal"
-        android:layout_marginTop="8dp"
-        android:background="@drawable/offline_banner_background"
-        android:paddingHorizontal="12dp"
-        android:paddingVertical="7dp"
-        android:text="Sin conexión · usando datos descargados"
-        android:textColor="@color/white"
-        android:textSize="12sp"
-        android:textStyle="bold"
-        android:visibility="gone" />
 </FrameLayout>

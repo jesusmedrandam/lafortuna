@@ -9,9 +9,12 @@ interface Window {
     requestPushToken?: () => void;
     setAuthenticatedSession?: (active: boolean) => void;
     isOnline?: () => boolean;
+    requestAuthentication?: (id:string,path:string,body:string) => void;
+    setOfflineUserScope?: (userId:string) => void;
     isWifiConnected?: () => boolean;
     retryHome?: () => void;
     setPendingMutations?: (count: number) => void;
+    setAutomaticMediaDownloads?: (enabled: boolean) => void;
     downloadMedia?: (urlsJson: string) => void;
     saveOptimizedMedia?: (originalUrl: string, optimizedUrl: string, filename: string, mimeType: string) => boolean;
     saveMedia?: (url: string, filename: string, mimeType: string) => boolean;
@@ -31,6 +34,8 @@ interface Window {
     setTransientSystemBarColors?: (primary: string, background: string) => void;
     clearMediaCache?: () => void;
     getMediaCacheInfo?: () => string;
+    getMediaCacheDetails?: () => string;
+    removeMediaCacheFiles?: (idsJson:string) => void;
     setChartFullscreen?: (enabled: boolean) => void;
     showLocalNotification?: (channel: 'sync' | 'downloads', title: string, message: string, id: number, ongoing: boolean) => void;
     cancelLocalNotification?: (id: number) => void;
@@ -42,5 +47,7 @@ interface Window {
     clearOfflineSyncSession?: () => void;
     mirrorOfflineMutation?: (mutationJson:string) => void;
     removeMirroredMutation?: (mutationId:string) => void;
+    reservePendingMutation?: (id:string,key:string) => boolean;
+    confirmMirroredMutation?: (id:string,key:string) => void;
   };
 }

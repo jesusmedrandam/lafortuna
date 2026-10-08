@@ -5,8 +5,8 @@ import {Baby,Beef,ChevronRight,Droplets,HeartPulse,Home,Images,LayoutDashboard,L
   CloudDownload,X} from 'lucide-react';
 import {BrowserRouter,Link,NavLink,Navigate,Outlet,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
 import {AuthLayout} from '../pages/auth/AuthLayout';
-import {IconButton,LoadingState,Select} from '../components/ui';
-import {useTheme} from '../theme/ThemeContext';
+import {IconButton,LoadingState} from '../components/ui';
+import {ThemeProvider,useTheme} from '../theme/ThemeContext';
 import {ActivityPanel} from './ActivityPanel';
 import {AnimalPanel} from './AnimalPanel';
 import {CatalogPanel} from './CatalogPanel';
@@ -18,11 +18,12 @@ import {HomeOperations,HomePendingTasks} from './HomeOperations';
 import {MediaPanel} from './MediaPanel';
 import {MovementPanel} from './MovementPanel';
 import {ProductionPanel} from './ProductionPanel';
-import {PropertySettingsPanel} from './PropertySettingsPanel';
-import {PropertyTeamPanel} from './PropertyTeamPanel';
+import {V2SettingsPage} from './V2SettingsPage';
+import {RolesPermissionsPage} from './RolesPermissionsPage';
+import {loadDashboardPreferences} from './DashboardPreferences';
 import {ReproductionPanel} from './ReproductionPanel';
 import {SuperadminPanel} from './SuperadminPanel';
-import {V2Login,V2Recovery,V2Register,V2Verify} from './AuthPages';
+import {V2EmailChange,V2Login,V2Recovery,V2Register,V2Verify} from './AuthPages';
 import {V2AnimalsPage} from './V2AnimalsPage';
 import {V2AnimalAttendancePage} from './V2AnimalAttendancePage';
 import {V2AnimalDetail} from './V2AnimalDetail';
@@ -34,7 +35,7 @@ import {V2AgendaPage} from './V2AgendaPage';
 import {V2FinancesPage} from './V2FinancesPage';
 import {V2NotificationCenter} from './V2NotificationCenter';
 import {V2SessionProvider,useV2Session} from './V2Session';
-import {OfflineStatusButton,V2OfflinePage,V2OfflineProvider,useV2Offline} from './offline/V2Offline';
+import {OfflineStatusButton,SyncProgressBar,V2OfflinePage,V2OfflineProvider} from './offline/V2Offline';
 import type {SessionOverview} from './api';
 
 type Section='principal'|'operaciones'|'configuracion';
@@ -60,11 +61,11 @@ const destinations:Destination[]=[
   {to:'/produccion',label:'Producción',icon:Milk,section:'operaciones',permission:'PRODUCTION_VIEW',module:'PRODUCTION'},
   {to:'/actividades',label:'Actividades',icon:Activity,section:'operaciones',permission:'ACTIVITY_VIEW',module:'TASKS'},
   {to:'/catalogos',label:'Catálogos',icon:SlidersHorizontal,section:'configuracion',permission:'CATALOG_VIEW'},
-  {to:'/sin-conexion',label:'Datos sin conexión',icon:CloudDownload,section:'configuracion'},
-  {to:'/equipo',label:'Equipo y roles',icon:Users,section:'configuracion',permission:'MEMBERSHIP_VIEW'},
-  {to:'/auditoria',label:'Auditoría',icon:ClipboardList,section:'configuracion',permission:'AUDIT_VIEW'},
-  {to:'/configuracion',label:'Configuración',icon:Settings2,section:'configuracion',permission:'MODULE_VIEW'},
-  {to:'/administracion',label:'Administración',icon:ShieldCheck,section:'configuracion',admin:true},
+  {to:'/sin-conexion',label:'Descargas',icon:CloudDownload,section:'configuracion'},
+  {to:'/roles-permisos',label:'Roles y permisos',icon:Users,section:'configuracion'},
+  {to:'/auditoria',label:'Historial de cambios',icon:ClipboardList,section:'configuracion',permission:'AUDIT_VIEW'},
+  {to:'/configuracion',label:'Configuración',icon:Settings2,section:'configuracion'},
+  {to:'/administracion',label:'Superadministrador',icon:ShieldCheck,section:'configuracion',admin:true},
 ];
 
 function activeProperty(overview:SessionOverview){
@@ -80,16 +81,15 @@ function Protected(){
 }
 
 function V2Shell(){
-  const {session,signOut,selectContext,hasPermission}=useV2Session();const {theme,toggleTheme}=useTheme();
-  const {dataRevision}=useV2Offline();
-  const [open,setOpen]=useState(false);const [changing,setChanging]=useState(false);
-  const [error,setError]=useState('');const location=useLocation();const navigate=useNavigate();
+  const {session,signOut,hasPermission,endSupport}=useV2Session();const {theme,toggleTheme}=useTheme();
+  const navigate=useNavigate();const [supportBusy,setSupportBusy]=useState(false);const [supportError,setSupportError]=useState('');
+  const [open,setOpen]=useState(false);const location=useLocation();
   const overview=session!.overview;const property=activeProperty(overview);
-  const role=property?.roles.find(item=>item.id===overview.activeContext?.roleId);
   const platformMode=overview.user.isSuperadmin&&location.pathname.startsWith('/administracion');
   const visible=useMemo(()=>destinations.filter(item=>{
     if(platformMode)return Boolean(item.admin);
-    if(item.admin)return overview.user.isSuperadmin;
+    if(item.to==='/roles-permisos'||item.to==='/configuracion')return true;
+    if(item.admin)return false;
     if(item.to==='/')return true;
     if(item.to==='/mis-finanzas')return overview.enabledUserModules.includes('PERSONAL_FINANCE');
     if(!property||item.permission&&!hasPermission(item.permission))return false;
@@ -102,42 +102,20 @@ function V2Shell(){
   }),[overview,property,hasPermission,platformMode]);
   const current=visible.find(item=>item.to===location.pathname)||visible.find(item=>
     item.to!=='/'&&location.pathname.startsWith(`${item.to}/`));
-  async function switchProperty(id:string){
-    const next=overview.properties.find(item=>item.id===id);if(!next?.roles[0])return;
-    setChanging(true);setError('');try{await selectContext(id,next.roles[0].id);navigate('/');}
-    catch(reason){setError(reason instanceof Error?reason.message:'No se pudo cambiar de propiedad.');}
-    finally{setChanging(false);}
-  }
-  async function switchRole(id:string){
-    if(!property)return;setChanging(true);setError('');
-    try{await selectContext(property.id,id);navigate('/');}
-    catch(reason){setError(reason instanceof Error?reason.message:'No se pudo cambiar de rol.');}
-    finally{setChanging(false);}
-  }
   return <div className="app-shell sgb-v2-shell">
     {open&&<button className="mobile-overlay" aria-label="Cerrar menú" onClick={()=>setOpen(false)}/>}
     <aside className={`sidebar ${open?'sidebar-open':''}`}>
       <div className="sidebar-brand"><img src="/branding/logo-sgb-icon.png" alt="SGB"/>
         <div><strong>SGB</strong><span>Gestión Bovina</span></div>
         <IconButton label="Cerrar menú" className="sidebar-close" onClick={()=>setOpen(false)}><X size={20}/></IconButton></div>
-      {overview.user.isSuperadmin&&<div className="v2-scope-picker">
-        <label htmlFor="active-scope">Trabajar como</label>
-        <Select id="active-scope" value={platformMode?'PLATFORM':'PROPERTY'}
-          onChange={event=>navigate(event.target.value==='PLATFORM'?'/administracion':'/')}>
-          <option value="PLATFORM">Superadministrador</option>
-          <option value="PROPERTY">Rol en una propiedad</option>
-        </Select>
+      {overview.user.isSuperadmin&&<div className="session-mode-switch" role="group" aria-label="Modo de trabajo">
+        <button className={!platformMode&&!overview.supportMode?'selected':''} disabled={supportBusy}
+          onClick={()=>{setSupportError('');setOpen(false);if(!overview.supportMode){navigate('/roles-permisos');return;}
+            setSupportBusy(true);void endSupport().then(()=>navigate('/')).catch(failure=>setSupportError(failure instanceof Error?failure.message:'No se pudo volver al usuario.'))
+              .finally(()=>setSupportBusy(false));}}><UserCircle size={18}/><span>Usuario</span></button>
+        <button className={platformMode?'selected':''} onClick={()=>{setOpen(false);navigate('/administracion');}}>
+          <ShieldCheck size={18}/><span>Superadministrador</span></button>
       </div>}
-      {!platformMode&&<div className="v2-property-picker"><label htmlFor="active-property">Propiedad activa</label>
-        <Select id="active-property" value={property?.id??''} disabled={changing||!overview.properties.length}
-          onChange={event=>void switchProperty(event.target.value)}>
-          {!property&&<option value="">Selecciona una propiedad</option>}
-          {overview.properties.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
-        </Select>{property?<><label htmlFor="active-role">Rol en la propiedad</label>
-          <Select id="active-role" value={role?.id??''}
-          disabled={changing||!property.roles.length} onChange={event=>void switchRole(event.target.value)}>
-          {property.roles.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
-        </Select></>:<small>Elige una propiedad para seleccionar un rol.</small>}</div>}
       <nav className="sidebar-nav" aria-label="Secciones">
         {(['principal','operaciones','configuracion'] as const).map(section=>{
           const items=visible.filter(item=>item.section===section);
@@ -149,22 +127,34 @@ function V2Shell(){
           </div>:null;
         })}
       </nav>
-      <div className="sidebar-user"><div className="user-avatar"><span>{overview.user.displayName.slice(0,1)}</span></div>
-        <div><strong>{overview.user.displayName}</strong><span>{platformMode?'Superadministrador':role?.name??'Usuario'}</span></div>
+      <div className="sidebar-user"><div className="user-avatar">{overview.user.profilePhoto?
+        <img src={overview.user.profilePhoto} alt="Tu foto de perfil"/>:<span>{overview.user.displayName.slice(0,1)}</span>}</div>
+        <div><strong>{overview.user.displayName}</strong><span>{overview.user.email}</span></div>
         <IconButton label="Cerrar sesión" onClick={()=>void signOut()}><LogOut size={18}/></IconButton>
       </div>
     </aside>
     <div className="shell-main"><header className="topbar"><div className="topbar-left">
       <IconButton label="Abrir menú" className="mobile-menu-button" onClick={()=>setOpen(true)}><Menu size={22}/></IconButton>
       <div><span className="breadcrumb">Sistema de Gestión Bovina</span><h2>{current?.label??'Gestión ganadera'}</h2></div>
-    </div><div className="topbar-actions"><span className="v2-current-property">{platformMode?'Administración global':property?.name??'Sin propiedad'}</span>
+    </div><div className="topbar-actions"><span className="v2-current-property">{platformMode?'Administración global':`${overview.supportMode?'Soporte · ':''}${property?.name??'Sin propiedad'}`}</span>
       <OfflineStatusButton/>
       <V2NotificationCenter/>
       <IconButton label={theme==='dark'?'Usar tema claro':'Usar tema oscuro'} onClick={toggleTheme}>
         {theme==='dark'?<Sun size={19}/>:<Moon size={19}/>}</IconButton>
-      <span className="profile-link"><UserCircle size={21}/><span>{overview.user.displayName}</span></span>
-    </div></header><main className="page-content">{error&&<div className="form-alert form-alert-error" role="alert">{error}</div>}
-      <Outlet key={`${overview.activeContext?.propertyId??'none'}:${overview.activeContext?.roleId??'none'}:${dataRevision}`}/></main>
+      <Link className="profile-link" to="/configuracion?seccion=cuenta" aria-label="Mi cuenta">
+        {overview.user.profilePhoto?<img src={overview.user.profilePhoto} alt=""/>:<UserCircle size={21}/>}
+        <span>{overview.user.displayName}</span></Link>
+    </div></header><SyncProgressBar/>
+      {overview.user.isSuperadmin&&overview.supportOwner&&property&&<div className="support-context-banner" role="status">
+        <div><strong>Soporte de sistema</strong><span>{overview.supportOwner.name} · {property.name}</span></div>
+        <Link to="/administracion">Cambiar propietario</Link><button type="button" className="secondary-button compact"
+          disabled={supportBusy} onClick={()=>{setSupportBusy(true);setSupportError('');void endSupport()
+            .then(()=>navigate('/')).catch(failure=>setSupportError(failure instanceof Error?failure.message:'No se pudo finalizar el soporte.'))
+            .finally(()=>setSupportBusy(false));}}>Finalizar soporte</button>
+      </div>}
+      {supportError&&<p role="alert" className="form-error">{supportError}</p>}
+      <main className="page-content">
+      <Outlet key={`${overview.user.id}:${overview.activeContext?.propertyId??'none'}:${overview.activeContext?.roleId??'none'}:${Boolean(overview.supportMode)}`}/></main>
       <footer className="app-footer"><Home size={14}/><span>SGB · Sistema de Gestión Bovina</span></footer>
     </div>
   </div>;
@@ -183,8 +173,8 @@ function Feature({permission,module,children}:{permission?:string;module?:string
 }
 
 function Panel({kind}:{kind:'animals'|'movements'|'reproduction'|'production'|'health'|
-  'cleanings'|'activities'|'media'|'catalogs'|'team'|'settings'|'admin'}){
-  const {session,hasPermission,reloadOverview,selectContext}=useV2Session();const navigate=useNavigate();
+  'cleanings'|'activities'|'media'|'catalogs'|'settings'|'admin'}){
+  const {session,hasPermission,reloadOverview,beginSupport}=useV2Session();const navigate=useNavigate();
   const {id}=useParams();
   const overview=session!.overview;const property=activeProperty(overview);const token=session!.accessToken;
   const modules=property?.enabledModules??[];
@@ -210,7 +200,7 @@ function Panel({kind}:{kind:'animals'|'movements'|'reproduction'|'production'|'h
     case 'production':return <ProductionPanel accessToken={token}
       canManage={hasPermission('PRODUCTION_MANAGE')} initialAnimalId={initialAnimalId}/>;
     case 'health':return <HealthPanel accessToken={token}
-      canManage={hasPermission('HEALTH_MANAGE')} initialAnimalId={initialAnimalId}/>;
+      canManage={hasPermission('HEALTH_MANAGE')} canViewMedicines={hasPermission('CATALOG_VIEW')} initialAnimalId={initialAnimalId}/>;
     case 'cleanings':return <CleaningPanel accessToken={token}
       canManage={hasPermission('CLEANING_MANAGE')} canViewMedia={hasPermission('MEDIA_VIEW')}
       canManageMedia={hasPermission('MEDIA_MANAGE')}/>;
@@ -220,12 +210,11 @@ function Panel({kind}:{kind:'animals'|'movements'|'reproduction'|'production'|'h
     case 'media':return <MediaPanel accessToken={token}
       permissions={property?.roles.find(role=>role.id===overview.activeContext?.roleId)?.permissions??[]}/>;
     case 'catalogs':return <CatalogPanel accessToken={token} canManage={hasPermission('CATALOG_MANAGE')}
-      commerceEnabled={modules.includes('SALES_PURCHASES')}/>;
-    case 'team':return <PropertyTeamPanel accessToken={token}/>;
-    case 'settings':return <PropertySettingsPanel accessToken={token}
-      onPropertyCreated={async(propertyId,roleId)=>{await selectContext(propertyId,roleId);navigate('/');}}
-      onSettingsChanged={reloadOverview}/>;
-    case 'admin':return <SuperadminPanel accessToken={token} onSettingsChanged={reloadOverview}/>;
+      commerceEnabled={modules.includes('SALES_PURCHASES')}
+      canEditMedicines={Boolean(hasPermission('CATALOG_MANAGE')&&(overview.supportMode||['OWNER','ADMINISTRATOR'].includes(property?.roles.find(role=>role.id===overview.activeContext?.roleId)?.code??'')))}/>;
+    case 'settings':return <V2SettingsPage/>;
+    case 'admin':return <SuperadminPanel accessToken={token} onSettingsChanged={reloadOverview}
+      onStartSupport={async(accountId,propertyId)=>{await beginSupport(accountId,propertyId);navigate('/');}}/>;
   }
 }
 
@@ -233,19 +222,23 @@ function HomePage(){
   const {session,hasPermission}=useV2Session();const navigate=useNavigate();
   const property=activeProperty(session!.overview);
   const permissions=property?.roles.find(role=>role.id===session!.overview.activeContext?.roleId)?.permissions??[];
-  return <div className="module-no-header home-dashboard">
-    {property&&<HomePendingTasks accessToken={session!.accessToken} userId={session!.overview.user.id}
+  const preferences=loadDashboardPreferences(session!.overview.user.id);
+  const sections:Record<string,ReactNode>={
+    pending:property&&<HomePendingTasks accessToken={session!.accessToken} userId={session!.overview.user.id}
       userName={session!.overview.user.displayName} propertyName={property.name}
       enabled={hasPermission('AGENDA_TASK_VIEW')&&property.enabledModules.includes('TASKS')}
-      onNavigate={path=>navigate(path)}/>}
-    {property&&<HomeOperations accessToken={session!.accessToken} userId={session!.overview.user.id}
-      userName={session!.overview.user.displayName} propertyName={property.name}
-      modules={property.enabledModules} permissions={permissions} onNavigate={path=>navigate(path)}/>}
-    {property&&hasPermission('ANIMAL_VIEW')&&<HomeSummary accessToken={session!.accessToken}
-      onAnimals={()=>navigate('/animales')} onGroups={hasPermission('GROUP_VIEW')
-        ?()=>navigate('/grupos'):undefined}
-      onClassification={code=>navigate(`/animales?clasificacion=${encodeURIComponent(code)}`)}/>}
-    {!property&&!session!.overview.user.isSuperadmin&&<p className="muted">Selecciona una propiedad para gestionar tu ganado.</p>}
+      onNavigate={path=>navigate(path)}/>,
+    animals:property&&hasPermission('ANIMAL_VIEW')&&<HomeSummary accessToken={session!.accessToken}
+      items={preferences.animalItems} onAnimals={()=>navigate('/animales')}
+      onGroups={hasPermission('GROUP_VIEW')?()=>navigate('/grupos'):undefined}
+      onClassification={code=>navigate(`/animales?clasificacion=${encodeURIComponent(code)}`)}/>,
+    operations:property&&<HomeOperations accessToken={session!.accessToken} userId={session!.overview.user.id}
+      items={preferences.operationItems} userName={session!.overview.user.displayName} propertyName={property.name}
+      modules={property.enabledModules} permissions={permissions} onNavigate={path=>navigate(path)}/>,
+  };
+  return <div className="module-no-header home-dashboard">
+    {preferences.sections.filter(item=>item.visible).map(item=><div key={item.id}>{sections[item.id]}</div>)}
+    {!property&&!session!.overview.user.isSuperadmin&&<p className="muted"><Link to="/roles-permisos">Selecciona una propiedad y un rol</Link> para gestionar tu ganado.</p>}
     {!property&&session!.overview.user.isSuperadmin&&<p><Link to="/administracion">Administrar cuentas</Link></p>}
   </div>;
 }
@@ -256,6 +249,7 @@ function V2Routes(){
     <Route element={<AuthLayout/>}>
       <Route path="/login" element={session?<Navigate to="/" replace/>:<V2Login/>}/>
       <Route path="/registro" element={<V2Register/>}/>
+      <Route path="/cambiar-correo" element={<V2EmailChange/>}/>
       <Route path="/activar" element={<V2Verify/>}/>
       <Route path="/recuperar" element={<V2Recovery/>}/>
     </Route>
@@ -285,20 +279,28 @@ function V2Routes(){
       <Route path="multimedia" element={<Feature permission="MEDIA_VIEW" module="MULTIMEDIA"><Panel kind="media"/></Feature>}/>
       <Route path="catalogos" element={<Feature permission="CATALOG_VIEW"><Panel kind="catalogs"/></Feature>}/>
       <Route path="sin-conexion" element={<V2OfflinePage/>}/>
-      <Route path="equipo" element={<Feature permission="MEMBERSHIP_VIEW"><Panel kind="team"/></Feature>}/>
+      <Route path="equipo" element={<Navigate to="/roles-permisos" replace/>}/>
+      <Route path="roles-permisos" element={<RolesPermissionsPage/>}/>
       <Route path="auditoria" element={<Feature permission="AUDIT_VIEW"><V2AuditPage/></Feature>}/>
-      <Route path="configuracion" element={<Feature permission="MODULE_VIEW"><Panel kind="settings"/></Feature>}/>
+      <Route path="configuracion" element={<Panel kind="settings"/>}/>
       <Route path="administracion" element={session?.overview.user.isSuperadmin?<Panel kind="admin"/>:<Navigate to="/" replace/>}/>
       <Route path="*" element={<Navigate to="/" replace/>}/>
     </Route></Route>
   </Routes></BrowserRouter>;
 }
 
+function V2Appearance({children}:{children:ReactNode}){
+  const {session}=useV2Session();const userId=session?.overview.user.id;
+  return <ThemeProvider key={userId??'guest'} userId={userId}>{children}</ThemeProvider>;
+}
+
 export function V2App(){
   const url=new URL(window.location.href);
   const verification=url.searchParams.get('verify-email');
   const reset=url.searchParams.get('reset-password');
-  if(verification&&url.pathname!=='/activar')window.history.replaceState({},'',`/activar${url.search}`);
+  const emailChange=url.searchParams.get('change-email');
+  if(emailChange&&url.pathname!=='/cambiar-correo')window.history.replaceState({},'',`/cambiar-correo${url.search}`);
+  else if(verification&&url.pathname!=='/activar')window.history.replaceState({},'',`/activar${url.search}`);
   else if(reset&&url.pathname!=='/recuperar')window.history.replaceState({},'',`/recuperar${url.search}`);
-  return <V2SessionProvider><V2OfflineProvider><V2Routes/></V2OfflineProvider></V2SessionProvider>;
+  return <V2SessionProvider><V2Appearance><V2OfflineProvider><V2Routes/></V2OfflineProvider></V2Appearance></V2SessionProvider>;
 }

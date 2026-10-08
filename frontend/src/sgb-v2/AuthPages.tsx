@@ -2,7 +2,7 @@ import {useEffect,useState,type FormEvent} from 'react';
 import {Eye,EyeOff,KeyRound,LogIn,UserPlus} from 'lucide-react';
 import {Link,useNavigate,useSearchParams} from 'react-router-dom';
 import {Button,Field,Input} from '../components/ui';
-import {register,requestPasswordReset,resendVerification,resetPassword,verifyEmail} from './api';
+import {confirmUserEmailChange,register,requestPasswordReset,resendVerification,resetPassword,verifyEmail} from './api';
 import {useV2Session} from './V2Session';
 
 const failure=(reason:unknown)=>reason instanceof Error?reason.message:'No se pudo completar la solicitud.';
@@ -106,4 +106,21 @@ export function V2Recovery(){
     </>:<Field label="Correo electrónico" required><Input type="email" autoComplete="email" value={email} onChange={event=>setEmail(event.target.value)} required/></Field>}
       <Button type="submit" loading={busy}><KeyRound size={18}/>{token?'Cambiar contraseña':'Enviar enlace'}</Button>
     </form><div className="auth-footer"><Link to="/login">Volver al inicio de sesión</Link></div></div>;
+}
+
+export function V2EmailChange(){
+  const [params]=useSearchParams();const [token]=useState(()=>params.get('change-email'));
+  const {session,signOut}=useV2Session();const [busy,setBusy]=useState(false);const [done,setDone]=useState(false);const [error,setError]=useState('');
+  async function confirm(){if(!token)return;setBusy(true);setError('');
+    try{await confirmUserEmailChange(token);setDone(true);if(session)await signOut();
+      const url=new URL(window.location.href);url.searchParams.delete('change-email');window.history.replaceState({},'',url.pathname+url.search);}
+    catch(reason){setError(failure(reason));}finally{setBusy(false);}}
+  return <div className="auth-card"><h2>Cambiar correo electrónico</h2>
+    <p>{done?'Tu correo se actualizó. Inicia sesión con el nuevo correo y tu contraseña.':
+      'Confirma el cambio para usar este correo al iniciar sesión. Se cerrarán las sesiones de tu cuenta.'}</p>
+    {error&&<p role="alert" className="form-error">{error}</p>}
+    {!done&&(token?<Button loading={busy} onClick={()=>void confirm()}>Confirmar nuevo correo</Button>:
+      <p role="alert">Falta el enlace de confirmación. Solicita uno desde Mi cuenta.</p>)}
+    {done&&<Link to="/login">Iniciar sesión</Link>}
+  </div>;
 }

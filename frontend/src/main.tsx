@@ -1,6 +1,5 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ThemeProvider } from './theme/ThemeContext';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import './sgb-v2/styles.css';
 import './sgb-v2/shell.css';
@@ -19,7 +18,7 @@ if ('serviceWorker' in navigator && import.meta.env.PROD && !window.SGBAndroid) 
 const root=createRoot(document.getElementById('root')!);
 if (import.meta.env.VITE_SGB_V2 !== 'false') {
   void import('./sgb-v2/V2App').then(({V2App})=>root.render(
-    <StrictMode><AppErrorBoundary><ThemeProvider><V2App/></ThemeProvider></AppErrorBoundary></StrictMode>,
+    <StrictMode><AppErrorBoundary><V2App/></AppErrorBoundary></StrictMode>,
   ));
 } else {
   void import('./legacy-main').then(({LegacyApp})=>root.render(<StrictMode><LegacyApp/></StrictMode>));

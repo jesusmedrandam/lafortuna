@@ -10,7 +10,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "test:offline": "node tests/offline-runtime.test.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "5.101.4",

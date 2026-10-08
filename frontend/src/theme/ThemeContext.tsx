@@ -44,9 +44,9 @@ function validColor(value: unknown): value is string {
   return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
 }
 
-function initialAppearance(): AppearanceSettings {
+function initialAppearance(storageKey: string): AppearanceSettings {
   try {
-    const saved = JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) ?? 'null') as Partial<AppearanceSettings> | null;
+    const saved = JSON.parse(localStorage.getItem(storageKey) ?? 'null') as Partial<AppearanceSettings> | null;
     return {
       primaryColor: validColor(saved?.primaryColor) ? saved.primaryColor : defaultAppearance.primaryColor,
       lightBackground: validColor(saved?.lightBackground) ? saved.lightBackground : defaultAppearance.lightBackground,
@@ -71,15 +71,17 @@ function mixColor(left: string, right: string, rightWeight: number) {
 function isLight(value:string){const rgb=[1,3,5].map((index)=>Number.parseInt(value.slice(index,index+2),16));return (rgb[0]*.299+rgb[1]*.587+rgb[2]*.114)/255>.58;}
 function foreground(background:string,mode:AppearanceSettings['textMode']){return mode==='light'?'#f5faf7':mode==='dark'?'#17231d':isLight(background)?'#17231d':'#f2f8f4';}
 
-function initialTheme(): Theme {
-  const saved = localStorage.getItem(STORAGE_KEY);
+function initialTheme(storageKey: string): Theme {
+  const saved = localStorage.getItem(storageKey);
   if (saved === 'light' || saved === 'dark') return saved;
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(initialTheme);
-  const [appearance, setAppearanceState] = useState<AppearanceSettings>(initialAppearance);
+export function ThemeProvider({ children, userId }: { children: ReactNode; userId?: string }) {
+  const themeKey=userId?`${STORAGE_KEY}:${userId}`:STORAGE_KEY;
+  const appearanceKey=userId?`${APPEARANCE_STORAGE_KEY}:${userId}`:APPEARANCE_STORAGE_KEY;
+  const [theme, setThemeState] = useState<Theme>(()=>initialTheme(themeKey));
+  const [appearance, setAppearanceState] = useState<AppearanceSettings>(()=>initialAppearance(appearanceKey));
 
   useEffect(() => {
     const root=document.documentElement;
@@ -92,9 +94,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.dataset.theme = theme;
     root.style.colorScheme = theme;
     root.style.setProperty('--primary',appearance.primaryColor);
+    root.style.setProperty('--primary-contrast',foreground(appearance.primaryColor,'auto'));
     root.style.setProperty('--primary-dark',mixColor(appearance.primaryColor,theme==='dark'?'#ffffff':'#000000',theme==='dark'?.42:.24));
     root.style.setProperty('--primary-soft',mixColor(appearance.primaryColor,surface,theme==='dark'?.72:.86));
     root.style.setProperty('--page-bg',background);
+    root.style.setProperty('--bg',background);
     root.style.setProperty('--surface',surface);
     root.style.setProperty('--surface-alt',mixColor(surface,background,.38));
     root.style.setProperty('--surface-soft',mixColor(surface,background,.58));
@@ -107,9 +111,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.style.setProperty('--topbar-bg',topbar);
     root.style.setProperty('--topbar-text',topbarText);
     root.style.background=background;
+    root.style.color=text;
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content',background);
-    localStorage.setItem(STORAGE_KEY, theme);
-    localStorage.setItem(APPEARANCE_STORAGE_KEY,JSON.stringify(appearance));
+    localStorage.setItem(themeKey, theme);
+    localStorage.setItem(appearanceKey,JSON.stringify(appearance));
     const syncNativeBars=()=>{
       try { window.SGBAndroid?.setSystemBarColors?.(background,background); } catch { /* Solo Android. */ }
     };
@@ -117,7 +122,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const retry=window.setTimeout(syncNativeBars,180);
     window.addEventListener('pageshow',syncNativeBars);
     return ()=>{window.clearTimeout(retry);window.removeEventListener('pageshow',syncNativeBars);};
-  }, [theme,appearance]);
+  }, [theme,appearance,themeKey,appearanceKey]);
 
   const value = useMemo<ThemeValue>(() => ({
     theme,

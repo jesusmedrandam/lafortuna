@@ -1,3 +1,4 @@
+import {DateInput} from '../components/ui';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import {
   ApiRequestError, createAnimal, createCatalogItem, getAnimal, getAnimals, listBrands,
@@ -10,6 +11,7 @@ import {
   getAnimalClassificationPolicy,type AnimalClassificationPolicy,
   type Animal, type AnimalList, type CatalogItem, type LivestockBrand, type LivestockOwner, type ParentSelection,
 } from './api';
+import {formatDate} from '../utils';
 import {Select} from '../components/ui';
 import {ShellIcon} from './ShellIcon';
 
@@ -29,7 +31,7 @@ function CatalogFields({ choices, selected, canManage, onCreate }: {
   choices: AnimalChoices; selected?: Animal | null; canManage: boolean;
   onCreate: (code: keyof AnimalChoices, name: string) => Promise<CatalogItem>;
 }) {
-  const breeds = selected?.breeds || (selected?.breed ? [selected.breed] : []);
+  const breeds = selected?.breeds?.length ? selected.breeds : (selected?.breed ? [selected.breed] : []);
   const colors = selected?.colors || [];
   const [selectedBreeds,setSelectedBreeds]=useState<string[]>(()=>breeds.map(item=>item.id));
   const [selectedColors,setSelectedColors]=useState<string[]>(()=>colors.map(item=>item.id));
@@ -79,7 +81,7 @@ function CatalogFields({ choices, selected, canManage, onCreate }: {
           onChange={event=>setNewName(event.target.value)} disabled={saving} autoFocus
           onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void add('BREEDS');}}}/>
         <button type="button" className="secondary-button compact" disabled={saving||newName.trim().length<2}
-          onClick={()=>void add('BREEDS')}>Guardar</button>
+          onClick={()=>void add('BREEDS')}>Añadir raza</button>
         <button type="button" className="text-button" onClick={()=>setAdding(null)}>Cancelar</button>
       </div>}
     </fieldset>
@@ -97,7 +99,7 @@ function CatalogFields({ choices, selected, canManage, onCreate }: {
           onChange={event=>setNewName(event.target.value)} disabled={saving} autoFocus
           onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void add('COLORS');}}}/>
         <button type="button" className="secondary-button compact" disabled={saving||newName.trim().length<2}
-          onClick={()=>void add('COLORS')}>Guardar</button>
+          onClick={()=>void add('COLORS')}>Añadir color</button>
         <button type="button" className="text-button" onClick={()=>setAdding(null)}>Cancelar</button>
       </div>}
     </fieldset>
@@ -156,6 +158,10 @@ function OwnerFields({ owners, accountUsers, selected, canManage, onCreate, onCr
     }catch(failure){setError(message(failure));}finally{setAddingUserId('');}
   }
   const available = owners.filter((owner) => owner.active || selected?.owners?.some((entry) => entry.id === owner.id));
+  for (const owner of selected?.owners ?? []) {
+    if (!available.some(entry => entry.id === owner.id))
+      available.push({ id: owner.id, name: owner.name, kind: '', active: false });
+  }
   const availableUsers=accountUsers.filter(user=>!owners.some(owner=>owner.kind==='USER'&&
     owner.name.trim().toLocaleLowerCase()===user.name.trim().toLocaleLowerCase()));
   return <fieldset className="animal-colors animal-owner-fieldset"><legend>Propietarios (total 100%)</legend>
@@ -183,7 +189,7 @@ function OwnerFields({ owners, accountUsers, selected, canManage, onCreate, onCr
         onChange={event=>setName(event.target.value)} disabled={saving} autoFocus
         onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void add();}}}/>
       <button type="button" className="secondary-button compact" disabled={saving||name.trim().length<2}
-        onClick={()=>void add()}>Guardar</button>
+        onClick={()=>void add()}>Añadir propietario</button>
       <button type="button" className="text-button" onClick={()=>setAdding(false)}>Cancelar</button>
     </div>}
     {canManage&&availableUsers.length>0&&<div className="animal-owner-users">
@@ -211,6 +217,10 @@ function ownerInput(data: FormData) {
 function BrandFields({ brands, selected }: { brands: LivestockBrand[]; selected?: Animal | null }) {
   const chosen = selected?.brands ?? [];
   const available = brands.filter((brand) => brand.active || chosen.some((entry) => entry.id === brand.id));
+  for (const brand of chosen) {
+    if (!available.some(entry => entry.id === brand.id))
+      available.push({ id: brand.id, name: brand.name, active: false });
+  }
   return <fieldset className="animal-colors"><legend>Marquillas de la cuenta</legend>
     {available.length === 0 && <small>Registra primero una marquilla en la sección Marquillas.</small>}
     {available.map((brand) => <label key={brand.id}>
@@ -302,6 +312,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
   const [accountUsers, setAccountUsers] = useState<Array<{ id: string; name: string }>>([]);
   const [animalMedia,setAnimalMedia]=useState<MediaItem[]>([]);
   const [mediaRevision,setMediaRevision]=useState(0);
+  const [editRevision,setEditRevision]=useState(0);
   const openedEdit=useRef<string|null>(null);
   useEffect(()=>{
     if(!initialAnimalId)return;
@@ -433,25 +444,6 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     finally { setBusy(false); }
   }
 
-  async function changeCatalogs(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selected) return;
-    const data = new FormData(event.currentTarget);
-    setBusy(true); setError(null);
-    try {
-      setSelected(await updateAnimalCatalogs(accessToken, selected.id, {
-        breedIds: data.getAll('breedIds').map(String),
-        colorIds: data.getAll('colorIds').map(String),
-        expectedVersion: selected.version,
-      }));
-    } catch (failure) {
-      setError(message(failure));
-      if (failure instanceof ApiRequestError && failure.code === 'ANIMAL_VERSION_CONFLICT') {
-        try { setSelected(await getAnimal(accessToken, selected.id)); } catch { /* conserva el error original */ }
-      }
-    } finally { setBusy(false); }
-  }
-
   async function addOwnerInline(kind:'EXTERNAL_PERSON'|'ORGANIZATION',name:string){
     const created=await createOwner(accessToken,{kind,name});
     setOwners(current=>[...current,created].sort((left,right)=>left.name.localeCompare(right.name,'es')));
@@ -468,70 +460,67 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       .sort((left,right)=>left.name.localeCompare(right.name,'es'))}:current);
     return created;
   }
-  async function changeOwners(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (!selected) return;
+  async function changeAnimal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected || busy) return;
     const data = new FormData(event.currentTarget);
     let ownersInput: ReturnType<typeof ownerInput>;
     try { ownersInput = ownerInput(data); }
     catch (failure) { setError(failure instanceof Error ? failure.message : 'Propietarios inválidos.'); return; }
-    setBusy(true); setError(null);
-    try { setSelected(await updateAnimalOwners(accessToken, selected.id,
-      { owners: ownersInput, expectedVersion: selected.version })); }
-    catch (failure) { setError(message(failure)); } finally { setBusy(false); }
-  }
-  async function changeBrands(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selected) return;
-    const brandIds = new FormData(event.currentTarget).getAll('brandIds').map(String);
-    setBusy(true); setError(null);
-    try {
-      setSelected(await updateAnimalBrands(accessToken, selected.id,
-        { brandIds, expectedVersion: selected.version }));
-      setRevision((value) => value + 1);
-    } catch (failure) {
-      setError(message(failure));
-      if (failure instanceof ApiRequestError && failure.code === 'ANIMAL_VERSION_CONFLICT') {
-        try { setSelected(await getAnimal(accessToken, selected.id)); } catch { /* conserva el error original */ }
-      }
-    } finally { setBusy(false); }
-  }
-
-  async function changeParents(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selected) return;
-    const data = new FormData(event.currentTarget);
+    const description = String(data.get('description') || '').trim() || null;
+    const breedIds = data.getAll('breedIds').map(String);
+    const colorIds = data.getAll('colorIds').map(String);
+    const brandIds = data.getAll('brandIds').map(String);
+    const sameIds = (left: string[], right: string[]) => left.length === right.length
+      && left.every(id => right.includes(id));
     const parent = (role: 'mother' | 'father'): ParentSelection => {
       const mode = data.get(`${role}Mode`);
       if (mode === 'animal') return { animalId: String(data.get(`${role}AnimalId`)) };
       if (mode === 'reported') return { reportedName: String(data.get(`${role}ReportedName`)).trim() };
       return null;
     };
+    const currentParent = (role: 'mother' | 'father'): ParentSelection => {
+      const entry = selected[role];
+      return entry ? entry.animalId ? { animalId: entry.animalId } : { reportedName: entry.name } : null;
+    };
+    const mother = parent('mother');
+    const father = parent('father');
+    let updated = selected;
     setBusy(true); setError(null);
     try {
-      setSelected(await updateAnimalParents(accessToken, selected.id,
-        { mother: parent('mother'), father: parent('father'), expectedVersion: selected.version }));
+      // These endpoints share a version: save in order and keep the draft if a later section fails.
+      if (description !== selected.description)
+        updated = await updateAnimalDescription(accessToken, selected.id,
+          { description, expectedVersion: updated.version });
+      if (ownersInput.length !== selected.owners.length || ownersInput.some(owner => {
+        const current = selected.owners.find(entry => entry.id === owner.partyId);
+        return !current || current.percent !== owner.percent || current.isPrimary !== owner.isPrimary;
+      })) updated = await updateAnimalOwners(accessToken, selected.id,
+        { owners: ownersInput, expectedVersion: updated.version });
+      const breeds = selected.breeds?.length ? selected.breeds : (selected.breed ? [selected.breed] : []);
+      if (choices && (!sameIds(breedIds, breeds.map(entry => entry.id))
+        || !sameIds(colorIds, (selected.colors ?? []).map(entry => entry.id))))
+        updated = await updateAnimalCatalogs(accessToken, selected.id,
+          { breedIds, colorIds, expectedVersion: updated.version });
+      if (brands && !sameIds(brandIds, selected.brands.map(entry => entry.id)))
+        updated = await updateAnimalBrands(accessToken, selected.id,
+          { brandIds, expectedVersion: updated.version });
+      if (JSON.stringify(mother) !== JSON.stringify(currentParent('mother'))
+        || JSON.stringify(father) !== JSON.stringify(currentParent('father')))
+        updated = await updateAnimalParents(accessToken, selected.id,
+          { mother, father, expectedVersion: updated.version });
+      setEditRevision(value => value + 1);
+      const panel = document.getElementById('animal-edit-panel') as HTMLDetailsElement | null;
+      if (panel) panel.open = false;
+      if (initialEdit) onBack?.();
     } catch (failure) {
-      setError(message(failure));
-      if (failure instanceof ApiRequestError && failure.code === 'ANIMAL_VERSION_CONFLICT') {
-        try { setSelected(await getAnimal(accessToken, selected.id)); } catch { /* conserva el error original */ }
-      }
-    } finally { setBusy(false); }
-  }
-
-  async function changeDescription(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selected) return;
-    const description = String(new FormData(event.currentTarget).get('description') || '').trim() || null;
-    setBusy(true); setError(null);
-    try {
-      setSelected(await updateAnimalDescription(accessToken, selected.id,
-        { description, expectedVersion: selected.version }));
-    } catch (failure) {
-      setError(message(failure));
-      if (failure instanceof ApiRequestError && failure.code === 'ANIMAL_VERSION_CONFLICT') {
-        try { setSelected(await getAnimal(accessToken, selected.id)); } catch { /* conserva el error original */ }
-      }
-    } finally { setBusy(false); }
+      setError(`${updated.version !== selected.version ? 'Se guardó parte de los cambios. ' : ''}${message(failure)}`);
+    } finally {
+      setSelected(updated);
+      if (updated.version !== selected.version) setResult(current => current ? { ...current,
+        items: current.items.map(entry => entry.id === updated.id ? updated : entry) } : current);
+      setBusy(false);
+    }
   }
 
   return <section className="section-block animal-panel">
@@ -560,8 +549,8 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
             key={group.id} value={group.id}>{group.name}{group.location?` · ${group.location.name}`:''}</option>)}
         </Select><small>La ubicación se hereda del grupo.</small></label>
         <label><span>Arete individual</span><input name="earTagCode" maxLength={80} disabled={busy} /></label>
-        <label><span>Fecha de nacimiento</span><input type="date" name="birthDate" disabled={busy} /></label>
-        <label><span>Fecha de ingreso</span><input type="date" name="entryDate" disabled={busy} />
+        <label><span>Fecha de nacimiento</span><DateInput type="date" name="birthDate" disabled={busy} /></label>
+        <label><span>Fecha de ingreso</span><DateInput type="date" name="entryDate" disabled={busy} />
           <small>Vacía: se usa la fecha actual de la finca.</small></label>
         <label><span>Peso inicial</span><input type="number" name="initialWeight" min="0.001"
           max="999999999" step="0.001" disabled={busy} /></label>
@@ -644,9 +633,9 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         <label><span>Marquilla</span><Select value={filters.brandId??''} onChange={event=>setFilter('brandId',event.target.value)}>
           <option value="">Todas</option>{brands?.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
         </Select></label>
-        <label><span>Nacimiento desde</span><input type="date" value={filters.birthFrom??''}
+        <label><span>Nacimiento desde</span><DateInput type="date" value={filters.birthFrom??''}
           max={filters.birthTo||undefined} onChange={event=>setFilter('birthFrom',event.target.value)}/></label>
-        <label><span>Nacimiento hasta</span><input type="date" value={filters.birthTo??''}
+        <label><span>Nacimiento hasta</span><DateInput type="date" value={filters.birthTo??''}
           min={filters.birthFrom||undefined} onChange={event=>setFilter('birthTo',event.target.value)}/></label>
       </div><button type="button" className="text-button" onClick={()=>{setFilters({});setClassification('');setPage(1);}}>
         Limpiar filtros</button>
@@ -663,7 +652,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
           <small className="animal-row-facts">{entry.classification?.name??'Animal'} · {entry.sex==='FEMALE'?'Hembra':'Macho'}
             {' · '}{entry.group?.name||'Sin grupo'}{entry.location?` · ${entry.location.name}`:''}</small>
           <span className="animal-row-footer"><small>{entry.earTagCode?`Arete ${entry.earTagCode} · `:''}
-            {entry.birthDate?`Nacimiento ${entry.birthDate}`:'Sin fecha de nacimiento'}</small>
+            {entry.birthDate?`Nacimiento ${formatDate(entry.birthDate)}`:'Sin fecha de nacimiento'}</small>
             {entry.primaryOwnerName&&<small>Propietario: {entry.primaryOwnerName}</small>}</span>
         </span>
         <span className={`animal-row-status ${entry.availabilityStatusCode.toLowerCase()}`}>
@@ -678,7 +667,6 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       </div>}
     </>}</>}
     {selected && <div className="animal-detail">
-      <button type="button" className="animal-back" onClick={()=>onBack?onBack():setSelected(null)}>‹ Volver a animales</button>
       <div className="animal-social-cover">
         {canViewMedia&&animalMedia.find(item=>item.relation_code==='COVER'&&item.kind==='IMAGE')&&<img
           className="animal-cover" src={animalMedia.find(item=>item.relation_code==='COVER')!.url}
@@ -768,44 +756,36 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
           <button className="secondary-button compact" disabled={busy}>Agregar foto</button></form>}
       </div>}
       {canUpdate&&<details id="animal-edit-panel" className="animal-edit-section"><summary>Editar ficha del animal</summary>
-      {canUpdate && <form className="animal-catalog-edit" key={`description:${selected.id}:${selected.version}`}
-        onSubmit={(event) => void changeDescription(event)}>
+      <form key={`${selected.id}:${editRevision}`} onSubmit={(event) => void changeAnimal(event)}>
+      <fieldset disabled={busy} style={{border:0,padding:0,margin:0,minWidth:0}}>
+      <section className="animal-catalog-edit">
         <h4>Descripción</h4>
         <label><span>Notas del animal</span><textarea name="description" maxLength={5000}
           rows={4} defaultValue={selected.description || ''} disabled={busy} /></label>
-        <button className="primary-button compact" type="submit" disabled={busy}>
-          {busy ? 'Guardando…' : 'Guardar descripción'}</button>
-      </form>}
-      {canUpdate && <form className="animal-catalog-edit" key={`owners:${selected.id}:${selected.version}`}
-        onSubmit={(event) => void changeOwners(event)}>
+      </section>
+      <section className="animal-catalog-edit">
         <h4>Propietarios y participación</h4>
         <OwnerFields owners={owners} accountUsers={accountUsers} selected={selected}
           canManage={canManageBrands} onCreate={addOwnerInline} onCreateUser={addUserOwnerInline}/>
-        <button className="primary-button compact" disabled={busy}>Guardar propietarios</button>
-      </form>}
-      {canUpdate && choices && <form className="animal-catalog-edit" key={`${selected.id}:${selected.version}`}
-        onSubmit={(event) => void changeCatalogs(event)}>
+      </section>
+      {choices && <section className="animal-catalog-edit">
         <h4>Raza y colores</h4><CatalogFields choices={choices} selected={selected}
           canManage={canManageBrands} onCreate={addCatalogInline}/>
-        <button className="primary-button compact" type="submit" disabled={busy}>
-          {busy ? 'Guardando…' : 'Guardar cambios'}</button>
-      </form>}
-      {canUpdate && brands && <form className="animal-catalog-edit" key={`brands:${selected.id}:${selected.version}`}
-        onSubmit={(event) => void changeBrands(event)}>
+      </section>}
+      {brands && <section className="animal-catalog-edit">
         <h4>Marquillas</h4><BrandFields brands={brands} selected={selected} />
-        <button className="primary-button compact" type="submit" disabled={busy}>
-          {busy ? 'Guardando…' : 'Guardar marquillas'}</button>
-      </form>}
-      {canUpdate && <form className="animal-catalog-edit" key={`parents:${selected.id}:${selected.version}`}
-        onSubmit={(event) => void changeParents(event)}>
+      </section>}
+      <section className="animal-catalog-edit">
         <h4>Parentesco</h4>
         <div className="animal-parent-grid">
           <ParentField accessToken={accessToken} child={selected} role="mother" />
           <ParentField accessToken={accessToken} child={selected} role="father" />
         </div>
-        <button className="primary-button compact" type="submit" disabled={busy}>
-          {busy ? 'Guardando…' : 'Guardar parentesco'}</button>
-      </form>}
+      </section>
+      </fieldset>
+      <div className="animal-form-actions"><button className="primary-button compact" type="submit" disabled={busy}>
+        {busy ? 'Guardando…' : 'Guardar'}</button></div>
+      </form>
       </details>}
     </div>}
   </section>;

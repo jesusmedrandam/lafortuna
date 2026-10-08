@@ -1,3 +1,4 @@
+import {DateInput} from '../components/ui';
 import {type FormEvent,useEffect,useMemo,useState} from 'react';
 import {CalendarRange,Gauge,Milk,Plus} from 'lucide-react';
 import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
@@ -32,6 +33,7 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAc
   const [tankShift,setTankShift]=useState<MilkShift>('SINGLE');
   const [tankSource,setTankSource]=useState<'MANUAL'|'SENSOR'>('MANUAL');
   const [closingLactationId,setClosingLactationId]=useState<string|null>(null);
+  const closeForm=()=>{setActiveForm(null);setClosingLactationId(null);if(initialAction)onCompleted?.();};
   const [closeDate,setCloseDate]=useState(localDate());
   useEffect(()=>{
     let active=true;
@@ -107,8 +109,7 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAc
     {!records&&!error&&<LoadingState/>}
     {!records&&error&&<ErrorState message={error} onRetry={()=>setRevision(value=>value+1)}/>}
     {canManage&&records&&activeForm&&<Modal title={activeForm==='CLOSE_LACTATION'?'Cerrar lactancia':'Registrar producción'} wide
-      onClose={()=>{setActiveForm(null);setClosingLactationId(null);}} footer={<Button variant="ghost"
-        onClick={()=>{setActiveForm(null);setClosingLactationId(null);}}>Cerrar</Button>}>
+      onClose={closeForm} footer={<Button variant="ghost" onClick={closeForm}>Cerrar</Button>}>
       {!initialAction&&activeForm!=='CLOSE_LACTATION'&&<div className="form-toolbar" aria-label="Tipo de registro">
       {([['LACTATION','Iniciar lactancia'],['MILK','Ordeño'],['TANK','Tanque']] as const)
         .map(([id,label])=><button type="button" key={id} className={activeForm===id?'active':''}
@@ -133,7 +134,7 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAc
             onChange={setMilkCowId} title="Seleccionar vaca" placeholder="Selecciona la vaca"
             searchPlaceholder="Buscar vaca…" options={milkingCows.map(row=>({value:row.id,label:row.name,
               description:row.lactationId?'Con lactancia activa':'Sin lactancia'}))}/>}</label>
-        <label><span>Fecha *</span><input type="date" name="producedOn" required defaultValue={localDate()} /></label>
+        <label><span>Fecha *</span><DateInput type="date" name="producedOn" required defaultValue={localDate()} /></label>
         <label><span>Turno</span><SearchableSelect value={milkShift}
           onChange={value=>setMilkShift(value as MilkShift)} title="Turno de ordeño"
           options={Object.entries(shiftName).map(([value,label])=>({value,label}))}/></label>
@@ -147,7 +148,7 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAc
       </form>
       <form className="group-new-form" onSubmit={tank} hidden={activeForm!=='TANK'}>
         <h3>Registrar tanque</h3>
-        <label><span>Fecha *</span><input type="date" name="producedOn" required defaultValue={localDate()}/></label>
+        <label><span>Fecha *</span><DateInput type="date" name="producedOn" required defaultValue={localDate()}/></label>
         <label><span>Turno</span><SearchableSelect value={tankShift}
           onChange={value=>setTankShift(value as MilkShift)} title="Turno del tanque"
           options={Object.entries(shiftName).map(([value,label])=>({value,label}))}/></label>
@@ -164,7 +165,7 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAc
         <h3>Cerrar lactancia activa</h3>
         {closingLactation&&<div className="health-fixed-animal selected"><strong>{closingLactation.cowName}</strong>
           <small>Inició el {formatDate(closingLactation.startedOn)}</small></div>}
-        <label><span>Fecha de cierre *</span><input type="date" required value={closeDate}
+        <label><span>Fecha de cierre *</span><DateInput type="date" required value={closeDate}
           min={closingLactation?.startedOn} max={localDate()} onChange={event=>setCloseDate(event.target.value)}/></label>
         <p className="muted">Después del cierre ya no se podrán registrar nuevas producciones dentro de esta lactancia.</p>
         <button className="primary-button compact" disabled={busy||!closingLactation||!closeDate}>
@@ -172,7 +173,7 @@ export function ProductionPanel({accessToken,canManage,initialAnimalId,initialAc
       </form>
     </div></Modal>}
     {records&&tab==='production'&&<><div className="production-date-filter">
-      <label><span>Fecha</span><input type="date" value={date}
+      <label><span>Fecha</span><DateInput type="date" value={date}
         onChange={event=>setDate(event.target.value)}/></label></div>
       <section className="production-daily-compact"><div className="production-daily-group">
         <header><span><Milk size={18}/><strong>Producción por animal</strong></span>

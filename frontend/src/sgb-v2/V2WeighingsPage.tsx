@@ -29,6 +29,7 @@ export function V2WeighingsPage({profileAnimalId,profileAction,onCompleted}:{
   const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [revision,setRevision]=useState(0);
   const canManage=hasPermission('WEIGHING_MANAGE');
   const openedFromProfile=useRef<string|null>(null);
+  const closeForm=()=>{setEditing(undefined);if(profileAction)onCompleted?.();};
   useEffect(()=>{if(!canManage||!animalId||(profileAction??params.get('accion'))!=='NUEVO'||
     openedFromProfile.current===animalId||!animals.some(item=>item.id===animalId))return;
     openedFromProfile.current=animalId;setEditing(null);
@@ -98,8 +99,7 @@ export function V2WeighingsPage({profileAnimalId,profileAction,onCompleted}:{
         Ver perfil del animal <ChevronRight size={17}/></Button>
     </Modal>}
     {editing!==undefined&&<Modal title={editing?'Editar pesaje':'Nuevo pesaje'}
-      onClose={()=>setEditing(undefined)} footer={<><Button variant="ghost"
-        onClick={()=>setEditing(undefined)}>Cancelar</Button>
+      onClose={closeForm} footer={<><Button variant="ghost" onClick={closeForm}>Cancelar</Button>
         <Button type="submit" form="v2-weighing-form" loading={busy}>Guardar</Button></>}>
       <form id="v2-weighing-form" className="form-stack" onSubmit={event=>void save(event)}>
         {error&&<div className="form-error admin-error" role="alert">{error}</div>}

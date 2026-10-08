@@ -51,17 +51,18 @@ function QuotaEditor({ quota, busy, onSave }: {
   </form>;
 }
 
-export function SuperadminPanel({ accessToken, onSettingsChanged }: {
-  accessToken: string; onSettingsChanged: () => Promise<void>;
+export function SuperadminPanel({ accessToken, onSettingsChanged,onStartSupport }: {
+  accessToken: string; onSettingsChanged: () => Promise<void>;onStartSupport:(accountId:string,propertyId:string)=>Promise<void>;
 }) {
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
   const [detail, setDetail] = useState<AccountDetails | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab,setTab]=useState<'accounts'|'catalogs'>('accounts');
+  const [search,setSearch]=useState('');const [page,setPage]=useState(1);
 
   async function loadOverview() {
-    setOverview(await getPlatformOverview(accessToken));
+    setOverview(await getPlatformOverview(accessToken,search,page));
   }
 
   async function loadAccount(accountId: string) {
@@ -81,8 +82,16 @@ export function SuperadminPanel({ accessToken, onSettingsChanged }: {
   }
 
   useEffect(() => {
-    void loadOverview().catch((loadError) => setError(message(loadError)));
-  }, [accessToken]);
+    let active=true;const timer=setTimeout(()=>{
+      void getPlatformOverview(accessToken,search,page).then(value=>{if(active){setOverview(value);setError(null);}})
+        .catch(loadError=>{if(active)setError(message(loadError));});
+    },220);return()=>{active=false;clearTimeout(timer);};
+  }, [accessToken,search,page]);
+
+  async function support(propertyId:string){if(!detail)return;setBusy(true);setError(null);
+    try{await onStartSupport(detail.account.id,propertyId);}
+    catch(failure){setError(failure instanceof Error?failure.message:message(failure));}
+    finally{setBusy(false);}}
 
   async function saveAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -139,17 +148,23 @@ export function SuperadminPanel({ accessToken, onSettingsChanged }: {
 
     <div className="accounts-layout">
       <div className="accounts-list">
-        <div className="subheading"><div><h3>Cuentas administrativas</h3><p>Hasta 100 cuentas recientes.</p></div></div>
-        {overview.accounts.length === 0 ? <div className="empty-state"><strong>Aún no existen cuentas</strong>
-          <p>Aparecerán aquí cuando un usuario registre su primera propiedad.</p></div>
+        <div className="subheading"><div><h3>Propietarios y cuentas</h3><p>Selecciona al propietario al que darás soporte.</p></div></div>
+        <label className="support-owner-search"><span>Buscar propietario</span><input type="search" value={search}
+          placeholder="Nombre, correo o cuenta" maxLength={160} disabled={busy} onChange={event=>{setSearch(event.target.value);setPage(1);setDetail(null);}}/></label>
+        {overview.accounts.length === 0 ? <div className="empty-state"><strong>{search?'Sin coincidencias':'Aún no existen cuentas'}</strong>
+          <p>{search?'Prueba con otro nombre, correo o cuenta.':'Aparecerán aquí cuando un usuario registre su primera propiedad.'}</p></div>
           : overview.accounts.map((account) => <button type="button" key={account.id}
             className={`account-row ${detail?.account.id === account.id ? 'selected' : ''}`}
-            onClick={() => loadAccount(account.id)}>
+            disabled={busy} onClick={() => loadAccount(account.id)}>
             <span className="account-avatar">{account.owner.name.slice(0, 1).toUpperCase()}</span>
             <span className="account-copy"><strong>{account.name}</strong><small>{account.owner.name} · {account.owner.email}</small></span>
             <span className={`status-pill ${account.status.toLowerCase()}`}>{statusName[account.status]}</span>
             <span className="account-count">{account.propertyCount} prop.</span>
           </button>)}
+        <div className="inline-actions"><button type="button" className="secondary-button compact" disabled={page===1||busy}
+          onClick={()=>{setPage(value=>value-1);setDetail(null);}}>Anterior</button><span>Página {page}</span>
+          <button type="button" className="secondary-button compact" disabled={!overview.hasMore||busy}
+            onClick={()=>{setPage(value=>value+1);setDetail(null);}}>Siguiente</button></div>
       </div>
 
       <div className="account-detail">
@@ -158,7 +173,7 @@ export function SuperadminPanel({ accessToken, onSettingsChanged }: {
           <div className="detail-heading"><div><span className="eyebrow">Cuenta seleccionada</span><h3>{detail.account.name}</h3>
             <p>{detail.account.owner.name} · {detail.account.owner.email}</p></div></div>
 
-          <form className="account-settings" onSubmit={saveAccount}>
+          <form key={detail.account.id} className="account-settings" onSubmit={saveAccount}>
             <label><span>Estado</span><Select name="status" defaultValue={detail.account.status} disabled={busy}>
               <option value="ACTIVE">Activa</option><option value="SUSPENDED">Suspendida</option>
               <option value="DISABLED">Deshabilitada</option></Select></label>
@@ -183,6 +198,8 @@ export function SuperadminPanel({ accessToken, onSettingsChanged }: {
             : detail.properties.map((property) => <div className="property-row" key={property.id}>
               <div><strong>{property.name}</strong><small>{property.timezone}</small></div>
               <span>{property.animalCount} animales · {property.memberCount} usuarios</span>
+              <button type="button" className="primary-button compact" disabled={busy}
+                onClick={()=>void support(property.id)}>Dar soporte</button>
             </div>)}</div>
         </>}
       </div>

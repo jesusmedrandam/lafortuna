@@ -1,10 +1,11 @@
-import {useEffect,useRef,useState} from 'react';
-import {ArrowLeft,ArrowLeftRight,Baby,Beef,Camera,Edit3,HeartPulse,MapPin,Milk,Users,Weight,
-  HeartCrack,ShoppingCart,ShoppingBag,X,ChevronRight} from 'lucide-react';
-import {useNavigate,useParams} from 'react-router-dom';
+import {AnimalIcon} from '../components/AnimalIcon';
+import {useEffect,useRef,useState,type ComponentType,type ReactNode} from 'react';
+import {Activity,ArrowRightLeft,Baby,CalendarDays,Camera,Edit3,HeartPulse,MapPin,Milk,Users,Weight,
+  HeartCrack,HeartOff,LogOut,Search,ShoppingCart,ShoppingBag,Syringe,Tag,UserRound,X,ChevronRight,type LucideIcon} from 'lucide-react';
+import {useLocation,useNavigate,useParams} from 'react-router-dom';
 import {Badge,Card,IconButton,LoadingState,ErrorState} from '../components/ui';
 import {ImageLightbox,type LightboxMedia} from '../components/ImageLightbox';
-import {formatDate} from '../utils';
+import {formatAge,formatDate} from '../utils';
 import {getAnimal,getMedia,uploadMedia,getMovements,getMovementOptions,getWeighings,getHealthConditions,getHealthMedicines,
   getHealthCampaigns,getReproduction,getProduction,getCommerce,getAnimalStatusEvents,
   getReproductionSettings,type Animal,type MediaItem,type MovementOptions,
@@ -19,21 +20,35 @@ import {V2AnimalStatusPage} from './V2AnimalStatusPage';
 import {V2CommercePage} from './V2CommercePage';
 import {AnimalPanel} from './AnimalPanel';
 
-type Section={title:string;path:string;entries:Array<{id:string;date:string;label:string}>};
+type Section={title:string;path:string;entries:Array<{id:string;date:string;label:string;path?:string}>};
+const historyIcons:Record<string,LucideIcon>={Novedades:Activity,Movimientos:ArrowRightLeft,Pesajes:Weight,
+  'Condiciones de salud':HeartPulse,Tratamientos:Syringe,Crías:Baby,Partos:CalendarDays,Celos:HeartPulse,
+  Preñeces:HeartPulse,'Pérdidas gestacionales':HeartCrack,'Reproducción asistida':Syringe,
+  Producción:Milk,Ventas:ShoppingCart,Compras:ShoppingBag};
 type AnimalAction={label:string;run:()=>void};
 type ActionKind='movement'|'health'|'reproduction'|'production'|'weighing'|'status'|'sale'|'purchase'|'edit';
+const actionAccess:Record<ActionKind,[string,string?]>={movement:['MOVEMENT_MANAGE','MOVEMENTS'],
+  health:['HEALTH_MANAGE','HEALTH'],reproduction:['REPRODUCTION_MANAGE','REPRODUCTION'],
+  production:['PRODUCTION_MANAGE','PRODUCTION'],weighing:['WEIGHING_MANAGE','WEIGHING'],
+  status:['ANIMAL_UPDATE'],sale:['COMMERCE_MANAGE','SALES_PURCHASES'],purchase:['COMMERCE_MANAGE','SALES_PURCHASES'],edit:['ANIMAL_UPDATE']};
 function recent(title:string,path:string,entries:Section['entries']):Section{
   return {title,path,entries:entries.sort((a,b)=>b.date.localeCompare(a.date))};
 }
+function CompactInfo({icon:Icon,label,value,wide=false}:{icon:ComponentType<{size?:number}>;label:string;value:ReactNode;wide?:boolean}){
+  if(value==null||typeof value==='string'&&!value.trim())return null;
+  return <div className={`animal-compact-info ${wide?'animal-compact-info-wide':''}`}><Icon size={17}/>
+    <span><small>{label}</small><strong>{value}</strong></span></div>;
+}
 export function V2AnimalDetail(){
-  const {id}=useParams();const navigate=useNavigate();const {session,hasPermission}=useV2Session();
+  const {id}=useParams();const navigate=useNavigate();const location=useLocation();const {session,hasPermission}=useV2Session();
   const [animal,setAnimal]=useState<Animal|null>(null);const [media,setMedia]=useState<MediaItem[]>([]);
   const [error,setError]=useState('');const [busy,setBusy]=useState(false);
   const [viewer,setViewer]=useState<MediaItem|null>(null);const [purpose,setPurpose]=useState<'PROFILE'|'COVER'>('PROFILE');
   const [menu,setMenu]=useState<{title:string;actions:AnimalAction[]}|null>(null);
-  const [action,setAction]=useState<{kind:ActionKind;code:string}|null>(null);
+  const previousAction=useRef(false);
   const [revision,setRevision]=useState(0);
   const [sections,setSections]=useState<Section[]>([]);
+  const [expandedHistories,setExpandedHistories]=useState<Record<string,boolean>>({});
   const [movementOptions,setMovementOptions]=useState<MovementOptions|null>(null);
   const [inMilking,setInMilking]=useState(false);
   const [activeLactationId,setActiveLactationId]=useState<string|null>(null);
@@ -48,15 +63,23 @@ export function V2AnimalDetail(){
   const canViewMedia=hasPermission('MEDIA_VIEW')&&modules.includes('MULTIMEDIA');
   const canManageMedia=hasPermission('MEDIA_MANAGE')&&modules.includes('MULTIMEDIA');
   const can=(permission:string,module?:string)=>hasPermission(permission)&&(!module||modules.includes(module));
+  const context=session!.overview.activeContext;
+  const pending=location.state?.animalAction as {kind:ActionKind;code:string;animalId:string;propertyId:string;roleId:string;supportMode:boolean}|undefined;
+  const action=pending&&Object.hasOwn(actionAccess,pending.kind)&&typeof pending.code==='string'
+    &&can(...actionAccess[pending.kind])&&pending.animalId===id&&pending.propertyId===context?.propertyId&&pending.roleId===context?.roleId
+    &&pending.supportMode===Boolean(session!.overview.supportMode)?pending:null;
+  useEffect(()=>{if(previousAction.current&&!action)setRevision(value=>value+1);previousAction.current=Boolean(action);},[action]);
+  useEffect(()=>{setAnimal(null);setMedia([]);setViewer(null);setMenu(null);},
+    [id,context?.propertyId,context?.roleId,session!.overview.supportMode]);
   useEffect(()=>{
-    if(!id)return;let active=true;setAnimal(null);setError('');
+    if(!id)return;let active=true;setError('');if(!canViewMedia)setMedia([]);
     void getAnimal(token,id).then(value=>{if(active)setAnimal(value);})
       .catch(reason=>{if(active)setError(reason instanceof Error?reason.message:'No se pudo abrir el animal.');});
     if(canViewMedia)void getMedia(token,'ANIMAL',id).then(value=>{if(active)setMedia(value);})
       .catch(()=>{});
     return()=>{active=false;};
-  },[id,token,canViewMedia,revision]);
-  useEffect(()=>{if(!id)return;let active=true;setSections([]);setInMilking(false);
+  },[id,token,canViewMedia,revision,context?.propertyId,context?.roleId,session!.overview.supportMode]);
+  useEffect(()=>{if(!id)return;let active=true;setSections([]);setExpandedHistories({});setInMilking(false);
     setActiveLactationId(null);
     setReproduction(null);setReproductionSettings(null);
     setMovementOptions(null);
@@ -66,7 +89,7 @@ export function V2AnimalDetail(){
       .then(options=>{if(active)setMovementOptions(options);}).catch(()=>{});
     if(can('HEALTH_MANAGE','HEALTH'))void getHealthMedicines(token)
       .then(items=>{if(active)setHasMedicines(items.some(item=>item.active));}).catch(()=>{});
-    const jobs:Array<Promise<Section>>=[];
+    const jobs:Array<Promise<Section|Section[]>>=[];
     if(can('ANIMAL_VIEW'))jobs.push(getAnimalStatusEvents(token,id).then(items=>
       recent('Novedades','/bajas',items.map(item=>({id:item.id,date:item.occurredAt,
         label:{REPORT_MISSING:'Desaparición',MARK_FOUND:'Recuperación',RECORD_DEATH:'Muerte',
@@ -94,17 +117,20 @@ export function V2AnimalDetail(){
         .then(value=>{if(active)setReproductionSettings(value);}).catch(()=>{});
       jobs.push(getReproduction(token).then(items=>{
         if(active)setReproduction(items);
-        return recent('Reproducción','/reproduccion',[
-        ...items.heats.filter(item=>item.cowId===id).map(item=>({id:item.id,date:item.startsOn,label:'Celo'})),
-        ...items.services.filter(item=>item.cowId===id||item.fatherId===id||item.donorId===id)
-          .map(item=>({id:item.id,date:item.occurredOn,label:item.kind==='INSEMINATION'?'Inseminación':'Transferencia de embrión'})),
-        ...items.pregnancies.filter(item=>item.cowId===id||item.fatherId===id)
-          .map(item=>({id:item.id,date:item.confirmedOn,label:'Preñez'})),
-        ...items.births.filter(item=>item.motherId===id||item.calves.some(calf=>calf.id===id))
-          .map(item=>({id:item.id,date:item.occurredOn,label:'Parto'})),
-        ...items.losses.filter(item=>item.cowId===id)
-          .map(item=>({id:item.id,date:item.occurredOn,label:'Pérdida gestacional'})),
-        ]);
+        return [
+          recent('Crías','/reproduccion',items.births.filter(item=>item.motherId===id).flatMap(item=>
+            item.calves.map(calf=>({id:`${item.id}:${calf.id}`,date:item.occurredOn,label:calf.name,path:`/animales/${encodeURIComponent(calf.id)}`})))),
+          recent('Partos','/reproduccion',items.births.filter(item=>item.motherId===id||item.calves.some(calf=>calf.id===id))
+            .map(item=>({id:item.id,date:item.occurredOn,label:item.calves.map(calf=>calf.name).filter(Boolean).join(', ')||'Parto registrado'}))),
+          recent('Celos','/reproduccion',items.heats.filter(item=>item.cowId===id).map(item=>
+            ({id:item.id,date:item.startsOn,label:item.isFalse?'Celo falso':'Celo registrado'}))),
+          recent('Preñeces','/reproduccion',items.pregnancies.filter(item=>item.cowId===id||item.fatherId===id)
+            .map(item=>({id:item.id,date:item.confirmedOn,label:'Preñez'}))),
+          recent('Pérdidas gestacionales','/reproduccion',items.losses.filter(item=>item.cowId===id)
+            .map(item=>({id:item.id,date:item.occurredOn,label:item.notes?.trim()||'Pérdida gestacional'}))),
+          recent('Reproducción asistida','/reproduccion',items.services.filter(item=>item.cowId===id||item.fatherId===id||item.donorId===id)
+            .map(item=>({id:item.id,date:item.occurredOn,label:item.kind==='INSEMINATION'?'Inseminación':'Transferencia de embrión'}))),
+        ];
       }));
     }
     if(can('PRODUCTION_VIEW','PRODUCTION'))jobs.push(getProduction(token).then(items=>{
@@ -126,7 +152,7 @@ export function V2AnimalDetail(){
           label:item.counterpartyName})))));
     }
     void Promise.allSettled(jobs).then(results=>{if(active)setSections(results.flatMap(result=>
-      result.status==='fulfilled'?[result.value]:[]));});
+      result.status==='fulfilled'?[result.value].flat().filter(section=>section.entries.length>0):[]));});
     return()=>{active=false;};
   },[id,token,modules.join(','),session?.overview.activeContext?.roleId,revision]);
   async function photo(file:File){
@@ -145,8 +171,10 @@ export function V2AnimalDetail(){
       animal?.availabilityStatusCode==='EXITED'?'Salió de la propiedad':'Inactivo';
   const go=(path:string,action?:string)=>{setMenu(null);navigate(`${path}${path.includes('?')?'&':'?'}animal=${encodeURIComponent(id??'')}`+
     (action?`&accion=${encodeURIComponent(action)}`:''));};
-  const openAction=(kind:ActionKind,code:string)=>{setMenu(null);setAction({kind,code});};
-  const closeAction=()=>{setAction(null);setRevision(value=>value+1);};
+  const openAction=(kind:ActionKind,code:string)=>{setMenu(null);navigate(location.pathname+location.search,
+    {state:{animalAction:{kind,code,animalId:id,propertyId:context?.propertyId,roleId:context?.roleId,
+      supportMode:Boolean(session!.overview.supportMode)}}});};
+  const closeAction=()=>navigate(-1);
   const choose=(title:string,actions:AnimalAction[])=>{
     if(actions.length===1)actions[0]!.run();else if(actions.length>1)setMenu({title,actions});};
   const photoAction=()=>choose('Fotos del animal',[
@@ -223,54 +251,49 @@ export function V2AnimalDetail(){
     date:item.captured_on??item.created_at.slice(0,10),filename:`${animal?.name??'animal'}-${item.relation_code.toLowerCase()}`,
   }));
   const viewerIndex=viewer?lightboxItems.findIndex(item=>item.key===viewer.id):-1;
+  const breeds=animal?.breeds?.length?animal.breeds:animal?.breed?[animal.breed]:[];
+  const lastWeighing=sections.find(section=>section.title==='Pesajes')?.entries[0];
+  const lastTreatment=sections.find(section=>section.title==='Tratamientos')?.entries[0];
+  const lastMovement=sections.find(section=>section.title==='Movimientos')?.entries[0];
   if(error&&!animal)return <ErrorState message={error} onRetry={()=>navigate('/animales')}/>;
   if(!animal)return <LoadingState text="Abriendo ficha…"/>;
   return <div className="animal-detail-page sgb-v2-animal-detail">
-    <button className="animal-back" type="button" onClick={()=>navigate('/animales')}>
-      <ArrowLeft size={17}/> Volver a animales</button>
     <section className={`animal-social-cover ${cover?'has-cover':''}`}>
       {cover?<button type="button" className="animal-cover-media" onClick={()=>setViewer(cover)}>
         <img src={cover.url} alt={`Portada de ${animal.name}`}/></button>:<div className="animal-cover-placeholder"/>}
       <div className="animal-cover-shade"/><div className="animal-cover-name"><h1>{animal.name}</h1>
-        {animal.description&&<p>{animal.description}</p>}</div>
+        {animal.description?.trim()&&<p>{animal.description}</p>}</div>
       <button type="button" className="animal-social-avatar" disabled={!profile}
         onClick={()=>setViewer(profile??null)}>{profile?<img src={profile.thumbnailUrl??profile.url}
-          alt={`Perfil de ${animal.name}`}/>:<Beef size={48}/>}</button>
+          alt={`Perfil de ${animal.name}`}/>:<AnimalIcon size={48}/>}</button>
     </section>
     <div className="animal-profile-action-strip" aria-label="Acciones del animal">
       {canManageMedia&&<IconButton label="Fotos del animal" onClick={photoAction}><Camera size={21}/></IconButton>}
       {hasPermission('ANIMAL_UPDATE')&&<IconButton label="Editar animal" onClick={()=>openAction('edit','EDITAR')}>
         <Edit3 size={21}/></IconButton>}
-      {['ACTIVE','MISSING','INACTIVE'].includes(animal.availabilityStatusCode)&&
-        hasPermission('ANIMAL_UPDATE')&&<IconButton label="Bajas y novedades"
-          onClick={()=>choose('Novedades de '+animal.name,
-            (animal.availabilityStatusCode==='MISSING'?
-              [{label:'Marcar como encontrado',code:'MARK_FOUND'},{label:'Registrar fallecimiento',code:'RECORD_DEATH'},
-                {label:'Registrar salida',code:'RECORD_EXIT'}]:animal.availabilityStatusCode==='INACTIVE'?
-              [{label:'Registrar fallecimiento',code:'RECORD_DEATH'},{label:'Registrar salida',code:'RECORD_EXIT'}]:
-              [{label:'Reportar desaparición',code:'REPORT_MISSING'},
-                {label:'Registrar fallecimiento',code:'RECORD_DEATH'},
-                {label:'Registrar salida',code:'RECORD_EXIT'}]).map(item=>({label:item.label,
-                run:()=>openAction('status',item.code)})))}><HeartCrack size={21}/></IconButton>}
-      {usable&&can('COMMERCE_MANAGE','SALES_PURCHASES')&&<IconButton label="Ventas"
-        onClick={()=>openAction('sale','NUEVA')}><ShoppingCart size={21}/></IconButton>}
-      {usable&&can('COMMERCE_MANAGE','SALES_PURCHASES')&&<IconButton label="Compras"
-        onClick={()=>openAction('purchase','NUEVA')}><ShoppingBag size={21}/></IconButton>}
       {movementMenuActions.length>0&&can('MOVEMENT_VIEW','MOVEMENTS')&&<IconButton label="Movimientos"
         onClick={()=>setMenu({title:'Movimientos de '+animal.name,actions:movementMenuActions})}>
-        <ArrowLeftRight size={21}/></IconButton>}
-      {usable&&can('WEIGHING_MANAGE','WEIGHING')&&<IconButton label="Registrar pesaje"
-        onClick={()=>openAction('weighing','NUEVO')}><Weight size={21}/></IconButton>}
+        <ArrowRightLeft size={21}/></IconButton>}
       {healthActions.length>0&&can('HEALTH_VIEW','HEALTH')&&<IconButton label="Sanidad"
         onClick={()=>setMenu({title:'Sanidad de '+animal.name,actions:healthActions})}>
-        <HeartPulse size={21}/></IconButton>}
+        <Syringe size={21}/></IconButton>}
+      {usable&&can('WEIGHING_MANAGE','WEIGHING')&&<IconButton label="Registrar pesaje"
+        onClick={()=>openAction('weighing','NUEVO')}><Weight size={21}/></IconButton>}
+      {animal.sex==='FEMALE'&&productionActions.length>0&&can('PRODUCTION_VIEW','PRODUCTION')&&
+        <IconButton label="Producción" onClick={()=>setMenu({title:'Producción de '+animal.name,
+          actions:productionActions})}><Milk size={21}/></IconButton>}
       {usable&&animal.sex==='FEMALE'&&can('REPRODUCTION_MANAGE','REPRODUCTION')&&
         reproductiveActions.length>0&&<IconButton label="Reproducción"
           onClick={()=>choose('Reproducción de '+animal.name,reproductiveActions)}>
           <Baby size={21}/></IconButton>}
-      {animal.sex==='FEMALE'&&productionActions.length>0&&can('PRODUCTION_VIEW','PRODUCTION')&&
-        <IconButton label="Producción" onClick={()=>setMenu({title:'Producción de '+animal.name,
-          actions:productionActions})}><Milk size={21}/></IconButton>}
+      {usable&&can('COMMERCE_MANAGE','SALES_PURCHASES')&&<IconButton label="Ventas"
+        onClick={()=>openAction('sale','NUEVA')}><ShoppingCart size={21}/></IconButton>}
+      {['ACTIVE','MISSING','INACTIVE'].includes(animal.availabilityStatusCode)&&hasPermission('ANIMAL_UPDATE')&&<>
+        <IconButton label="Registrar fallecimiento" className="danger" onClick={()=>openAction('status','RECORD_DEATH')}><HeartOff size={21}/></IconButton>
+        {usable&&<IconButton label="Reportar desaparición" onClick={()=>openAction('status','REPORT_MISSING')}><Search size={21}/></IconButton>}
+        {animal.availabilityStatusCode==='MISSING'&&<IconButton label="Marcar como encontrado" onClick={()=>openAction('status','MARK_FOUND')}><MapPin size={21}/></IconButton>}
+        <IconButton label="Registrar salida" onClick={()=>openAction('status','RECORD_EXIT')}><LogOut size={21}/></IconButton>
+      </>}
     </div>
     <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic" hidden
       disabled={busy} onChange={event=>{const file=event.currentTarget.files?.[0];event.currentTarget.value='';
@@ -278,37 +301,47 @@ export function V2AnimalDetail(){
     {error&&<div className="form-alert form-alert-error" role="alert">{error}</div>}
     <Card className="animal-detail-summary-card animal-data-only-card">
       <div className="animal-summary-heading"><div><h2>Información</h2>
-        {animal.earTagCode&&<p>Arete {animal.earTagCode}</p>}</div>
+        {animal.earTagCode?.trim()&&<p>Arete {animal.earTagCode}</p>}</div>
         <Badge tone={usable?'success':animal.availabilityStatusCode==='DEAD'?'danger':'warning'}>
           {status}</Badge></div>
       <div className="animal-compact-info-grid">
-        <div><Beef size={18}/><span><small>Clasificación / sexo</small><strong>{animal.classification?.name??'Animal'} · {animal.sex==='FEMALE'?'Hembra':'Macho'}</strong></span></div>
-        <div><Users size={18}/><span><small>Grupo</small><strong>{animal.group?.name??'Sin grupo'}</strong></span></div>
-        {animal.location&&<div><MapPin size={18}/><span><small>Ubicación actual</small><strong>{animal.location.name}</strong></span></div>}
-        <div><Beef size={18}/><span><small>Nacimiento</small><strong>{formatDate(animal.birthDate)}</strong></span></div>
-        <div><Beef size={18}/><span><small>Ingreso</small><strong>{formatDate(animal.entryDate)}</strong></span></div>
-        {animal.owners?.length>0&&<div><Users size={18}/><span><small>Propietarios</small>
-          <strong>{animal.owners.map(owner=>`${owner.name} (${owner.percent}%)`).join(', ')}</strong></span></div>}
-        {animal.breeds?.length>0&&<div><Beef size={18}/><span><small>Razas</small>
-          <strong>{animal.breeds.map(breed=>breed.name).join(', ')}</strong></span></div>}
-        {Boolean(animal.colors?.length)&&<div><Beef size={18}/><span><small>Colores</small>
-          <strong>{animal.colors?.map(color=>color.name).join(', ')}</strong></span></div>}
-        {animal.brands?.length>0&&<div><Beef size={18}/><span><small>Marquillas</small>
-          <strong>{animal.brands.map(brand=>brand.name).join(', ')}</strong></span></div>}
-        {animal.initialWeight!==null&&<div><Weight size={18}/><span><small>Peso inicial</small>
-          <strong>{animal.initialWeight} {animal.initialWeightUnitCode==='POUND'?'lb':'kg'}</strong></span></div>}
-        {animal.mother&&<div><Baby size={18}/><span><small>Madre</small><strong>{animal.mother.name}</strong></span></div>}
-        {animal.father&&<div><Baby size={18}/><span><small>Padre</small><strong>{animal.father.name}</strong></span></div>}
+        <CompactInfo icon={AnimalIcon} label="Especie / sexo" value={[animal.speciesCode==='BOVINE'?'Bovino':animal.speciesCode,
+          animal.sex==='FEMALE'?'Hembra':animal.sex==='MALE'?'Macho':null].filter(Boolean).join(' · ')}/>
+        <CompactInfo icon={Users} label="Grupo" value={animal.group?.name}/>
+        <CompactInfo icon={MapPin} label="Ubicación actual" value={animal.location?.name}/>
+        {animal.classification?.code!=='SIN_CLASIFICAR'&&<CompactInfo icon={AnimalIcon} label="Clasificación" value={animal.classification?.name}/>}
+        {lastWeighing&&<CompactInfo icon={Weight} label="Último peso" value={`${lastWeighing.label} · ${formatDate(lastWeighing.date)}`}/>}
+        <CompactInfo icon={UserRound} label="Propietarios" wide value={animal.owners?.filter(owner=>owner.name?.trim())
+          .map(owner=>`${owner.name}${Number.isFinite(owner.percent)?` (${owner.percent}%)`:''}`).join(', ')}/>
+        {animal.birthDate?.trim()&&<><CompactInfo icon={CalendarDays} label="Nacimiento" value={formatDate(animal.birthDate)}/>
+          <CompactInfo icon={CalendarDays} label="Edad" value={formatAge(animal.birthDate)}/></>}
+        {animal.entryDate?.trim()&&<CompactInfo icon={CalendarDays} label="Ingreso" value={formatDate(animal.entryDate)}/>}
+        <CompactInfo icon={Tag} label="Marquillas" value={animal.brands?.map(brand=>brand.name).filter(value=>value?.trim()).join(', ')}/>
+        {typeof animal.initialWeight==='number'&&Number.isFinite(animal.initialWeight)&&<CompactInfo icon={Weight} label="Peso inicial"
+          value={`${animal.initialWeight} ${animal.initialWeightUnitCode==='POUND'?'lb':'kg'}`}/>}
+        <CompactInfo icon={UserRound} label="Padres" wide value={[animal.mother?.name?.trim()?`Madre: ${animal.mother.name}`:null,
+          animal.father?.name?.trim()?`Padre: ${animal.father.name}`:null].filter(Boolean).join(' · ')}/>
+        {lastTreatment&&<CompactInfo icon={Syringe} label="Último tratamiento" wide value={`${lastTreatment.label} · ${formatDate(lastTreatment.date)}`}/>}
+        {lastMovement&&<CompactInfo icon={ArrowRightLeft} label="Último traslado" wide value={`${lastMovement.label} · ${formatDate(lastMovement.date)}`}/>}
       </div>
+      {(breeds.some(breed=>breed.name?.trim())||animal.colors?.some(color=>color.name?.trim()))&&<div className="animal-compact-tags">
+        {breeds.some(breed=>breed.name?.trim())&&<span><strong>Razas:</strong> {breeds.map(breed=>breed.name).filter(value=>value?.trim()).join(', ')}</span>}
+        {animal.colors?.some(color=>color.name?.trim())&&<span><strong>Colores:</strong> {animal.colors.map(color=>color.name).filter(value=>value?.trim()).join(', ')}</span>}
+      </div>}
     </Card>
-    {sections.length>0&&<div className="v2-animal-history" aria-label="Resumen del animal">
-      {sections.map(section=><Card className="v2-animal-history-card" key={section.title}>
-        <div className="v2-animal-history-title"><h2>{section.title} <span>{section.entries.length}</span></h2>
-          <button type="button" onClick={()=>go(section.path)}>Ver todo <ChevronRight size={16}/></button></div>
-        {section.entries.length?section.entries.slice(0,3).map(item=><div className="v2-animal-history-row"
-          key={item.id}><strong>{item.label}</strong><time>{formatDate(item.date)}</time></div>)
-          :<p className="muted">Sin registros</p>}
-      </Card>)}
+    {sections.length>0&&<div className="animal-profile-history-grid" aria-label="Resumen del animal">
+      {sections.map(section=>{const Icon=historyIcons[section.title]??Activity;const expanded=Boolean(expandedHistories[section.title]);
+        return <Card className="animal-history-preview" key={section.title}>
+          <header><span className="history-count">{section.entries.length}</span><h2><Icon size={19}/>{section.title}</h2>
+            <IconButton label={`Abrir ${section.title}`} onClick={()=>go(section.path)}><ChevronRight size={19}/></IconButton></header>
+          <div className="history-stack">{(expanded?section.entries:section.entries.slice(0,3)).map(item=>
+            <button type="button" className="history-entry history-entry-link" key={item.id}
+              onClick={()=>item.path?navigate(item.path):go(section.path)}><span><strong>{item.label}</strong></span>
+              {item.date&&<time>{formatDate(item.date)}</time>}</button>)}</div>
+          {section.entries.length>3&&<button type="button" className="history-toggle" aria-expanded={expanded}
+            onClick={()=>setExpandedHistories(current=>({...current,[section.title]:!expanded}))}>
+            {expanded?'Mostrar solo 3':`Mostrar todo (${section.entries.length})`}</button>}
+        </Card>;})}
     </div>}
     {gallery.length>0&&<section className="v2-animal-gallery"><h2>Fotos</h2><div>
       {gallery.map(item=><button key={item.id} type="button" onClick={()=>setViewer(item)}>
@@ -326,8 +359,6 @@ export function V2AnimalDetail(){
       </section></div>}
     {action&&id&&<div className={`v2-animal-action-host action-${action.kind}`}
       role="dialog" aria-modal="true" aria-label={`Acción de ${animal.name}`}>
-      <button type="button" className="v2-animal-action-exit" onClick={closeAction}>
-        <ArrowLeft size={18}/> Volver a {animal.name}</button>
       <div className="v2-animal-action-content" key={`${action.kind}:${action.code}`}>
         {action.kind==='movement'&&<MovementPanel accessToken={token} propertyId={property!.id}
           canManage canCancel={hasPermission('MOVEMENT_CANCEL')}

@@ -36,6 +36,7 @@ export function V2CommercePage({kind,profileAnimalId,profileAction,onCompleted}:
   const canManage=hasPermission('COMMERCE_MANAGE');
   const canManageCatalogs=hasPermission('CATALOG_MANAGE');
   const openedFromProfile=useRef<string|null>(null);
+  const closeForm=()=>{setOpen(false);if(profileAction)onCompleted?.();};
   useEffect(()=>{if(!canManage||!initialAnimal||(profileAction??params.get('accion'))!=='NUEVA'||
     openedFromProfile.current===initialAnimal||!animals.some(item=>item.id===initialAnimal))return;
     openedFromProfile.current=initialAnimal;start();
@@ -147,7 +148,7 @@ export function V2CommercePage({kind,profileAnimalId,profileAction,onCompleted}:
         <Field label="Motivo" required><Textarea name="reason" required minLength={3} maxLength={3000}/></Field>
       </form></Modal>}
     {open&&<Modal title={`Nueva ${kind==='SALE'?'venta':'compra'}`} wide
-      onClose={()=>setOpen(false)} footer={<><Button variant="ghost" onClick={()=>setOpen(false)}>Cancelar</Button>
+      onClose={closeForm} footer={<><Button variant="ghost" onClick={closeForm}>Cancelar</Button>
         <Button type="submit" form="commerce-form" loading={busy}>Guardar</Button></>}>
       <form id="commerce-form" className="form-stack" onSubmit={event=>void save(event)}>
         {error&&<div className="form-error admin-error" role="alert">{error}</div>}

@@ -1,3 +1,4 @@
+import {DateInput} from '../components/ui';
 import {type FormEvent,useEffect,useMemo,useState} from 'react';
 import {ArrowLeftRight,ArrowUpDown,ChevronRight,Plus} from 'lucide-react';
 import {Badge,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,IconButton,
@@ -96,10 +97,11 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
   const viewing=records?.find(item=>item.id===viewingId);
   useEffect(()=>{if(!formOpen&&!viewing)return;
     const onKey=(event:KeyboardEvent)=>{if(event.key==='Escape'&&!busy){
-      if(formOpen)reset();else setViewingId(null);
+      if(formOpen)closeForm();else setViewingId(null);
     }};
     window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);
   },[formOpen,viewing,busy]);
+  function closeForm(){reset();if(initialAction)onCompleted?.();}
   function reset(){setEditing(null);setFormOpen(false);setKind(canChangeLocation?'UBICACION':'GRUPO');setMode('GRUPO');
     setSourceGroupId('');setDestinationPropertyId(propertyId);setDestinationGroupId('');
     setDestinationLocationId('');setSelected([]);}
@@ -144,10 +146,10 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
     {!records&&!error&&<LoadingState/>}
     {!records&&error&&<ErrorState message={error} onRetry={()=>setRevision(value=>value+1)}/>}
     {canManage&&formOpen&&options&&<div className="movement-overlay" role="presentation"
-      onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)reset();}}>
+      onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)closeForm();}}>
       <div className="movement-dialog" role="dialog" aria-modal="true" aria-label={editing?'Editar borrador':'Nuevo movimiento'}>
       <div className="movement-dialog-heading"><h2>{editing?'Editar borrador':'Nuevo movimiento'}</h2>
-        <button type="button" onClick={reset} disabled={busy} aria-label="Cerrar formulario">×</button></div>
+        <button type="button" onClick={closeForm} disabled={busy} aria-label="Cerrar formulario">×</button></div>
       {error&&<div role="alert" className="form-error movement-dialog-error">{error}</div>}
       <form className="movement-form" onSubmit={save}
       key={editing?.id??'new'}>
@@ -191,7 +193,7 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
         disabled={Boolean(onCompleted)} title="Forma de mover animales"
         onChange={value=>setMode(value as MovementRecord['selectionMode'])}
         options={[{value:'GRUPO',label:'Grupo completo'},{value:'MANUAL',label:'Animales seleccionados'}]}/></label>}
-      <label><span>Fecha *</span><input type="date" name="movementOn" required max={today()}
+      <label><span>Fecha *</span><DateInput type="date" name="movementOn" required max={today()}
         defaultValue={editing?.movementOn??today()}/></label>
       <label className="movement-wide"><span>Motivo *</span><input name="reason" list="movement-reasons" required
         minLength={2} maxLength={300} defaultValue={editing?.reason??(initialAction==='UBICACION'
@@ -215,12 +217,14 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
             <span>{animal.name}{animal.earTagCode?` · ${animal.earTagCode}`:''}</span></label>)}</div>
         </>}
       </div>}
-      <div className="movement-actions movement-wide"><button className="primary-button compact" disabled={busy
+      <div className="movement-actions reference-dialog-footer movement-wide">
+        <button type="button" className="secondary-button compact" onClick={closeForm} disabled={busy}>
+          {editing?'Cancelar edición':'Cancelar'}</button>
+        <button className="primary-button compact" disabled={busy
         || !sourceGroupId || kind!=='UBICACION'&&!groupAnimals.length || mode==='MANUAL'&&!selected.length
         || kind!=='UBICACION'&&!destinationGroupId || kind==='UBICACION'&&!destinationLocationId
         || kind==='PROPIEDAD'&&!cross}>
         {busy?'Guardando…':editing?'Guardar borrador':onCompleted?'Guardar y aplicar':'Crear borrador'}</button>
-        {editing&&<button type="button" className="secondary-button compact" onClick={reset}>Cancelar edición</button>}
       </div>
       </form></div></div>}
     {records&&(visible.length?<Card className="record-list movements-record-list">

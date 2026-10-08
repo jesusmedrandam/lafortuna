@@ -6,7 +6,10 @@ import {
   type AnimalClassificationPolicy,type CatalogItem,type CatalogReference,type EditableCatalogCode,
   type LivestockBrand,type LivestockOwner,
 } from './api';
-import {Select} from '../components/ui';
+import {Modal,Select} from '../components/ui';
+import {useNavigate,useSearchParams} from 'react-router-dom';
+import {MedicineCatalog} from './MedicineCatalog';
+import {medicineDoseUnits} from './MedicineForm';
 
 const catalogs:Array<{code:EditableCatalogCode;name:string;description:string}>=[
   {code:'BREEDS',name:'Razas',description:'Razas disponibles para los animales'},
@@ -14,6 +17,7 @@ const catalogs:Array<{code:EditableCatalogCode;name:string;description:string}>=
   {code:'GRASS_TYPES',name:'Pastos',description:'Tipos de pasto de las ubicaciones'},
   {code:'HEALTH_CONDITION_TYPES',name:'Problemas de salud',description:'Condiciones usadas en sanidad'},
   {code:'TREATMENT_TYPES',name:'Tipos de tratamiento',description:'Clasificación de medicamentos y tratamientos'},
+  {code:'ADMINISTRATION_ROUTES',name:'Vías de administración',description:'Vías compartidas para aplicar medicamentos'},
   {code:'AGROCHEMICAL_CATEGORIES',name:'Categorías de productos',description:'Productos usados en limpiezas y aplicaciones'},
   {code:'MEDIA_TAGS',name:'Etiquetas multimedia',description:'Etiquetas para ordenar fotos y videos'},
   {code:'MOVEMENT_REASONS',name:'Motivos de movimiento',description:'Motivos frecuentes de traslado'},
@@ -21,14 +25,20 @@ const catalogs:Array<{code:EditableCatalogCode;name:string;description:string}>=
   {code:'SALE_PRODUCTS',name:'Productos de venta',description:'Productos distintos de animales'},
 ];
 const classificationCodes=['VACA','VACONA','TERNERA','TORO','TORETE','TERNERO'] as const;
-type SpecialTab='CLASSIFICATION'|'OWNERS'|'BRANDS';
+type SpecialTab='CLASSIFICATION'|'OWNERS'|'BRANDS'|'MEDICINES'|'DOSE_UNITS';
 type CatalogTab=SpecialTab|EditableCatalogCode;
 
-export function CatalogPanel({accessToken,canManage,commerceEnabled=false}:{
-  accessToken:string;canManage:boolean;commerceEnabled?:boolean}){
+export function CatalogPanel({accessToken,canManage,canEditMedicines=false,commerceEnabled=false}:{
+  accessToken:string;canManage:boolean;canEditMedicines?:boolean;commerceEnabled?:boolean}){
   const availableCatalogs=useMemo(()=>catalogs.filter(({code})=>commerceEnabled||
     (code!=='BUYERS'&&code!=='SALE_PRODUCTS')),[commerceEnabled]);
-  const [tab,setTab]=useState<CatalogTab>('CLASSIFICATION');
+  const [params,setParams]=useSearchParams();const navigate=useNavigate();
+  const requested=params.get('catalogo');
+  const tab=requested&&['CLASSIFICATION','OWNERS','BRANDS','MEDICINES','DOSE_UNITS',...availableCatalogs.map(item=>item.code)].includes(requested)?requested as CatalogTab:null;
+  const setTab=(value:CatalogTab)=>{const next=new URLSearchParams(params);next.set('catalogo',value);next.delete('elemento');next.delete('medicamento');setParams(next);};
+  const openItem=(id:string)=>{const next=new URLSearchParams(params);next.set('elemento',id);setParams(next);};
+  const [search,setSearch]=useState('');
+  useEffect(()=>setSearch(''),[tab]);
   const [reference,setReference]=useState<CatalogReference|null>(null);
   const [items,setItems]=useState<Partial<Record<EditableCatalogCode,CatalogItem[]>>>({});
   const [classification,setClassification]=useState<AnimalClassificationPolicy|null>(null);
@@ -121,7 +131,14 @@ export function CatalogPanel({accessToken,canManage,commerceEnabled=false}:{
     catch(failure){setError(message(failure));}finally{setBusy(false);}
   }
 
+  const list=<T extends {name:string;active?:boolean},>(rows:T[])=>rows.filter(row=>row.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
+    .sort((a,b)=>Number(b.active??true)-Number(a.active??true)||a.name.localeCompare(b.name,'es'));
   const selectedCatalog=availableCatalogs.find(entry=>entry.code===tab);
+  const element=params.get('elemento');
+  const selectedOwner=tab==='OWNERS'?owners.find(item=>item.id===element):undefined;
+  const selectedBrand=tab==='BRANDS'?brands.find(item=>item.id===element):undefined;
+  const selectedItem=selectedCatalog?items[selectedCatalog.code]?.find(item=>item.id===element):undefined;
+  const selectedUnit=tab==='DOSE_UNITS'?medicineDoseUnits.find(item=>item.code===element):undefined;
   const availableUsers=accountUsers.filter(user=>!owners.some(owner=>owner.kind==='USER'&&
     owner.name.trim().toLocaleLowerCase()===user.name.trim().toLocaleLowerCase()));
 
@@ -135,7 +152,9 @@ export function CatalogPanel({accessToken,canManage,commerceEnabled=false}:{
       <div className="catalog-reference-bar"><span><strong>{reference.species.length}</strong> especies</span>
         <span><strong>{reference.units.filter(unit=>unit.contextCode==='ANIMAL_WEIGHT').length}</strong> unidades de peso</span>
         <small>Las opciones se comparten entre las propiedades de esta cuenta.</small></div>
-      <nav className="catalog-tabs" aria-label="Tipos de catálogo">
+      {!tab&&<nav className="catalog-hub" aria-label="Tipos de catálogo">
+        <button type="button" className={tab==='MEDICINES'?'active':''} onClick={()=>setTab('MEDICINES')}>Medicamentos</button>
+        <button type="button" className={tab==='DOSE_UNITS'?'active':''} onClick={()=>setTab('DOSE_UNITS')}>Unidades de dosis</button>
         <button type="button" className={tab==='CLASSIFICATION'?'active':''} onClick={()=>setTab('CLASSIFICATION')}>
           Clasificación</button>
         <button type="button" className={tab==='OWNERS'?'active':''} onClick={()=>setTab('OWNERS')}>
@@ -144,35 +163,49 @@ export function CatalogPanel({accessToken,canManage,commerceEnabled=false}:{
           Marquillas <small>{brands.length}</small></button>
         {availableCatalogs.map(({code,name})=><button type="button" key={code}
           className={tab===code?'active':''} onClick={()=>setTab(code)}>{name} <small>{items[code]?.length??0}</small></button>)}
-      </nav>
+      </nav>}
 
-      <div className="catalog-workspace-card">
+      {tab&&<div className="catalog-workspace-card">
+        {tab!=='MEDICINES'&&tab!=='CLASSIFICATION'&&<label className="catalog-search"><span className="sr-only">Buscar opciones</span>
+          <input type="search" placeholder="Buscar por nombre…" value={search} onChange={event=>setSearch(event.target.value)}/></label>}
+        {tab==='MEDICINES'&&<MedicineCatalog accessToken={accessToken} canManage={canManage} canEdit={canEditMedicines}
+          units={reference.units.filter(unit=>unit.contextCode==='MEDICINE_DOSE')}
+          routes={items.ADMINISTRATION_ROUTES??[]} treatmentTypes={items.TREATMENT_TYPES??[]}
+          classifications={classification?Object.entries(classification.names).map(([code,name])=>({code,name})):undefined}/>}
+        {tab==='DOSE_UNITS'&&<><header><div><h3>Unidades de dosis</h3><p>Selecciona una de estas unidades al registrar el medicamento.</p></div></header>
+          <div className="catalog-item-list">{list(medicineDoseUnits).map(unit=><button type="button" className="catalog-detail-row" key={unit.code} onClick={()=>openItem(unit.code)}>
+            <span><strong>{unit.name}</strong><small>{unit.symbol}</small></span><span aria-hidden="true">›</span></button>)}</div></>}
         {tab==='CLASSIFICATION'&&classification&&<><header><div><h3>Clasificación de animales</h3>
           <p>Define las edades y nombres usados automáticamente en el inventario.</p></div></header>
           <p className="catalog-help">Las vacas tienen crías registradas; los toros tienen crías o figuran como padres en una preñez confirmada. Los demás se clasifican por sexo y edad.</p>
+          <dl className="catalog-detail-grid"><div><dt>Hembras adultas desde</dt><dd>{classification.femaleAdultMonths} meses</dd></div>
+            <div><dt>Machos adultos desde</dt><dd>{classification.maleAdultMonths} meses</dd></div>
+            {classificationCodes.map(code=><div key={code}><dt>{classification.names[code]}</dt><dd>{code==='VACA'?'Hembra con crías registradas':code==='TORO'?'Macho con descendencia':
+              `${['VACONA','TERNERA'].includes(code)?'Hembra':'Macho'} ${['TERNERA','TERNERO'].includes(code)?'joven':'adulto'}`}</dd></div>)}</dl>
+          {canManage&&<details className="catalog-add"><summary>Editar clasificación</summary>
           <form className="classification-form" key={JSON.stringify(classification)} onSubmit={saveClassification}>
             <label><span>Hembras adultas desde (meses)</span><input name="femaleAdultMonths" type="number"
               min="1" max="120" required defaultValue={classification.femaleAdultMonths} disabled={!canManage||busy}/></label>
             <label><span>Machos adultos desde (meses)</span><input name="maleAdultMonths" type="number"
               min="1" max="120" required defaultValue={classification.maleAdultMonths} disabled={!canManage||busy}/></label>
-            {classificationCodes.map(code=><label key={code}><span>{code}</span><input name={code}
+            {classificationCodes.map(code=><label key={code}><span>{classification.names[code]}</span><input name={code}
               minLength={2} maxLength={80} required defaultValue={classification.names[code]}
               disabled={!canManage||busy}/></label>)}
             {canManage&&<button className="primary-button compact" disabled={busy}>Guardar cambios</button>}
-          </form></>}
+          </form></details>}</>}
 
         {tab==='OWNERS'&&<><header><div><h3>Propietarios</h3>
           <p>Personas, organizaciones y usuarios que pueden tener participación en los animales.</p></div></header>
-          {canManage&&<form className="catalog-create catalog-owner-create" onSubmit={addNamedOwner}>
+          {canManage&&<details className="catalog-add"><summary>Agregar propietario</summary><form className="catalog-create catalog-owner-create" onSubmit={addNamedOwner}>
             <label><span>Tipo</span><Select name="kind"><option value="EXTERNAL_PERSON">Persona externa</option>
               <option value="ORGANIZATION">Organización</option></Select></label>
             <label><span>Nombre</span><input name="name" minLength={2} maxLength={160} required
               placeholder="Nombre del propietario"/></label>
             <button className="primary-button compact" disabled={busy}>Agregar</button>
-          </form>}
-          <div className="catalog-list">{owners.map(owner=><div className="catalog-list-row" key={owner.id}>
-            <span><strong>{owner.name}</strong><small>{ownerKind(owner.kind)} · {owner.active?'Activo':'Inactivo'}</small></span>
-          </div>)}{!owners.length&&<p className="muted">Aún no hay propietarios registrados.</p>}</div>
+          </form></details>}
+          <div className="catalog-list">{list(owners).map(owner=><button type="button" className="catalog-detail-row" key={owner.id} onClick={()=>openItem(owner.id)}>
+            <span><strong>{owner.name}</strong><small>{ownerKind(owner.kind)} · {owner.active?'Activo':'Inactivo'}</small></span><span aria-hidden="true">›</span>
+          </button>)}{!owners.length&&<p className="muted">Aún no hay propietarios registrados.</p>}</div>
           {canManage&&availableUsers.length>0&&<section className="catalog-user-owners"><h4>Usuarios de la cuenta</h4>
             <p>Agrega aquí los usuarios que también podrán seleccionarse como propietarios.</p><div>
               {availableUsers.map(user=><button type="button" key={user.id} disabled={busy}
@@ -182,38 +215,55 @@ export function CatalogPanel({accessToken,canManage,commerceEnabled=false}:{
 
         {tab==='BRANDS'&&<><header><div><h3>Marquillas</h3>
           <p>Relaciona cada marquilla con uno o varios propietarios.</p></div></header>
-          {canManage&&<form className="catalog-brand-create" onSubmit={addBrand}><label><span>Nombre de la marquilla</span>
+          {canManage&&<details className="catalog-add"><summary>Agregar marquilla</summary><form className="catalog-brand-create" onSubmit={addBrand}><label><span>Nombre de la marquilla</span>
             <input name="name" minLength={2} maxLength={120} required placeholder="Ej. Hacienda La Fortuna"/></label>
             <fieldset><legend>Propietarios</legend>{owners.filter(owner=>owner.active).map(owner=><label key={owner.id}>
               <input type="checkbox" name="ownerIds" value={owner.id}/><span>{owner.name}</span></label>)}</fieldset>
             <button className="primary-button compact" disabled={busy||!owners.some(owner=>owner.active)}>Agregar marquilla</button>
-          </form>}
-          <div className="catalog-brand-list">{brands.map(brand=><form key={brand.id}
-            className="catalog-brand-row" onSubmit={event=>void saveBrandOwners(event,brand.id)}>
-            <header><span><strong>{brand.name}</strong><small>{brand.active?'Activa':'Inactiva · conserva su historial'}</small></span>
-              {canManage&&<label className="property-module-toggle"><input type="checkbox" checked={brand.active}
-                disabled={busy} onChange={()=>void changeBrand(brand)} aria-label={`${brand.name}: marquilla activa`}/></label>}</header>
-            <fieldset disabled={!canManage||busy}><legend>Propietarios vinculados</legend>{owners.map(owner=><label key={owner.id}>
-              <input type="checkbox" name="ownerIds" value={owner.id} defaultChecked={brand.owner_ids?.includes(owner.id)}/>
-              <span>{owner.name}</span></label>)}</fieldset>
-            {canManage&&<button className="secondary-button compact" disabled={busy}>Guardar propietarios</button>}
-          </form>)}{!brands.length&&<p className="muted">Aún no hay marquillas registradas.</p>}</div>
+          </form></details>}
+          <div className="catalog-list">{list(brands).map(brand=><button type="button" className="catalog-detail-row" key={brand.id} onClick={()=>openItem(brand.id)}>
+            <span><strong>{brand.name}</strong><small>{brand.active?'Activa':'Inactiva'} · {brand.owner_ids?.length??0} propietarios</small></span><span aria-hidden="true">›</span>
+          </button>)}{!brands.length&&<p className="muted">Aún no hay marquillas registradas.</p>}</div>
         </>}
 
         {selectedCatalog&&<><header><div><h3>{selectedCatalog.name}</h3><p>{selectedCatalog.description}</p></div>
           <span className="catalog-count">{items[selectedCatalog.code]?.length??0} opciones</span></header>
-          {canManage&&<form className="catalog-create" onSubmit={event=>void createItem(event,selectedCatalog.code)}>
+          {canManage&&<details className="catalog-add"><summary>Agregar opción</summary><form className="catalog-create" onSubmit={event=>void createItem(event,selectedCatalog.code)}>
             <label><span>Nueva opción</span><input name="name" minLength={2} maxLength={160}
               placeholder={`Agregar a ${selectedCatalog.name.toLocaleLowerCase()}`} disabled={busy} required/></label>
-            <button type="submit" className="primary-button compact" disabled={busy}>Agregar</button></form>}
-          <div className="catalog-list">{(items[selectedCatalog.code]??[]).map(entry=><div className="catalog-list-row" key={entry.id}>
-            <span><strong>{entry.name}</strong><small>{entry.systemDefined?'Opción del sistema':entry.active?'Activa':'Inactiva · conserva su historial'}</small></span>
-            {canManage&&!entry.systemDefined&&<label className="property-module-toggle"><input type="checkbox"
-              checked={entry.active} disabled={busy} onChange={event=>void changeItem(selectedCatalog.code,entry.id,event.target.checked)}
-              aria-label={`${entry.name}: opción activa`}/></label>}</div>)}
+            <button type="submit" className="primary-button compact" disabled={busy}>Agregar</button></form></details>}
+          <div className="catalog-list">{list(items[selectedCatalog.code]??[]).map(entry=><button type="button" className="catalog-detail-row" key={entry.id} onClick={()=>openItem(entry.id)}>
+            <span><strong>{entry.name}</strong><small>{entry.active?'Activa':'Inactiva'}</small></span><span aria-hidden="true">›</span></button>)}
             {!items[selectedCatalog.code]?.length&&<p className="muted">Aún no hay opciones registradas.</p>}</div>
         </>}
-      </div>
+        {(selectedOwner||selectedBrand||selectedItem||selectedUnit)&&<Modal title={(selectedOwner||selectedBrand||selectedItem||selectedUnit)!.name} onClose={()=>{if(!busy)navigate(-1);}}>
+          {error&&<p className="form-error" role="alert">{error}</p>}
+          {selectedOwner&&<dl className="catalog-detail-grid"><div><dt>Tipo de propietario</dt><dd>{ownerKind(selectedOwner.kind)}</dd></div>
+            <div><dt>Estado</dt><dd>{selectedOwner.active?'Activo':'Inactivo'}</dd></div>
+            <div><dt>Marquillas vinculadas</dt><dd>{brands.filter(item=>item.owner_ids?.includes(selectedOwner.id)).map(item=>item.name).join(', ')||'Sin marquillas'}</dd></div></dl>}
+          {selectedBrand&&<form key={selectedBrand.id}
+            className="catalog-brand-row" onSubmit={event=>void saveBrandOwners(event,selectedBrand.id)}>
+            <header><span><strong>{selectedBrand.name}</strong><small>{selectedBrand.active?'Activa':'Inactiva · conserva su historial'}</small></span>
+              {canManage&&<label className="property-module-toggle"><input type="checkbox" checked={selectedBrand.active}
+                disabled={busy} onChange={()=>void changeBrand(selectedBrand)} aria-label={`${selectedBrand.name}: marquilla activa`}/></label>}</header>
+            <section><h4>Propietarios vinculados</h4><ul>{owners.filter(owner=>selectedBrand.owner_ids?.includes(owner.id))
+              .sort((a,b)=>a.name.localeCompare(b.name,'es')).map(owner=><li key={owner.id}>{owner.name}</li>)}</ul></section>
+            {canManage&&<details className="catalog-add"><summary>Editar propietarios</summary>
+            <fieldset disabled={busy}><legend>Propietarios de la marquilla</legend>{owners.map(owner=><label key={owner.id}>
+              <input type="checkbox" name="ownerIds" value={owner.id} defaultChecked={selectedBrand.owner_ids?.includes(owner.id)}/>
+              <span>{owner.name}</span></label>)}</fieldset>
+            <button className="secondary-button compact" disabled={busy}>Guardar propietarios</button></details>}
+          </form>}
+          {selectedItem&&selectedCatalog&&<><dl className="catalog-detail-grid"><div><dt>Catálogo</dt><dd>{selectedCatalog.name}</dd></div>
+            <div><dt>Estado</dt><dd>{selectedItem.active?'Activa':'Inactiva · conserva su historial'}</dd></div>
+            <div><dt>Origen</dt><dd>{selectedItem.systemDefined?'Opción del sistema':'Opción de esta cuenta'}</dd></div>
+            {selectedItem.speciesCode&&<div><dt>Especie</dt><dd>{reference.species.find(item=>item.code===selectedItem.speciesCode)?.name??selectedItem.speciesCode}</dd></div>}</dl>
+            {canManage&&!selectedItem.systemDefined&&<label className="checkbox"><input type="checkbox" checked={selectedItem.active} disabled={busy}
+              onChange={event=>void changeItem(selectedCatalog.code,selectedItem.id,event.target.checked)}/>Opción activa</label>}</>}
+          {selectedUnit&&<dl className="catalog-detail-grid"><div><dt>Símbolo</dt><dd>{selectedUnit.symbol}</dd></div>
+            <div><dt>Uso</dt><dd>Dosis de medicamentos</dd></div></dl>}
+        </Modal>}
+      </div>}
     </>}
   </section>;
 }

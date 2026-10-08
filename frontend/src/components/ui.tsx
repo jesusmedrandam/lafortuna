@@ -1,6 +1,7 @@
-import { ArrowUpDown, CalendarDays, Eye, EyeOff, LoaderCircle, Search, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useId, useMemo, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import { ArrowUpDown, CalendarDays, Eye, EyeOff, LoaderCircle, Search, X } from 'lucide-react';
+import { useEffect, useId, useMemo, useRef, useState, type ButtonHTMLAttributes, type ComponentType, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
+import {formatDate,formatDateTime} from '../utils';
 
 export function Button({ children, className = '', variant = 'primary', loading, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; loading?: boolean }) {
   return <button className={`button button-${variant} ${className}`} disabled={props.disabled || loading} {...props}>{loading ? <LoaderCircle className="spin" size={17} /> : null}{children}</button>;
@@ -19,11 +20,23 @@ export function Field({ label, hint, error, required, children }: { label: strin
 }
 
 export function Input({ className = '', type, ...props }: InputHTMLAttributes<HTMLInputElement>) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  if (type === 'date' || type === 'datetime-local') {
-    return <span className="date-input-wrap"><input ref={inputRef} className={`input ${className}`} type={type} {...props} /><button type="button" aria-label="Abrir calendario" title="Abrir calendario" onClick={(event) => { event.preventDefault(); inputRef.current?.showPicker?.(); }}><CalendarDays size={18} /></button></span>;
-  }
+  if(type==='date'||type==='datetime-local')return <DateInput type={type} className={className} {...props}/>;
   return <input className={`input ${className}`} type={type} {...props} />;
+}
+
+export function DateInput({className='',type='date',onChange,value,defaultValue,...props}:InputHTMLAttributes<HTMLInputElement>){
+  const inputRef=useRef<HTMLInputElement|null>(null);
+  const [internalValue,setInternalValue]=useState(String(defaultValue??''));
+  const selected=String(value??internalValue);
+  useEffect(()=>{const input=inputRef.current;const form=input?.form;
+    const reset=()=>setInternalValue(input?.defaultValue??'');
+    form?.addEventListener('reset',reset);return()=>form?.removeEventListener('reset',reset);
+  },[]);
+  return <span className="date-input-wrap readable-date"><input ref={inputRef} className={`input ${className}`} type={type}
+    value={value} defaultValue={defaultValue} {...props} onChange={event=>{setInternalValue(event.target.value);onChange?.(event);}}/>
+    <span className="readable-date-value" aria-hidden="true">{selected?(type==='datetime-local'?formatDateTime(selected):formatDate(selected)):'Selecciona fecha'}</span>
+    <button type="button" disabled={props.disabled||props.readOnly} aria-label="Abrir calendario" title="Abrir calendario"
+      onClick={event=>{event.preventDefault();inputRef.current?.showPicker?.();}}><CalendarDays size={18}/></button></span>;
 }
 
 export function PasswordInput({ className = '', ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
@@ -152,7 +165,7 @@ export function LoadingState({ text = 'Cargando información…' }: { text?: str
   return <div className="state-panel"><LoaderCircle className="spin" size={30} /><p>{text}</p></div>;
 }
 
-export function EmptyState({ icon: Icon, title, description, action }: { icon: LucideIcon; title: string; description: string; action?: ReactNode }) {
+export function EmptyState({ icon: Icon, title, description, action }: { icon: ComponentType<{size?:number}>; title: string; description: string; action?: ReactNode }) {
   return <div className="state-panel empty-state"><div className="empty-icon"><Icon size={31} /></div><h3>{title}</h3><p>{description}</p>{action}</div>;
 }
 

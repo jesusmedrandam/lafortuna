@@ -32,6 +32,7 @@ export function V2AnimalStatusPage({profileAnimalId,profileAction,onCompleted}:{
   const [error,setError]=useState('');const [saving,setSaving]=useState(false);
   const [revision,setRevision]=useState(0);const canManage=hasPermission('ANIMAL_UPDATE');
   const openedFromProfile=useRef<string|null>(null);
+  const closeForm=()=>{setOpen(false);if(profileAction)onCompleted?.();};
   useEffect(()=>{const requested=profileAction??params.get('accion');
     const preselected=options.find(row=>row.id===animalId);
     if(!canManage||!preselected||!requested||
@@ -89,8 +90,8 @@ export function V2AnimalStatusPage({profileAnimalId,profileAction,onCompleted}:{
         <div><small>Registrado por</small><strong>{detail.registeredBy}</strong></div></div>
       <Button variant="secondary" onClick={()=>navigate(`/animales/${detail.animalId}`)}>Ver perfil del animal</Button>
     </Modal>}
-    {open&&<Modal title="Nueva novedad" onClose={()=>setOpen(false)} footer={<>
-      <Button variant="ghost" onClick={()=>setOpen(false)}>Cancelar</Button>
+    {open&&<Modal title="Nueva novedad" onClose={closeForm} footer={<>
+      <Button variant="ghost" onClick={closeForm}>Cancelar</Button>
       <Button type="submit" form="v2-status-form" loading={saving}>Guardar novedad</Button></>}>
       <form id="v2-status-form" className="form-stack" onSubmit={event=>void save(event)}>
         {error&&<div className="form-error admin-error" role="alert">{error}</div>}

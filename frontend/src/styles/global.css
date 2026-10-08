@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
-
 :root {
   font-family: Manrope, Inter, system-ui, sans-serif;
   color: #17231d;
@@ -92,6 +90,9 @@ h1, h2, h3, p { margin-top: 0; }
 .date-input-wrap > button { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); width: 35px; height: 35px; display: grid; place-items: center; border: 0; border-radius: 9px; color: var(--primary); background: var(--primary-soft); }
 .date-input-wrap > button:hover { background: #ccebd8; }
 .date-input-wrap input::-webkit-calendar-picker-indicator { opacity: 0; position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; }
+.readable-date input { color: transparent !important; caret-color: transparent; }
+.readable-date-value { position: absolute; inset: 0 46px 0 13px; display: flex; align-items: center; pointer-events: none; color: var(--text); font-size: inherit; white-space: nowrap; overflow: hidden; }
+.readable-date:has(input:disabled) .readable-date-value { opacity: .6; }
 .textarea { min-height: 90px; resize: vertical; }
 .checkbox { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); cursor: pointer; }
 .checkbox input, .choice-card input { accent-color: var(--primary); }

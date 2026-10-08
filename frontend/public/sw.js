@@ -1,4 +1,4 @@
-const SHELL_CACHE='sgb-v2-shell-2026-09-29';
+const SHELL_CACHE='sgb-v2-shell-2026-10-07-alpha13';
 const SHELL=['/','/index.html','/manifest.webmanifest','/favicon.png','/branding/logo-sgb-icon.png'];
 
 self.addEventListener('install',event=>{
@@ -14,12 +14,18 @@ self.addEventListener('fetch',event=>{
   const request=event.request;const url=new URL(request.url);
   if(request.method!=='GET'||url.origin!==self.location.origin)return;
   if(request.mode==='navigate'){
-    event.respondWith(caches.match('/index.html').then(cached=>{
-      const update=fetch(request).then(response=>{if(response.ok){const copy=response.clone();
-        void caches.open(SHELL_CACHE).then(cache=>cache.put('/index.html',copy));}return response;});
-      return cached??update.catch(()=>new Response('SGB no está disponible todavía sin conexión.',
-        {status:503,headers:{'content-type':'text/plain; charset=utf-8'}}));
-    }));return;
+    event.respondWith((async()=>{
+      try{
+        const response=await fetch(request);
+        if(!response.ok)throw new Error('No se pudo actualizar la página.');
+        const copy=response.clone();
+        event.waitUntil(caches.open(SHELL_CACHE).then(cache=>cache.put('/index.html',copy)).catch(()=>undefined));
+        return response;
+      }catch{
+        return await caches.match('/index.html')??new Response('SGB no está disponible todavía sin conexión.',
+          {status:503,headers:{'content-type':'text/plain; charset=utf-8'}});
+      }
+    })());return;
   }
   event.respondWith(caches.match(request).then(cached=>cached??fetch(request).then(response=>{
     if(response.ok&&(url.pathname.startsWith('/assets/')||url.pathname.startsWith('/branding/')||

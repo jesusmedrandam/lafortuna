@@ -17,7 +17,7 @@ function formatCalendarDate(value: string) {
   if (probe.getUTCFullYear() !== Number(year)
       || probe.getUTCMonth() + 1 !== Number(month)
       || probe.getUTCDate() !== Number(day)) return null;
-  return `${day}/${month}/${year}`;
+  return new Intl.DateTimeFormat('es-EC',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}).format(probe);
 }
 
 export function formatDate(value?: string | null) {
@@ -29,7 +29,7 @@ export function formatDate(value?: string | null) {
   if (calendarDate) return calendarDate;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('es-EC', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: APP_TIME_ZONE }).format(date);
+  return new Intl.DateTimeFormat('es-EC', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE }).format(date);
 }
 
 export function dateInputValue(value?: string | null) {
