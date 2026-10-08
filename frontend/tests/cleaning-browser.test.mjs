@@ -29,16 +29,17 @@ const page='<meta name="viewport" content="width=device-width, initial-scale=1">
 const server=createServer((_request,response)=>{response.setHeader('Content-Type','text/html; charset=utf-8');response.end(page);});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const temporary=await mkdtemp(join(tmpdir(),'sgb-animal-profile-'));
-let browser;let socket;
+let browser;let socket;let browserError='';
 try{
   const chrome=process.env.CHROME_PATH??'C:/Program Files/Google/Chrome/Application/chrome.exe';
   browser=spawn(chrome,['--headless','--disable-gpu','--no-first-run',
     '--no-default-browser-check','--disable-background-networking','--disable-component-update',
-    '--user-data-dir='+join(temporary,'profile'),'--remote-debugging-port=0','about:blank'],{windowsHide:true,stdio:'ignore'});
+    '--user-data-dir='+join(temporary,'profile'),'--remote-debugging-port=0','about:blank'],{windowsHide:true,stdio:['ignore','ignore','pipe']});
+  browser.stderr.on('data',data=>{browserError=(browserError+data.toString()).slice(-4000);});
   const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   let port;
-  for(let attempt=0;attempt<100;attempt++){try{port=(await readFile(join(temporary,'profile','DevToolsActivePort'),'utf8')).split('\n')[0];break;}catch{await pause(50);}}
-  assert.ok(port,'Chrome did not start');
+  for(let attempt=0;attempt<600;attempt++){try{port=(await readFile(join(temporary,'profile','DevToolsActivePort'),'utf8')).split('\n')[0];break;}catch{await pause(50);}}
+  assert.ok(port,'Chrome did not start: '+browserError);
   const targets=await(await fetch('http://127.0.0.1:'+port+'/json/list')).json();
   socket=new WebSocket(targets.find(target=>target.type==='page').webSocketDebuggerUrl);
   await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',reject,{once:true});});
