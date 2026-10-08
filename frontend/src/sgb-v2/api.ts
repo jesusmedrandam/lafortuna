@@ -1,5 +1,5 @@
-import {offlineRequest,OfflineUnavailableError,setOfflineApiBase,
-  type OfflineTransportResponse} from './offline/runtime';
+import {offlineRequest,OfflineUnavailableError,setOfflineApiBase,offlineUserId,updateOfflineAccessToken,
+  type OfflineTransportResponse,type OfflineTransportRequest} from './offline/runtime';
 
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
 
@@ -12,7 +12,30 @@ export interface SessionUser {
   email: string;
   displayName: string;
   isSuperadmin: boolean;
+  profilePhoto?:string|null;
 }
+
+export interface UserProfileInput {displayName:string;profilePhoto?:string|null}
+export function updateUserProfile(token:string,input:UserProfileInput){
+  return request<SessionUser>('/auth/profile',{method:'PATCH',headers:bearer(token),body:JSON.stringify(input)});
+}
+export function changeUserPassword(token:string,currentPassword:string,newPassword:string){
+  return request<{changed:boolean}>('/auth/password',{method:'POST',headers:bearer(token),
+    body:JSON.stringify({currentPassword,newPassword})});
+}
+
+export function requestUserEmailChange(token:string,email:string,currentPassword:string){
+  return request<{accepted:boolean;expiresAt:string}>('/auth/email',{method:'POST',headers:bearer(token),body:JSON.stringify({email,currentPassword})});
+}
+export function confirmUserEmailChange(token:string){
+  return request<{changed:boolean}>('/auth/email/confirm',{method:'POST',body:JSON.stringify({token})});
+}
+export interface UserSession {id:string;deviceName:string;current:boolean;createdAt:string;lastSeenAt:string;expiresAt:string}
+export function getUserSessions(token:string){return request<UserSession[]>('/auth/sessions',{headers:bearer(token)});}
+export function closeUserSession(token:string,id:string){return request<{closed:number;currentSessionClosed:boolean}>(
+  `/auth/sessions/${encodeURIComponent(id)}`,{method:'DELETE',headers:bearer(token)});}
+export function closeOtherUserSessions(token:string){return request<{closed:number;currentSessionClosed:boolean}>(
+  '/auth/sessions/revoke-others',{method:'POST',headers:bearer(token)});}
 
 export interface ActiveContext {
   propertyId: string;
@@ -37,6 +60,10 @@ export interface PropertyAccess {
 }
 
 export interface SessionOverview {
+  supportMode?:boolean;
+  supportAccountId?:string|null;
+  memberProperties?:PropertyAccess[];
+  supportOwner?: {id:string;name:string;email:string}|null;
   user: SessionUser;
   activeContext: ActiveContext | null;
   properties: PropertyAccess[];
@@ -56,13 +83,14 @@ export interface PropertySettings {
 
 export type EditableCatalogCode = 'BREEDS' | 'COLORS' | 'GRASS_TYPES' |
   'HEALTH_CONDITION_TYPES' | 'AGROCHEMICAL_CATEGORIES' | 'MEDIA_TAGS' |
-  'MOVEMENT_REASONS' | 'TREATMENT_TYPES' | 'BUYERS' | 'SALE_PRODUCTS';
+  'MOVEMENT_REASONS' | 'TREATMENT_TYPES' | 'ADMINISTRATION_ROUTES' | 'BUYERS' | 'SALE_PRODUCTS';
 export interface CatalogItem {
   id: string;
   catalogCode: EditableCatalogCode;
   name: string;
   speciesCode: string | null;
   systemDefined: boolean;
+  itemCode?:string|null;
   active: boolean;
 }
 export interface CatalogReference {
@@ -121,8 +149,15 @@ export interface PhysicalLocation {
   version: number; area: number | null; areaUnitCode: string | null;
   pastureUse: string | null; capacityEstimate: number | null; waterAvailable: boolean | null;
   lastRestDate: string | null; floorMaterial: string | null; covered: boolean | null;
+  currentAnimalCount?: number;
+  occupationHistory?: LocationOccupation[];
   grasses: Array<{ name: string; catalogItemId?:string|null;percent: number | null; area: number | null;
     areaUnitCode: string | null; sowingDate: string | null; notes: string | null }>;
+}
+
+export interface LocationOccupation {
+  startedOn: string; endedOn: string | null; animalCount: number;
+  restStartedOn: string | null;
 }
 
 export interface RegistrationResult {
@@ -192,6 +227,7 @@ export interface AdministrativeAccountSummary {
 }
 
 export interface PlatformOverview {
+  page?:number;hasMore?:boolean;
   totals: { users: number; accounts: number; properties: number; managedAnimals: number };
   accounts: AdministrativeAccountSummary[];
 }
@@ -276,17 +312,45 @@ export class ApiRequestError extends Error {
   }
 }
 
-async function networkRequest<T>(path: string, init: RequestInit = {}): Promise<OfflineTransportResponse<T>> {
+function nativeAuthentication(path:string,body:string):Promise<Response>{
+  return new Promise((resolve,reject)=>{
+    const id=crypto.randomUUID();
+    const cleanup=()=>{window.clearTimeout(timer);window.removeEventListener('sgb-native-auth-response',receive);};
+    const receive=(event:Event)=>{const result=(event as CustomEvent<{id:string;status:number;body:string}>).detail;
+      if(result?.id!==id)return;cleanup();if(!result.status){reject(new Error('Network unavailable'));return;}
+      resolve(new Response(result.status===204?null:result.body,{status:result.status,headers:{'content-type':'application/json'}}));};
+    const timer=window.setTimeout(()=>{cleanup();reject(new Error('Authentication timeout'));},45_000);
+    window.addEventListener('sgb-native-auth-response',receive);
+    try{window.SGBAndroid!.requestAuthentication!(id,path,body);}catch(reason){cleanup();reject(reason);}
+  });
+}
+
+function uploadResponse(path:string,init:OfflineTransportRequest):Promise<Response>{
+  return new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();xhr.open(init.method??'POST',`${API_URL}${path}`);xhr.withCredentials=true;xhr.timeout=60_000;
+    new Headers(init.headers).forEach((value,key)=>xhr.setRequestHeader(key,value));
+    xhr.upload.onprogress=event=>{if(event.lengthComputable)init.onUploadProgress?.(event.loaded,event.total);};
+    xhr.onload=()=>resolve(new Response(xhr.status===204?null:xhr.responseText,{status:xhr.status,headers:{'etag':xhr.getResponseHeader('etag')??''}}));
+    xhr.onerror=xhr.ontimeout=()=>reject(new Error('Upload interrupted'));
+    xhr.send(init.body as XMLHttpRequestBodyInit|null);
+  });
+}
+
+async function networkRequest<T>(path: string, init: OfflineTransportRequest = {}, canRenew=true): Promise<OfflineTransportResponse<T>> {
   let response: Response;
   try {
     // Header names are case-insensitive. Sending both content-type and Content-Type
     // joins their values with a comma; express.json then ignores the JSON body.
     const headers = new Headers(init.headers);
     if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
-    response = await fetch(`${API_URL}${path}`, {
+    response = window.SGBAndroid?.requestAuthentication&&API_URL==='https://appsgb.onrender.com'
+      &&['/auth/login','/auth/refresh','/auth/logout'].includes(path)
+      ? await nativeAuthentication(path,typeof init.body==='string'?init.body:'')
+      : init.onUploadProgress&&typeof XMLHttpRequest!=='undefined'?await uploadResponse(path,{...init,headers}):await fetch(`${API_URL}${path}`, {
       ...init,
       credentials: 'include',
       headers,
+      signal:init.signal??AbortSignal.timeout(30_000),
     });
   } catch {
     throw new ApiRequestError(
@@ -294,6 +358,16 @@ async function networkRequest<T>(path: string, init: RequestInit = {}): Promise<
       0,
       'NETWORK_ERROR',
     );
+  }
+
+  if(response.status===401&&canRenew&&new Headers(init.headers).has('authorization')){
+    const userId=offlineUserId();const failedToken=new Headers(init.headers).get('authorization');
+    const renewed=lastRenewed?.user.id===userId&&failedToken!==`Bearer ${lastRenewed.accessToken}`?lastRenewed:await refreshSession();
+    if(!userId||renewed.user.id!==userId||!updateOfflineAccessToken(userId,renewed.accessToken))
+      throw new ApiRequestError('La sesión cambió. Vuelve a abrir el contenido.',401,'SESSION_CHANGED');
+    window.dispatchEvent(new CustomEvent('sgb-v2-session-renewed',{detail:renewed}));
+    const headers=new Headers(init.headers);headers.set('authorization',`Bearer ${renewed.accessToken}`);
+    return networkRequest<T>(path,{...init,headers},false);
   }
 
   const etag=response.headers.get('etag');
@@ -325,11 +399,13 @@ async function request<T>(path:string,init:RequestInit={}):Promise<T>{
   }
 }
 
-export function login(email: string, password: string, deviceId: string) {
-  return request<SessionPayload>('/auth/login', {
+export async function login(email: string, password: string, deviceId: string) {
+  lastRenewed=null;
+  const payload=await request<SessionPayload>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password, deviceId, deviceName: 'Navegador web' }),
   });
+  lastRenewed=payload;return payload;
 }
 
 export function register(input: {
@@ -382,8 +458,11 @@ export function resetPassword(token:string,password:string){
   });
 }
 
-export function refreshSession() {
-  return request<SessionPayload>('/auth/refresh', { method: 'POST' });
+let refreshInFlight:Promise<SessionPayload>|null=null;
+let lastRenewed:SessionPayload|null=null;
+export function refreshSession():Promise<SessionPayload> {
+  if(!refreshInFlight)refreshInFlight=request<SessionPayload>('/auth/refresh',{method:'POST'}).then(payload=>{lastRenewed=payload;return payload;}).finally(()=>{refreshInFlight=null;});
+  return refreshInFlight;
 }
 
 export function getSessionOverview(accessToken: string) {
@@ -401,6 +480,7 @@ export function changeContext(accessToken: string, propertyId: string, roleId: s
 }
 
 export async function logout(accessToken: string | null) {
+  lastRenewed=null;
   await request<never>('/auth/logout', {
     method: 'POST',
     headers: accessToken ? { authorization: `Bearer ${accessToken}` } : {},
@@ -540,6 +620,7 @@ export interface AuditRecord {
   id:string;occurredAt:string;action:string;entityType:string;entityId:string|null;
   reason:string|null;beforeData:unknown;afterData:unknown;ipAddress:string|null;
   userAgent:string|null;actorName:string|null;
+  actorDisplayName?:string|null;actorUserId?:string|null;superadminAccess?:boolean;
 }
 export interface AuditPage {items:AuditRecord[];page:number;hasMore:boolean}
 export function getAudit(token:string,page=1,action=''){
@@ -972,15 +1053,22 @@ export function cancelMovement(accessToken:string,id:string){
 }
 
 export interface HealthMedicine {
-  id:string;name:string;kind:'VACUNA'|'DESPARASITACION'|'ENFERMEDAD'|'OTRO';
+  id:string;version?:number;name:string;kind:'VACUNA'|'DESPARASITACION'|'ENFERMEDAD'|'OTRO';
   treatmentCatalogItemId?:string|null;
   activeIngredient:string|null;defaultUnitCode:string;suggestedDose:string|null;
   indications:string|null;withdrawalMilkDays:number;withdrawalMeatDays:number;active:boolean;
+  administrationRoutes?:string[];
+  doseAmount?:number|null;doseWeight?:number|null;doseWeightUnitCode?:'KILOGRAM'|'POUND'|null;
+  doseClassificationRanges?:Array<{classificationCode:string;min:number;max:number}>;
 }
 export interface HealthOptions {
-  animals:Array<{id:string;name:string;earTagCode:string|null;groupId:string|null}>;
+  animals:Array<{id:string;name:string;earTagCode:string|null;groupId:string|null;groupName:string|null;
+    locationId:string|null;locationName:string|null;profilePhotoUrl:string|null;
+    weightKg?:number|null;weightOn?:string|null;weightSource?:'WEIGHING'|'INITIAL';classificationCode?:string|null}>;
   groups:Array<{id:string;name:string}>;
   units:Array<{code:string;name:string;symbol:string}>;
+  administrationRoutes?:CatalogItem[];
+  classifications?:Array<{code:string;name:string}>;
 }
 export interface HealthAnimalInput {
   animalId:string;selected:boolean;dose:number;unitCode:string;notes?:string|null;conditionId?:string|null;
@@ -1005,7 +1093,7 @@ export function resolveHealthCondition(accessToken:string,id:string,input:{resol
   return request<HealthCondition>(`/health-records/conditions/${encodeURIComponent(id)}/resolve`,{
     method:'POST',headers:{...bearer(accessToken),'Content-Type':'application/json'},body:JSON.stringify(input)});}
 export interface HealthCampaignInput {
-  medicineId:string;administrationRoute:'ORAL'|'INTRAMUSCULAR'|'SUBCUTANEA'|'INTRAVENOSA'|'TOPICA'|'OTRA';
+  medicineId:string;administrationRoute:string;
   selectionMode:'TODOS'|'GRUPO'|'MANUAL';groupId?:string|null;appliedOn:string;
   responsible?:string|null;notes?:string|null;animals:HealthAnimalInput[];expectedVersion?:number;
 }
@@ -1013,13 +1101,25 @@ export interface HealthCampaign extends Omit<HealthCampaignInput,'animals'> {
   id:string;medicineName:string;kind:HealthMedicine['kind'];groupName:string|null;
   status:'BORRADOR'|'COMPLETADO'|'CANCELADO';version:number;
   animals:Array<HealthAnimalInput&{name:string}>;createdAt:string;appliedAt:string|null;
-  cancelledAt:string|null;
+  cancelledAt:string|null;activeIngredient?:string|null;withdrawalMilkDays?:number;withdrawalMeatDays?:number;
 }
 export function getHealthMedicines(accessToken:string){return request<HealthMedicine[]>(
   '/health-records/medicines',{headers:bearer(accessToken)});}
 export function createHealthMedicine(accessToken:string,input:Omit<HealthMedicine,'id'|'active'>){
-  return request<HealthMedicine>('/health-records/medicines',{
+  // The dedicated endpoint prevents an older API from accepting and dropping the dose fields.
+  return request<HealthMedicine>(input.doseClassificationRanges?.length?'/health-records/medicines/classification':'/health-records/medicines/structured',{
     method:'POST',headers:{...bearer(accessToken),'Content-Type':'application/json'},body:JSON.stringify(input)});}
+export function getCatalogMedicines(accessToken:string){return request<HealthMedicine[]>(
+  '/catalogs/medicines',{headers:bearer(accessToken)});}
+export function createCatalogMedicine(accessToken:string,input:Omit<HealthMedicine,'id'|'active'>){
+  return request<HealthMedicine>(input.doseClassificationRanges?.length?'/catalogs/medicines/classification':'/catalogs/medicines',{
+    method:'POST',headers:{...bearer(accessToken),'Content-Type':'application/json'},body:JSON.stringify(input)});}
+export function updateCatalogMedicine(accessToken:string,id:string,input:Omit<HealthMedicine,'id'|'active'|'version'>,active:boolean,expectedVersion:number){
+  return request<HealthMedicine>(`/catalogs/medicines/${encodeURIComponent(id)}`,{method:'PATCH',headers:bearer(accessToken),
+    body:JSON.stringify({medicine:input,active,expectedVersion})});
+}
+export function getHealthConditionTreatments(accessToken:string,id:string){return request<HealthCampaign[]>(
+  `/health-records/conditions/${encodeURIComponent(id)}/treatments`,{headers:bearer(accessToken)});}
 export function getHealthOptions(accessToken:string){return request<HealthOptions>(
   '/health-records/options',{headers:bearer(accessToken)});}
 export function getHealthCampaigns(accessToken:string){return request<HealthCampaign[]>(
@@ -1057,7 +1157,7 @@ export interface CleaningRecord extends CleaningInput {
   id:string;locationName:string;areaValue:number|null;areaUnitCode:string|null;
   status:'BORRADOR'|'COMPLETADO'|'CANCELADO';version:number;
   products:Array<CleaningInput['products'][number]&{productName:string;totalQuantity:number}>;
-  createdAt:string;completedAt:string|null;cancelledAt:string|null;
+  createdAt:string;completedAt:string|null;cancelledAt:string|null;activeIngredient?:string|null;withdrawalMilkDays?:number;withdrawalMeatDays?:number;
 }
 export function getCleanings(accessToken:string){return request<CleaningRecord[]>(
   '/cleanings',{headers:bearer(accessToken)});}
@@ -1087,7 +1187,7 @@ export interface ActivityInput {
 export interface ActivityRecord extends Omit<ActivityInput,'animalIds'> {
   id:string;brandName:string|null;status:'BORRADOR'|'COMPLETADA'|'CANCELADA';
   version:number;animals:Array<{id:string;name:string;earTagCode:string|null}>;
-  createdAt:string;appliedAt:string|null;cancelledAt:string|null;
+  createdAt:string;appliedAt:string|null;cancelledAt:string|null;activeIngredient?:string|null;withdrawalMilkDays?:number;withdrawalMeatDays?:number;
 }
 export interface ActivityOptions {
   animals:Array<{id:string;name:string;earTagCode:string|null}>;
@@ -1160,8 +1260,16 @@ export function updateMembershipStatus(
   });
 }
 
-export function getPlatformOverview(accessToken: string) {
-  return request<PlatformOverview>('/superadmin/overview', { headers: bearer(accessToken) });
+export function getPlatformOverview(accessToken: string,search='',page=1) {
+  return request<PlatformOverview>(`/superadmin/overview?${new URLSearchParams({search,page:String(page)})}`, { headers: bearer(accessToken) });
+}
+
+export function beginPropertySupport(token:string,accountId:string,propertyId:string){
+  return request<ActiveContext>('/superadmin/support-context',{method:'POST',headers:bearer(token),
+    body:JSON.stringify({accountId,propertyId})});
+}
+export function endPropertySupport(token:string){
+  return request<void>('/superadmin/support-context',{method:'DELETE',headers:bearer(token)});
 }
 
 export function getAdministrativeAccount(accessToken: string, accountId: string) {
@@ -1240,6 +1348,14 @@ export function deleteMedia(accessToken:string,id:string){return request<void>(`
   method:'DELETE',headers:bearer(accessToken)});}
 export function deleteMediaObject(accessToken:string,id:string){return request<{deletedFromProvider:boolean}>(
   `/media/objects/${id}`,{method:'DELETE',headers:bearer(accessToken)});}
+export interface MediaDetailsInput {
+  capturedOn:string|null;description:string|null;tagIds:string[];
+  animalIds:string[];expectedAttachmentIds:string[];
+}
+export function updateMediaDetails(accessToken:string,id:string,input:MediaDetailsInput){
+  return request<{attachmentIds:string[]}>(`/media/objects/${encodeURIComponent(id)}`,{
+    method:'PATCH',headers:bearer(accessToken),body:JSON.stringify(input)});
+}
 export async function uploadMedia(accessToken:string,input:{file:File;animalIds?:string[];
   entityType?:string;entityId?:string;relationCode?:'GENERAL'|'PROFILE'|'COVER';
   tagIds?:string[];description?:string;capturedOn?:string}){
@@ -1250,14 +1366,8 @@ export async function uploadMedia(accessToken:string,input:{file:File;animalIds?
   if(input.tagIds?.length)params.set('tagIds',input.tagIds.join(','));
   if(input.description)params.set('description',input.description);
   if(input.capturedOn)params.set('capturedOn',input.capturedOn);
-  let response:Response;
-  try{response=await fetch(`${API_URL}/media?${params}`,{
-    method:'POST',credentials:'include',headers:{authorization:`Bearer ${accessToken}`,
+  return request<{id:string;attachmentIds:string[]}>(`/media?${params}`,{
+    method:'POST',headers:{authorization:`Bearer ${accessToken}`,
       'content-type':file.type||'application/octet-stream',
-      'x-media-kind':file.type.startsWith('video/')?'VIDEO':'IMAGE'},body:file});}
-  catch{throw new ApiRequestError('No fue posible enviar el archivo.',0,'NETWORK_ERROR');}
-  const body=await response.json() as ApiEnvelope<{id:string;attachmentIds:string[]}>|ApiErrorEnvelope;
-  if(!response.ok)throw new ApiRequestError((body as ApiErrorEnvelope).error?.message||
-    'No se pudo cargar el archivo.',response.status,(body as ApiErrorEnvelope).error?.code||'UPLOAD_FAILED');
-  return (body as ApiEnvelope<{id:string;attachmentIds:string[]}>).data;
+      'x-media-kind':file.type.startsWith('video/')?'VIDEO':'IMAGE'},body:file});
 }

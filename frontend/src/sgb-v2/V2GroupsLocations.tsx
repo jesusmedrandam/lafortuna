@@ -7,6 +7,7 @@ import {LocationFields,locationInput} from './GroupPanel';
 import {createGroup,createLocation,listCatalogItems,listGroups,listLocations,setGroupState,
   updateGroup,updateLocation,type CatalogItem,type LivestockGroup,type PhysicalLocation} from './api';
 import {useV2Session} from './V2Session';
+import {PastureOccupations,PastureOccupationStatus} from './PastureOccupations';
 
 type Filter='ALL'|'ACTIVE'|'INACTIVE';
 function matches(active:boolean,filter:Filter){return filter==='ALL'||active===(filter==='ACTIVE');}
@@ -101,6 +102,13 @@ export function V2LocationsPage({kind}:{kind:PhysicalLocation['kind']}){
   const [editing,setEditing]=useState<PhysicalLocation|null|undefined>(undefined);
   const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [revision,setRevision]=useState(0);
   const canManage=hasPermission('LOCATION_MANAGE');const title=kind==='PASTURE'?'potrero':'corral';
+  useEffect(()=>{let timer:ReturnType<typeof setTimeout>;
+    const changed=(event:Event)=>{const path=(event as CustomEvent<{path?:string}>).detail?.path;
+      if(path&&path!=='/locations'&&!path.startsWith('/movements'))return;
+      clearTimeout(timer);timer=setTimeout(()=>setRevision(value=>value+1),120);};
+    window.addEventListener('sgb-v2-cache-updated',changed);
+    return()=>{clearTimeout(timer);window.removeEventListener('sgb-v2-cache-updated',changed);};
+  },[]);
   useEffect(()=>{let active=true;setError('');
     void listLocations(token).then(items=>{if(active)setLocations(items);})
       .catch(reason=>{if(active)setError(message(reason));});
@@ -128,11 +136,24 @@ export function V2LocationsPage({kind}:{kind:PhysicalLocation['kind']}){
     {locations===null&&!error?<LoadingState/>:locations===null?<ErrorState message={error}
       onRetry={()=>setRevision(value=>value+1)}/>:visible.length===0?<EmptyState
       icon={kind==='PASTURE'?Sprout:Warehouse} title={`Sin ${kind==='PASTURE'?'potreros':'corrales'}`}
-      description={`Crea un ${title} o modifica los filtros.`}/>:<div className="record-grid">
+      description={`Crea un ${title} o modifica los filtros.`}/>:kind==='PASTURE'?<Card className="pasture-list v2-pasture-list">
+      <div className="pasture-list-head"><span>Potrero</span><span>Área</span><span>Pastos</span>
+        <span>Estado y tiempo</span><span/></div>
+      {visible.map(place=><button type="button" className="pasture-list-row" key={place.id}
+        aria-label={`Ver detalles de ${place.name}`} onClick={()=>setSelected(place.id)}>
+        <span className="pasture-name"><span className="pasture-mini-icon"><Sprout size={18}/></span>
+          <span><strong>{place.name}</strong><small>{place.group?.name??'Sin grupo'}{place.active?'':' · Inactivo'}</small></span></span>
+        <span><strong>{areaLabel(place)}</strong></span>
+        <span className="pasture-grass-summary"><strong>{place.grasses.map(grass=>grass.name).join(', ')||'Sin pastos'}</strong>
+          <small>{place.grasses.length} tipos registrados</small></span>
+        <span className="pasture-time"><PastureOccupationStatus place={place}/></span>
+        <span className="pasture-row-actions"><ChevronRight size={19}/></span>
+      </button>)}
+    </Card>:<div className="record-grid">
       {visible.map(place=><Card key={place.id} className="record-card" onClick={()=>setSelected(place.id)}>
         <div className="record-card-header"><div className="record-icon">
-          {kind==='PASTURE'?<Sprout size={22}/>:<Warehouse size={22}/>}</div>
-          <div><h3>{place.name}</h3><span>{kind==='PASTURE'?'Potrero':'Corral'}</span></div>
+          <Warehouse size={22}/></div>
+          <div><h3>{place.name}</h3><span>Corral</span></div>
           <Badge tone={place.active?'success':'neutral'}>{place.active?'Activo':'Inactivo'}</Badge></div>
         <div className="record-details">
           <span><small>Grupo actual</small><strong>{place.group?.name??'Sin grupo'}</strong></span>
@@ -150,6 +171,7 @@ export function V2LocationsPage({kind}:{kind:PhysicalLocation['kind']}){
         {kind==='PASTURE'?<Sprout size={22}/>:<Warehouse size={22}/>}</div>
         <div><h2>{item.name}</h2><p>{item.description||'Sin descripción.'}</p></div>
         <Badge tone={item.active?'success':'neutral'}>{item.active?'Activo':'Inactivo'}</Badge></div>
+        {kind==='PASTURE'&&<PastureOccupations place={item}/>}
         <div className="v2-location-details">
           <span><small>Área</small><strong>{areaLabel(item)}</strong></span>
           <span><small>Capacidad estimada</small><strong>{item.capacityEstimate??'Sin registrar'}</strong></span>

@@ -7,10 +7,12 @@ import {
   type AgendaItem,type AnimalStatusEvent,type HealthCampaign,type HealthCondition,type HealthMedicine,
   type MovementRecord,type ProductionRecords,type ReproductionRecords,type WeighingRecord,
 } from './api';
+import type {DashboardItem} from './DashboardPreferences';
 
 interface HomeOperationsProps{
   accessToken:string;userId:string;userName:string;propertyName:string;
   modules:string[];permissions:string[];onNavigate:(path:string)=>void;
+  items?:DashboardItem[];
 }
 const catalogCodes=['BREEDS','COLORS','GRASS_TYPES','HEALTH_CONDITION_TYPES','TREATMENT_TYPES',
   'AGROCHEMICAL_CATEGORIES','MEDIA_TAGS','MOVEMENT_REASONS'] as const;
@@ -73,8 +75,9 @@ export function HomePendingTasks({accessToken,userId,userName,propertyName,enabl
 interface Metric{label:string;value:string|number}
 interface OperationCard{key:string;title:string;description:string;path:string;icon:ReactNode;metrics:Metric[]}
 
-export function HomeOperations({accessToken,modules,permissions,onNavigate}:HomeOperationsProps){
+export function HomeOperations({accessToken,modules,permissions,onNavigate,items}:HomeOperationsProps){
   const allowed=(permission:string,module?:string)=>permissions.includes(permission)&&(!module||modules.includes(module));
+  const enabled=(key:string)=>!items||items.some(item=>item.id===key&&item.visible);
   const [weighings,setWeighings]=useState<WeighingRecord[]>();
   const [conditions,setConditions]=useState<HealthCondition[]>();
   const [campaigns,setCampaigns]=useState<HealthCampaign[]>();
@@ -91,23 +94,23 @@ export function HomeOperations({accessToken,modules,permissions,onNavigate}:Home
     setProduction(undefined);setReproduction(undefined);setMovements(undefined);setStatusEvents(undefined);
     setCatalogTotals(undefined);
     const load=<T,>(promise:Promise<T>,save:(value:T)=>void)=>{jobs.push(promise.then(value=>{if(active)save(value);}));};
-    if(allowed('WEIGHING_VIEW','WEIGHING'))load(getWeighings(accessToken),setWeighings);
-    if(allowed('HEALTH_VIEW','HEALTH')){
+    if(enabled('weighings')&&allowed('WEIGHING_VIEW','WEIGHING'))load(getWeighings(accessToken),setWeighings);
+    if(enabled('health')&&allowed('HEALTH_VIEW','HEALTH')){
       load(getHealthConditions(accessToken),setConditions);load(getHealthCampaigns(accessToken),setCampaigns);
       load(getHealthMedicines(accessToken),setMedicines);
     }
-    if(allowed('PRODUCTION_VIEW','PRODUCTION'))load(getProduction(accessToken),setProduction);
-    if(allowed('REPRODUCTION_VIEW','REPRODUCTION'))load(getReproduction(accessToken),setReproduction);
-    if(allowed('MOVEMENT_VIEW','MOVEMENTS'))load(getMovements(accessToken),setMovements);
-    if(permissions.includes('ANIMAL_VIEW'))load(getAnimalStatusEvents(accessToken),setStatusEvents);
-    if(permissions.includes('CATALOG_VIEW'))load(Promise.all([listOwners(accessToken),listBrands(accessToken),
+    if(enabled('production')&&allowed('PRODUCTION_VIEW','PRODUCTION'))load(getProduction(accessToken),setProduction);
+    if(enabled('reproduction')&&allowed('REPRODUCTION_VIEW','REPRODUCTION'))load(getReproduction(accessToken),setReproduction);
+    if(enabled('movements')&&allowed('MOVEMENT_VIEW','MOVEMENTS'))load(getMovements(accessToken),setMovements);
+    if(enabled('status')&&permissions.includes('ANIMAL_VIEW'))load(getAnimalStatusEvents(accessToken),setStatusEvents);
+    if(enabled('catalogs')&&permissions.includes('CATALOG_VIEW'))load(Promise.all([listOwners(accessToken),listBrands(accessToken),
       ...catalogCodes.map(code=>listCatalogItems(accessToken,code))]).then(([owners,brands,...lists])=>({
         owners:owners.filter(owner=>owner.active).length,brands:brands.filter(brand=>brand.active).length,
         items:lists.reduce((total,list)=>total+list.filter(item=>item.active).length,0),
       })),setCatalogTotals);
     void Promise.allSettled(jobs).then(results=>{if(active&&results.some(result=>result.status==='rejected'))setPartialError(true);});
     return()=>{active=false;};
-  },[accessToken,modules.join('|'),permissions.join('|')]);
+  },[accessToken,modules.join('|'),permissions.join('|'),JSON.stringify(items)]);
 
   const today=ecuadorDate();const month=today.slice(0,7);const year=today.slice(0,4);
   const activeWeighings=weighings?.filter(row=>!row.voidedAt)??[];
@@ -162,12 +165,13 @@ export function HomeOperations({accessToken,modules,permissions,onNavigate}:Home
       {label:'Marquillas',value:catalogTotals?.brands??'—'},
     ]});
 
-  if(!cards.length)return null;
+  const visibleCards=items?items.filter(item=>item.visible).flatMap(item=>cards.filter(card=>card.key===item.id)):cards;
+  if(!visibleCards.length)return null;
   return <section className="home-operations" aria-labelledby="home-operations-title"><header>
     <div><span className="eyebrow">Resumen operativo</span><h2 id="home-operations-title">Estado de la propiedad</h2>
       <p>Datos actuales según los módulos a los que tienes acceso.</p></div>
     {partialError&&<small>Algunos datos no pudieron actualizarse.</small>}</header>
-    <div className="home-operation-grid">{cards.map(card=><button type="button" key={card.key}
+    <div className="home-operation-grid">{visibleCards.map(card=><button type="button" key={card.key}
       className={`home-operation-card ${card.key}`} onClick={()=>onNavigate(card.path)}>
       <span className="home-operation-icon">{card.icon}</span><span className="home-operation-copy">
         <strong>{card.title}</strong><small>{card.description}</small></span><ChevronRight size={18}/>

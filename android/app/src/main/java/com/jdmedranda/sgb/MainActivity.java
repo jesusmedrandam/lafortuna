@@ -28,8 +28,11 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.ProgressBar;
-import android.widget.TextView;
 import android.widget.Toast;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -38,26 +41,40 @@ import java.net.URI;
 public final class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 4001;
     private static final int NOTIFICATION_PERMISSION_REQUEST = 4002;
+    private static final int MEDIA_EXPORT_REQUEST = 4003;
     private static final String OFFLINE_PAGE = "file:///android_asset/offline.html";
     private static final String WEB_APP_HOST = Uri.parse(BuildConfig.WEB_APP_URL).getHost();
     private WebView webView;
     private ProgressBar pageProgress;
-    private TextView offlineBanner;
+    private boolean appReady;
     private ConnectivityManager connectivityManager;
+    private MediaCacheManager mediaCache;
     private ConnectivityManager.NetworkCallback networkCallback;
     private ValueCallback<Uri[]> fileCallback;
-    private int pendingCount;
+    private String exportSource;
+    private String exportDelivery;
+    private String exportScope;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        View root = findViewById(R.id.root_container);
+        int topSpacing = Math.round(6 * getResources().getDisplayMetrics().density);
+        ViewCompat.setOnApplyWindowInsetsListener(root, (view, windowInsets) -> {
+            Insets safe = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars()
+                    | WindowInsetsCompat.Type.displayCutout() | WindowInsetsCompat.Type.ime());
+            view.setPadding(safe.left, safe.top + topSpacing, safe.right, safe.bottom);
+            return WindowInsetsCompat.CONSUMED;
+        });
+        ViewCompat.requestApplyInsets(root);
         getWindow().setStatusBarColor(Color.parseColor("#0C1210"));
         getWindow().setNavigationBarColor(Color.parseColor("#0C1210"));
         webView = findViewById(R.id.web_view);
         pageProgress = findViewById(R.id.page_progress);
-        offlineBanner = findViewById(R.id.offline_banner);
         connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        mediaCache = new MediaCacheManager(this);
         configureWebView();
         registerConnectivity();
         requestNotificationPermission();
@@ -83,12 +100,12 @@ public final class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
         webView.setBackgroundColor(Color.parseColor("#0C1210"));
-        webView.addJavascriptInterface(new SgbJavascriptBridge(this), "SGBAndroid");
+        webView.addJavascriptInterface(new SgbJavascriptBridge(this, mediaCache), "SGBAndroid");
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onProgressChanged(WebView view, int progress) {
                 pageProgress.setProgress(progress);
-                pageProgress.setVisibility(progress >= 100 ? View.GONE : View.VISIBLE);
+                pageProgress.setVisibility(progress >= 100 || appReady ? View.GONE : View.VISIBLE);
             }
 
             @Override
@@ -114,9 +131,19 @@ public final class MainActivity extends Activity {
         });
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                appReady = false;
+            }
+            @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 WebResourceResponse bundled = bundledWebResponse(request);
-                return bundled == null ? super.shouldInterceptRequest(view, request) : bundled;
+                if (bundled != null) return bundled;
+                if ("GET".equalsIgnoreCase(request.getMethod())) {
+                    WebResourceResponse media = mediaCache.responseOrDownload(
+                            request.getUrl().toString(), request.getRequestHeaders().get("Range"));
+                    if (media != null) return media;
+                }
+                return super.shouldInterceptRequest(view, request);
             }
 
             @Override
@@ -226,7 +253,6 @@ public final class MainActivity extends Activity {
 
     private void dispatchConnectivity(boolean online) {
         runOnUiThread(() -> {
-            updateOfflineBanner(online);
             if (online && OFFLINE_PAGE.equals(webView.getUrl())) webView.loadUrl(BuildConfig.WEB_APP_URL);
             String script = "window.dispatchEvent(new Event('" + (online ? "online" : "offline") + "'));";
             webView.evaluateJavascript(script, null);
@@ -246,19 +272,16 @@ public final class MainActivity extends Activity {
         return capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
     }
 
-    void setPendingCount(int count) {
-        pendingCount = Math.max(0, count);
-        updateOfflineBanner(isOnline());
-    }
-
     void loadHome() { runOnUiThread(() -> webView.loadUrl(BuildConfig.WEB_APP_URL)); }
 
-    private void updateOfflineBanner(boolean online) {
-        if (!online) {
-            offlineBanner.setText(pendingCount > 0 ? "Sin conexión · " + pendingCount + " cambio(s) pendiente(s)"
-                    : "Sin conexión · usando datos descargados");
-            offlineBanner.setVisibility(View.VISIBLE);
-        } else offlineBanner.setVisibility(View.GONE);
+    void finishAppLoading() { runOnUiThread(() -> { appReady = true; pageProgress.setVisibility(View.GONE); }); }
+
+    void deliverAuthentication(String response) {
+        runOnUiThread(() -> {
+            if (!isFinishing() && !isDestroyed()) webView.evaluateJavascript(
+                    "window.dispatchEvent(new CustomEvent('sgb-native-auth-response',{detail:JSON.parse("
+                            + org.json.JSONObject.quote(response) + ")}));", null);
+        });
     }
 
     private void requestNotificationPermission() {
@@ -278,9 +301,37 @@ public final class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == MEDIA_EXPORT_REQUEST) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && exportSource != null) {
+                mediaCache.exportTo(data.getData(), exportSource, exportDelivery, exportScope,
+                        success -> runOnUiThread(() -> Toast.makeText(this, success ? "Archivo guardado"
+                                : "No se pudo guardar. Descarga el archivo para uso sin conexión primero.",
+                                Toast.LENGTH_LONG).show()));
+            }
+            exportSource = null;
+            exportDelivery = null;
+            exportScope = null;
+            return;
+        }
         if (requestCode != FILE_CHOOSER_REQUEST || fileCallback == null) return;
         fileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
         fileCallback = null;
+    }
+
+    void exportMedia(String source, String delivery, String filename, String mimeType) {
+        runOnUiThread(() -> {
+            if (exportSource != null) return;
+            exportSource = source;
+            exportDelivery = delivery;
+            exportScope = mediaCache.userScope();
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType(mimeType).putExtra(Intent.EXTRA_TITLE, filename);
+            try { startActivityForResult(intent, MEDIA_EXPORT_REQUEST); }
+            catch (ActivityNotFoundException error) {
+                exportSource = null;
+                Toast.makeText(this, "No se puede abrir el selector de archivos.", Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     @Override
@@ -295,6 +346,7 @@ public final class MainActivity extends Activity {
         OfflineSyncScheduler.cancel(this);
         webView.onResume();
         dispatchConnectivity(isOnline());
+        webView.evaluateJavascript("window.dispatchEvent(new Event('sgb-app-resumed'));", null);
     }
 
     @Override
@@ -306,13 +358,14 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onStop() {
-        if (pendingCount > 0) OfflineSyncScheduler.schedule(this);
+        if (new NativeMutationStore(this).queue().length() > 0) OfflineSyncScheduler.schedule(this);
         super.onStop();
     }
 
     @Override
     protected void onDestroy() {
         if (networkCallback != null) connectivityManager.unregisterNetworkCallback(networkCallback);
+        if (mediaCache != null) mediaCache.shutdown();
         webView.removeJavascriptInterface("SGBAndroid");
         webView.destroy();
         super.onDestroy();

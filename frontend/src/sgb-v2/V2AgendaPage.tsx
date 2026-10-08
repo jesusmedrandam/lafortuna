@@ -78,13 +78,13 @@ export function V2AgendaPage(){
           description="Programa actividades, recordatorios y fechas importantes."/>}
     {selected&&<Modal title={selected.kind==='TASK'?'Detalle de la tarea':'Detalle del evento'}
       wide onClose={()=>setSelected(null)} footer={<><Button variant="ghost" onClick={()=>setSelected(null)}>Cerrar</Button>
-        {selected.status==='PENDING'&&selected.createdBy===userId&&
+        {selected.status==='PENDING'&&(selected.createdBy===userId||session!.overview.supportMode)&&
           <Button variant="ghost" loading={busy} onClick={()=>void act('CANCEL')}>Cancelar evento</Button>}
         {selected.status==='PENDING'&&selected.kind==='TASK'&&selected.myResponse==='PENDING'&&<>
           <Button variant="secondary" loading={busy} onClick={()=>void act('DECLINE')}><UserX size={16}/>Rechazar</Button>
           <Button loading={busy} onClick={()=>void act('ACCEPT')}><UserCheck size={16}/>Aceptar</Button></>}
         {selected.status==='PENDING'&&selected.kind==='TASK'&&
-          (selected.createdBy===userId||selected.myResponse==='ACCEPTED')&&
+          (selected.createdBy===userId||selected.myResponse==='ACCEPTED'||session!.overview.supportMode)&&
           <Button loading={busy} onClick={()=>void act('COMPLETE')}><CheckCircle2 size={16}/>Completar</Button>}</>}>
       {error&&<div className="form-error admin-error" role="alert">{error}</div>}
       <div className="record-detail"><div className="record-detail-heading"><span className="record-icon">

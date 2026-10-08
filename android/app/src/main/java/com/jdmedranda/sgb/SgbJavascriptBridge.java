@@ -19,9 +19,11 @@ final class SgbJavascriptBridge {
     private static final String DOWNLOAD_CHANNEL = "sgb_downloads";
     private final MainActivity activity;
     private final NativeMutationStore mutationStore;
+    private final MediaCacheManager mediaCache;
 
-    SgbJavascriptBridge(MainActivity activity) {
+    SgbJavascriptBridge(MainActivity activity, MediaCacheManager mediaCache) {
         this.activity = activity;
+        this.mediaCache = mediaCache;
         mutationStore = new NativeMutationStore(activity);
         createNotificationChannels();
     }
@@ -33,27 +35,68 @@ final class SgbJavascriptBridge {
     public boolean isOnline() { return activity.isOnline(); }
 
     @JavascriptInterface
+    public void requestAuthentication(String id, String path, String body) {
+        NativeAuthentication.request(activity, id, path, body);
+    }
+
+    @JavascriptInterface
+    public void setOfflineUserScope(String userId) { mediaCache.setUserScope(userId); }
+
+    @JavascriptInterface
     public boolean isWifiConnected() { return activity.isWifiConnected(); }
 
     @JavascriptInterface
     public void retryHome() { activity.loadHome(); }
 
     @JavascriptInterface
-    public void setPendingMutations(int count) { activity.runOnUiThread(() -> activity.setPendingCount(count)); }
-
-    @JavascriptInterface
     public void setAuthenticatedSession(boolean active) {
         activity.getPreferences(Context.MODE_PRIVATE).edit().putBoolean("authenticated", active).apply();
+        activity.finishAppLoading();
     }
 
     @JavascriptInterface
     public void configureOfflineSync(String apiUrl, String accessToken, String userId,
                                      String propertyId, String roleId) {
+        mediaCache.setUserScope(userId);
         mutationStore.configure(apiUrl, accessToken, userId, propertyId, roleId);
     }
 
     @JavascriptInterface
-    public void clearOfflineSyncSession() { mutationStore.clearSession(); }
+    public void clearOfflineSyncSession() {
+        mutationStore.clearSession();
+        mediaCache.setUserScope("");
+    }
+
+    @JavascriptInterface
+    public void setAutomaticMediaDownloads(boolean enabled) {
+        mediaCache.setAutomaticDownloads(enabled);
+    }
+
+    @JavascriptInterface
+    public void downloadMedia(String requestsJson) { mediaCache.downloadJson(requestsJson); }
+
+    @JavascriptInterface
+    public String getMediaCacheInfo() { return mediaCache.information(); }
+
+    @JavascriptInterface
+    public String getMediaCacheDetails() { return mediaCache.details(); }
+
+    @JavascriptInterface
+    public void removeMediaCacheFiles(String idsJson) { mediaCache.removeFiles(idsJson); }
+
+    @JavascriptInterface
+    public void clearMediaCache() { mediaCache.clear(); }
+
+    @JavascriptInterface
+    public boolean saveOptimizedMedia(String originalUrl, String optimizedUrl, String filename, String mimeType) {
+        activity.exportMedia(originalUrl, optimizedUrl, filename, mimeType);
+        return true;
+    }
+
+    @JavascriptInterface
+    public boolean saveMedia(String url, String filename, String mimeType) {
+        return saveOptimizedMedia(url, url, filename, mimeType);
+    }
 
     @JavascriptInterface
     public void mirrorOfflineMutation(String mutationJson) {
@@ -63,6 +106,12 @@ final class SgbJavascriptBridge {
 
     @JavascriptInterface
     public void removeMirroredMutation(String mutationId) { mutationStore.remove(mutationId); }
+
+    @JavascriptInterface
+    public boolean reservePendingMutation(String id, String key) { return mutationStore.reserveForEditing(id, key); }
+
+    @JavascriptInterface
+    public void confirmMirroredMutation(String id, String key) { mutationStore.finish(id, key, false); }
 
     @JavascriptInterface
     public void setSystemBarColors(String primary, String background) {

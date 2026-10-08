@@ -44,13 +44,18 @@ public final class OfflineSyncWorker extends Worker {
                 JSONObject scope = entry.optJSONObject("scope");
                 String userId = scope == null ? "" : scope.optString("userId", "");
                 if (!config.userId.equals(userId)) continue;
+                entry = store.claim(entry.optString("id"), entry.optString("idempotencyKey"));
+                if (entry == null) continue;
                 String propertyId = scope == null ? "" : scope.optString("propertyId", "");
                 String roleId = scope == null ? "" : scope.optString("roleId", "");
                 if (!propertyId.trim().isEmpty() && !roleId.trim().isEmpty()
                         && (!propertyId.equals(serverProperty) || !roleId.equals(serverRole))) {
                     HttpResult contextResult = changeContext(config, propertyId, roleId);
-                    if (contextResult.status == 401 || contextResult.status == 403) return Result.success();
-                    if (!contextResult.success()) return Result.retry();
+                    if (!contextResult.success()) {
+                        store.finish(entry.optString("id"), entry.optString("idempotencyKey"), false);
+                        if (contextResult.status == 401 || contextResult.status == 403) return Result.success();
+                        return Result.retry();
+                    }
                     serverProperty = propertyId;
                     serverRole = roleId;
                 }
@@ -58,6 +63,7 @@ public final class OfflineSyncWorker extends Worker {
                 Map<String, String> replacements = store.replacements();
                 String path = replace(entry.optString("path"), replacements);
                 String bodyType = entry.optString("bodyType", "none");
+                if (!"json".equals(bodyType) && !"none".equals(bodyType)) return Result.success();
                 String body = null;
                 if ("json".equals(bodyType) && entry.has("jsonBody") && !entry.isNull("jsonBody")) {
                     body = replace(entry.get("jsonBody").toString(), replacements);
@@ -69,15 +75,19 @@ public final class OfflineSyncWorker extends Worker {
                     String actualId = responseDataId(response.body);
                     if (!temporaryId.trim().isEmpty() && !actualId.trim().isEmpty())
                         store.saveReplacement(temporaryId, actualId);
-                    store.remove(entry.optString("id"));
+                    store.finish(entry.optString("id"), entry.optString("idempotencyKey"), true);
                     continue;
                 }
                 String code = responseErrorCode(response.body);
                 if (response.status == 409 && "IDEMPOTENCY_IN_PROGRESS".equals(code)) return Result.retry();
-                if (response.status == 401) return Result.success();
+                if (response.status == 401) {
+                    store.finish(entry.optString("id"), entry.optString("idempotencyKey"), false);
+                    return Result.success();
+                }
                 if (response.status == 0 || response.status >= 500) return Result.retry();
                 // A deterministic validation/permission/conflict error is left in IndexedDB for review.
-                store.remove(entry.optString("id"));
+                store.finish(entry.optString("id"), entry.optString("idempotencyKey"), false);
+                return Result.success();
             }
         } catch (IOException error) {
             return Result.retry();

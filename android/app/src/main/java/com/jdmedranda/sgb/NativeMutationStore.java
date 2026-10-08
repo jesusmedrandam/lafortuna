@@ -48,6 +48,8 @@ final class NativeMutationStore {
             for (int index = 0; index < current.length(); index++) {
                 JSONObject item = current.getJSONObject(index);
                 if (id.equals(item.optString("id"))) {
+                    if (item.optString("idempotencyKey").equals(mutation.optString("idempotencyKey"))
+                            && !item.optString("nativeState").isEmpty()) return;
                     next.put(mutation);
                     replaced = true;
                 } else next.put(item);
@@ -63,7 +65,55 @@ final class NativeMutationStore {
             JSONArray next = new JSONArray();
             for (int index = 0; index < current.length(); index++) {
                 JSONObject item = current.optJSONObject(index);
-                if (item != null && !id.equals(item.optString("id"))) next.put(item);
+                if (item != null && (!id.equals(item.optString("id"))
+                        || !item.optString("nativeState").isEmpty())) next.put(item);
+            }
+            writeQueue(next);
+        }
+    }
+
+    // Retain receipts until IndexedDB confirms them, so editing cannot duplicate an upload.
+    boolean reserveForEditing(String id, String key) {
+        synchronized (LOCK) {
+            JSONArray queue = readQueue();
+            for (int index = 0; index < queue.length(); index++) {
+                JSONObject item = queue.optJSONObject(index);
+                if (item != null && id.equals(item.optString("id"))
+                        && (!key.equals(item.optString("idempotencyKey"))
+                        || !item.optString("nativeState").isEmpty())) return false;
+            }
+            remove(id);
+            return true;
+        }
+    }
+
+    JSONObject claim(String id, String key) throws JSONException {
+        synchronized (LOCK) {
+            JSONArray queue = readQueue();
+            for (int index = 0; index < queue.length(); index++) {
+                JSONObject item = queue.getJSONObject(index);
+                if (!id.equals(item.optString("id")) || !key.equals(item.optString("idempotencyKey"))) continue;
+                if ("SENT".equals(item.optString("nativeState"))) return null;
+                item.put("nativeState", "IN_FLIGHT");
+                if (!preferences.edit().putString(QUEUE, queue.toString()).commit()) return null;
+                return item;
+            }
+            return null;
+        }
+    }
+
+    void finish(String id, String key, boolean sent) {
+        synchronized (LOCK) {
+            JSONArray queue = readQueue();
+            JSONArray next = new JSONArray();
+            for (int index = 0; index < queue.length(); index++) {
+                JSONObject item = queue.optJSONObject(index);
+                if (item == null) continue;
+                if (id.equals(item.optString("id")) && key.equals(item.optString("idempotencyKey"))) {
+                    if (!sent) continue;
+                    try { item.put("nativeState", "SENT"); } catch (JSONException ignored) { }
+                }
+                next.put(item);
             }
             writeQueue(next);
         }
@@ -71,7 +121,13 @@ final class NativeMutationStore {
 
     JSONArray queue() {
         synchronized (LOCK) {
-            try { return new JSONArray(readQueue().toString()); }
+            try {
+                JSONArray queue = new JSONArray(readQueue().toString());
+                java.util.List<JSONObject> ordered = new java.util.ArrayList<>();
+                for (int index = 0; index < queue.length(); index++) ordered.add(queue.getJSONObject(index));
+                ordered.sort(java.util.Comparator.comparingLong(item -> item.optLong("createdAt")));
+                return new JSONArray(ordered);
+            }
             catch (JSONException ignored) { return new JSONArray(); }
         }
     }

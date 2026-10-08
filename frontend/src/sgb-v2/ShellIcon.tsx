@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
+import {AnimalIcon} from '../components/AnimalIcon';
 
 export type ShellIconName = 'home'|'animals'|'groups'|'reproduction'|'production'|'movements'|'health'|'cleanings'|'activities'|'media'|'catalogs'|
   'team'|'settings'|'admin'|'menu'|'close'|'moon'|'sun'|'logout'|'chevron'|'camera'|'edit'|'search'|'filter';
 
 const shapes: Record<ShellIconName, ReactNode> = {
   home: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
-  animals: <><path d="M4 9 2 5l5 2 3-2h4l3 2 5-2-2 4v8l-4 4-4-2-4 2-4-4V9Z"/><path d="M8 12h.01M16 12h.01M10 16h4"/></>,
+  animals: null,
   groups: <><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2H3ZM17 5a3 3 0 0 1 0 6m0 3a5 5 0 0 1 4 5v1h-3"/></>,
   reproduction: <><path d="M12 21s-9-5.5-9-12a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 6.5-9 12-9 12Z"/></>,
   production: <><path d="M12 2C10 6 5 10.5 5 15a7 7 0 0 0 14 0c0-4.5-5-9-7-13Z"/><path d="M9 16a3 3 0 0 0 3 3"/></>,
@@ -31,6 +32,7 @@ const shapes: Record<ShellIconName, ReactNode> = {
 };
 
 export function ShellIcon({name,size=19}:{name:ShellIconName;size?:number}) {
+  if(name==='animals')return <AnimalIcon size={size}/>;
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
     aria-hidden="true">{shapes[name]}</svg>;

@@ -1,5 +1,6 @@
+import {AnimalIcon} from '../components/AnimalIcon';
 import {useEffect,useState} from 'react';
-import {Beef,CalendarClock,ClipboardCheck,MapPin,Mars,Paintbrush,Plus,SlidersHorizontal,
+import {CalendarClock,ClipboardCheck,MapPin,Mars,Paintbrush,Plus,SlidersHorizontal,
   UserRound,Venus,VenusAndMars,X} from 'lucide-react';
 import {useNavigate,useSearchParams} from 'react-router-dom';
 import {Badge,Button,EmptyState,ErrorState,Field,IconButton,Input,LoadingState,SearchBox,Select}
@@ -82,7 +83,7 @@ export function V2AnimalsPage(){
         aria-expanded={advancedOpen} onClick={()=>setAdvancedOpen(value=>!value)}>
         <SlidersHorizontal size={20}/>{count>0&&<span className="filter-count">{count}</span>}</IconButton>
       <span className="animal-visible-count" aria-label={`${list?.total??0} animales`}>
-        <Beef size={16}/><strong>{list?.total??0}</strong></span>
+        <AnimalIcon size={16}/><strong>{list?.total??0}</strong></span>
     </div><div className="animal-secondary-filters">
       <Select aria-label="Filtrar por grupo" value={filters.groupId} onChange={event=>update('groupId',event.target.value)}>
         <option value="">Todos los grupos</option>{groups.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select>
@@ -118,12 +119,12 @@ export function V2AnimalsPage(){
       </div><div className="advanced-filters-footer">{count} filtros activos</div>
     </section>}
     {busy?<LoadingState/>:error?<ErrorState message={error} onRetry={()=>setRetry(value=>value+1)}/>:
-      !list?.items.length?<EmptyState icon={Beef} title="No hay animales" description="Registra el primer animal o modifica los filtros."
+      !list?.items.length?<EmptyState icon={AnimalIcon} title="No hay animales" description="Registra el primer animal o modifica los filtros."
         action={hasPermission('ANIMAL_CREATE')?<Button onClick={()=>navigate('/animales/gestionar?create=1')}>
           <Plus size={18}/>Registrar animal</Button>:undefined}/>:<div className="animal-list animal-compact-list" role="list" aria-label="Listado de animales">
         {list.items.map(animal=><button type="button" className="animal-list-row" role="listitem" key={animal.id}
           onClick={()=>navigate(`/animales/${animal.id}`)}>
-          <span className="animal-list-photo">{animal.profilePhotoUrl?<img src={animal.profilePhotoUrl} alt=""/>:<Beef size={24}/>}</span>
+          <span className="animal-list-photo">{animal.profilePhotoUrl?<img src={animal.profilePhotoUrl} alt=""/>:<AnimalIcon size={24}/>}</span>
           <span className="animal-compact-content"><span className="animal-compact-heading"><strong>{animal.name}</strong>
             <Badge tone={animal.availabilityStatusCode==='ACTIVE'?'success':animal.availabilityStatusCode==='DEAD'?'danger':'warning'}>
               {animal.availabilityStatusCode==='ACTIVE'?'Activo':animal.availabilityStatusCode}</Badge></span>

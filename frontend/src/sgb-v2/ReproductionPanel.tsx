@@ -1,3 +1,4 @@
+import {DateInput} from '../components/ui';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import {ArrowUpDown,Baby,ChevronRight,Plus,Settings2} from 'lucide-react';
 import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
@@ -37,6 +38,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeForm, setActiveForm] = useState<'HEAT'|'PREGNANCY'|'SERVICE'|'BIRTH'|'LOSS'|null>(null);
+  const closeForm=()=>{setActiveForm(null);if(initialAction)onCompleted?.();};
   const [settingsOpen,setSettingsOpen]=useState(false);
   const [selectedCategory,setSelectedCategory]=useState<ReproductionKind|null>(null);
   const [selectedRecord,setSelectedRecord]=useState<string|null>(null);
@@ -238,8 +240,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
       </form>
     </Modal>}
     {canManage && activeForm && <Modal title="Registrar evento reproductivo" wide
-      onClose={()=>setActiveForm(null)} footer={<Button variant="ghost"
-        onClick={()=>setActiveForm(null)}>Cerrar</Button>}>
+      onClose={closeForm} footer={<Button variant="ghost" onClick={closeForm}>Cerrar</Button>}>
       {!initialAction&&<div className="form-toolbar" aria-label="Tipo de evento">
       {([['HEAT','Celo'],['SERVICE','Servicio'],['PREGNANCY','Preñez'],
         ['BIRTH','Parto'],['LOSS','Pérdida']] as const).map(([id,label])=><button
@@ -259,8 +260,8 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
           <option value="">No registrado</option>
           {males.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
         </Select></label>
-        <label><span>Inicio *</span><input type="date" name="startsOn" required defaultValue={localDate()} /></label>
-        <label><span>Fin</span><input type="date" name="endsOn" /></label>
+        <label><span>Inicio *</span><DateInput type="date" name="startsOn" required defaultValue={localDate()} /></label>
+        <label><span>Fin</span><DateInput type="date" name="endsOn" /></label>
         <label><span>Celo aparente o falso</span><input type="checkbox" name="isFalse" /></label>
         <label><span>Observaciones</span><textarea name="notes" maxLength={500} /></label>
         <button className="primary-button compact" disabled={busy || !females.length}>Guardar celo</button>
@@ -301,7 +302,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
           <option value="BLOOD_TEST">Análisis de sangre</option>
           <option value="OBSERVATION">Observación</option><option value="OTHER">Otro</option>
         </Select></label>
-        <label><span>Fecha de confirmación *</span><input type="date" name="confirmedOn"
+        <label><span>Fecha de confirmación *</span><DateInput type="date" name="confirmedOn"
           required defaultValue={localDate()} /></label>
         <label><span>Días de gestación</span><input type="number" name="gestationDays" min="0" max="400" />
           <small>Con un celo se calculan automáticamente; sin selección se usa el último celo válido según las reglas.</small></label>
@@ -321,12 +322,12 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
           <option value="INSEMINATION">Inseminación artificial</option>
           <option value="EMBRYO_TRANSFER">Transferencia de embriones</option>
         </Select></label>
-        <label><span>Fecha *</span><input type="date" name="occurredOn" required defaultValue={localDate()} /></label>
+        <label><span>Fecha *</span><DateInput type="date" name="occurredOn" required defaultValue={localDate()} /></label>
         <label><span>Celo relacionado</span><Select name="heatId" defaultValue="">
           <option value="">Sin celo registrado</option>
           {records?.heats.filter((entry) => !entry.cancelled && !entry.isFalse&&
             (!initialAction||entry.cowId===initialAnimalId))
-            .map((entry) => <option key={entry.id} value={entry.id}>{entry.cowName} · {entry.startsOn}</option>)}
+            .map((entry) => <option key={entry.id} value={entry.id}>{entry.cowName} · {formatDate(entry.startsOn)}</option>)}
         </Select></label>
         <label><span>Padre registrado</span><Select name="fatherId" defaultValue="">
           <option value="">Sin padre registrado</option>
@@ -353,9 +354,9 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
           <option value="" disabled>Selecciona una preñez</option>
           {confirmed.filter(item=>!initialAction||item.cowId===initialAnimalId)
             .map((item) => <option key={item.id} value={item.id}>
-            {item.cowName} · {item.confirmedOn}</option>)}
+            {item.cowName} · {formatDate(item.confirmedOn)}</option>)}
         </Select></label>
-        <label><span>Fecha de parto *</span><input type="date" name="occurredOn"
+        <label><span>Fecha de parto *</span><DateInput type="date" name="occurredOn"
           required defaultValue={localDate()} /></label>
         <label><span>Crías vivas</span><input type="number" min="0" max="8" value={calfCount}
           onChange={(event) => setCalfCount(Number(event.target.value))} /></label>
@@ -381,9 +382,9 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
           <option value="" disabled>Selecciona una preñez</option>
           {confirmed.filter(item=>!initialAction||item.cowId===initialAnimalId)
             .map((item) => <option key={item.id} value={item.id}>
-            {item.cowName} · {item.confirmedOn}</option>)}
+            {item.cowName} · {formatDate(item.confirmedOn)}</option>)}
         </Select></label>
-        <label><span>Fecha *</span><input type="date" name="occurredOn"
+        <label><span>Fecha *</span><DateInput type="date" name="occurredOn"
           required defaultValue={localDate()} /></label>
         <label><span>Observaciones *</span><textarea name="notes" required maxLength={5000} /></label>
         <button className="secondary-button compact" disabled={busy || !confirmed.length}>

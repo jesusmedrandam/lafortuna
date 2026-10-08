@@ -1,14 +1,18 @@
+import {DateInput} from '../components/ui';
 import {type FormEvent,useEffect,useMemo,useState} from 'react';
-import {ArrowUpDown,ChevronRight,Edit3,ImagePlus,MapPin,Plus,Sprout} from 'lucide-react';
-import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
+import {ArrowUpDown,Axe,ChevronRight,Edit3,Gauge,ImagePlus,MapPin,Plus,SlidersHorizontal,Scissors,SprayCan,Sprout,Trash2,X} from 'lucide-react';
+import {useLocation,useNavigate,useSearchParams} from 'react-router-dom';
+import {Badge,Button,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
   IconButton,LoadingState,Modal,Select} from '../components/ui';
-import {formatDate} from '../utils';
+import {formatDate,formatNumber} from '../utils';
 import {ApiRequestError,applyCleaning,cancelCleaning,createCleaning,createCleaningProduct,
   getCleaningOptions,getCleaningProducts,getCleanings,listCatalogItems,updateCleaning,uploadMedia,
   type CatalogItem,type CleaningInput,type CleaningOptions,type CleaningProduct,type CleaningRecord} from './api';
 import {RecordMedia} from './RecordMedia';
 const labels={FUMIGACION:'Fumigación',TALA_SELECTIVA:'Tala selectiva',
   DESBROCE:'Desbroce',OTRA:'Otra labor'};
+const activityIcons={FUMIGACION:SprayCan,TALA_SELECTIVA:Axe,DESBROCE:Scissors,OTRA:Sprout};
+const statuses={BORRADOR:'Borrador',COMPLETADO:'Completado',CANCELADO:'Cancelado'};
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 const message=(error:unknown)=>error instanceof ApiRequestError?error.message:
   error instanceof Error?error.message:'No se pudo guardar la limpieza.';
@@ -27,15 +31,24 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
   const [showProduct,setShowProduct]=useState(false);
   const [editing,setEditing]=useState<CleaningRecord|null>(null);
   const [photos,setPhotos]=useState<File[]>([]);
-  const [selectedId,setSelectedId]=useState<string|null>(null);
+  const [params,setParams]=useSearchParams();const navigate=useNavigate();const route=useLocation();
+  const selectedId=params.get('limpieza');
+  function setSelectedId(id:string|null){
+    if(!id&&route.state?.cleaningDetail){navigate(-1);return;}
+    const next=new URLSearchParams(params);if(id)next.set('limpieza',id);else next.delete('limpieza');
+    setParams(next,{replace:!id,state:id?{cleaningDetail:true}:null});
+  }
   const [search,setSearch]=useState('');
   const [activityFilter,setActivityFilter]=useState<CleaningInput['activities'][number]|''>('');
-  const [newest,setNewest]=useState(true);
+  const [order,setOrder]=useState<'NEWEST'|'OLDEST'|'AZ'|'ZA'>('NEWEST');
+  const [filtersOpen,setFiltersOpen]=useState(false);
+  const [filters,setFilters]=useState({locationId:'',since:'',until:'',status:''});
   const [locationId,setLocationId]=useState('');
   const [areaType,setAreaType]=useState<CleaningInput['areaType']>('TOTAL');
   const [activities,setActivities]=useState<CleaningInput['activities']>([]);
   const [applicationUnit,setApplicationUnit]=useState<'TANQUES'|'BOMBADAS'>('TANQUES');
   const [applicationCount,setApplicationCount]=useState('');
+  const [startedOn,setStartedOn]=useState(today());
   const [lines,setLines]=useState<ProductLine[]>([]);
   const [operators,setOperators]=useState<OperatorLine[]>([]);
   useEffect(()=>{let active=true;void Promise.all([getCleanings(accessToken),
@@ -46,10 +59,10 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
   },[accessToken,revision]);
   function reset(){setEditing(null);setShowForm(false);setPhotos([]);setError(null);
     setLocationId('');setAreaType('TOTAL');
-    setActivities([]);setApplicationCount('');setApplicationUnit('TANQUES');setLines([]);setOperators([]);}
+    setStartedOn(today());setActivities([]);setApplicationCount('');setApplicationUnit('TANQUES');setLines([]);setOperators([]);}
   function edit(item:CleaningRecord){setSelectedId(null);setError(null);setEditing(item);
     setShowForm(true);setLocationId(item.locationId);
-    setAreaType(item.areaType);setActivities(item.activities);setApplicationUnit(item.applicationUnit??'TANQUES');
+    setStartedOn(item.startedOn);setAreaType(item.areaType);setActivities(item.activities);setApplicationUnit(item.applicationUnit??'TANQUES');
     setApplicationCount(item.applicationCount==null?'':String(item.applicationCount));
     setLines(item.products.map(({productId,unitCode,quantityPerApplication,notes})=>({
       productId,unitCode,quantityPerApplication,notes:notes??null})));setOperators(item.operators);
@@ -92,27 +105,44 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
     finally{setBusy(false);}
   }
   const location=options?.locations.find((item)=>item.id===locationId);
+  const unitLabel=(code:string)=>options?.units.find(item=>item.code===code)?.symbol??
+    ({HECTARE:'ha',SQUARE_METER:'m²',MILLILITER:'ml',LITER:'L',GRAM:'g',KILOGRAM:'kg'} as Record<string,string>)[code]??code;
+  const activeFilters=Object.values(filters).filter(Boolean).length;
   const visible=useMemo(()=>records?.filter(item=>(!activityFilter||item.activities.includes(activityFilter))&&
+    (!filters.locationId||item.locationId===filters.locationId)&&(!filters.status||item.status===filters.status)&&
+    (!filters.since||item.startedOn>=filters.since)&&(!filters.until||item.startedOn<=filters.until)&&
     [item.locationName,item.notes??'',...item.activities.map(activity=>labels[activity]),
       ...item.products.map(product=>product.productName)].join(' ').toLocaleLowerCase()
       .includes(search.trim().toLocaleLowerCase()))
-    .sort((a,b)=>(newest?-1:1)*(a.startedOn.localeCompare(b.startedOn)||
-      a.createdAt.localeCompare(b.createdAt)))??[],[records,activityFilter,search,newest]);
+    .sort((a,b)=>order==='AZ'||order==='ZA'?(order==='AZ'?1:-1)*a.locationName.localeCompare(b.locationName,'es'):
+      (order==='NEWEST'?-1:1)*(a.startedOn.localeCompare(b.startedOn)||a.createdAt.localeCompare(b.createdAt)))??[],
+      [records,activityFilter,search,order,filters]);
   const viewing=records?.find(item=>item.id===selectedId);
   return <section className="module-no-header cleanings-panel">
     <div className="activity-type-strip" aria-label="Filtrar tipo de labor">
       <button type="button" className={!activityFilter?'selected':''} onClick={()=>setActivityFilter('')}>
         <span><Sprout size={20}/></span><small>Todas</small></button>
-      {(Object.keys(labels) as CleaningInput['activities'][number][]).map(code=><button type="button"
+      {(Object.keys(labels) as CleaningInput['activities'][number][]).map(code=>{const Icon=activityIcons[code];return <button type="button"
         key={code} className={activityFilter===code?'selected':''} onClick={()=>setActivityFilter(code)}>
-        <span>{labels[code].slice(0,1)}</span><small>{labels[code]}</small></button>)}
+        <span><Icon size={20}/></span><small>{labels[code]}</small></button>;})}
     </div>
     <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar potrero, labor o producto…"
-      count={visible.length} actions={<><IconButton label={newest?'Más recientes':'Más antiguos'}
-        onClick={()=>setNewest(value=>!value)}><ArrowUpDown size={18}/></IconButton>
+      count={visible.length} actions={<><IconButton label="Cambiar orden" title={{NEWEST:'Más recientes',OLDEST:'Más antiguos',AZ:'Potrero A–Z',ZA:'Potrero Z–A'}[order]}
+        onClick={()=>setOrder(value=>value==='NEWEST'?'OLDEST':value==='OLDEST'?'AZ':value==='AZ'?'ZA':'NEWEST')}><ArrowUpDown size={18}/></IconButton>
+        <IconButton label="Filtros de limpieza" className={filtersOpen||activeFilters?'active':''} onClick={()=>setFiltersOpen(value=>!value)}>
+          <SlidersHorizontal size={18}/>{activeFilters>0&&<span className="filter-count">{activeFilters}</span>}</IconButton>
         {canManage&&<IconButton label="Nuevo producto" onClick={()=>{
           setError(null);setShowProduct(true);}}>
           <Plus size={18}/><Sprout size={15}/></IconButton>}</>}/>
+    {filtersOpen&&<section className="advanced-filters"><div className="advanced-filters-heading"><h2>Filtrar limpiezas</h2>
+      <div className="advanced-filter-actions"><IconButton label="Limpiar filtros" onClick={()=>setFilters({locationId:'',since:'',until:'',status:''})}><Trash2 size={17}/></IconButton>
+        <IconButton label="Cerrar filtros" onClick={()=>setFiltersOpen(false)}><X size={18}/></IconButton></div></div>
+      <div className="advanced-filters-grid"><label><span>Potrero</span><Select value={filters.locationId} onChange={event=>setFilters({...filters,locationId:event.target.value})}>
+        <option value="">Todos los potreros</option>{options?.locations.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>
+        <label><span>Desde</span><DateInput type="date" value={filters.since} max={filters.until||undefined} onChange={event=>setFilters({...filters,since:event.target.value})}/></label>
+        <label><span>Hasta</span><DateInput type="date" value={filters.until} min={filters.since||undefined} onChange={event=>setFilters({...filters,until:event.target.value})}/></label>
+        <label><span>Estado</span><Select value={filters.status} onChange={event=>setFilters({...filters,status:event.target.value})}><option value="">Todos los estados</option>
+          {Object.entries(statuses).map(([code,name])=><option key={code} value={code}>{name}</option>)}</Select></label></div></section>}
     {error&&<div role="alert" className="form-error admin-error">{error}</div>}
     {canManage&&showProduct&&<Modal title="Nuevo producto compartido en la cuenta" wide
       onClose={()=>setShowProduct(false)} footer={<Button variant="ghost"
@@ -133,9 +163,9 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
       <label><span>Potrero *</span><Select required value={locationId}
         onChange={(event)=>setLocationId(event.target.value)}><option value="">Selecciona</option>
         {options.locations.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>
-      <label><span>Inicio *</span><input name="startedOn" type="date" max={today()} required
-        defaultValue={editing?.startedOn??today()}/></label>
-      <label><span>Finalización</span><input name="finishedOn" type="date" max={today()}
+      <label><span>Inicio *</span><DateInput name="startedOn" type="date" max={today()} required
+        value={startedOn} onChange={event=>setStartedOn(event.target.value)}/></label>
+      <label><span>Finalización</span><DateInput name="finishedOn" type="date" min={startedOn} max={today()}
         defaultValue={editing?.finishedOn??''}/></label>
       <label><span>Área intervenida</span><Select value={areaType}
         onChange={(event)=>setAreaType(event.target.value as CleaningInput['areaType'])}>
@@ -143,7 +173,7 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
       {areaType==='PARCIAL'&&<label><span>Porcentaje del potrero *</span>
         <input name="partialPercent" type="number" min="0.01" max="99.99" step="0.01"
           required defaultValue={editing?.partialPercent??''}/></label>}
-      {location?.areaValue&&<p className="muted movement-wide">Área del potrero: {location.areaValue} {location.areaUnitCode}.
+      {location?.areaValue!=null&&<p className="muted movement-wide">Área del potrero: {formatNumber(location.areaValue)} {unitLabel(location.areaUnitCode??'')}.
         El área intervenida se calculará automáticamente.</p>}
       <fieldset className="movement-wide cleaning-activities"><legend>Actividades *</legend>
         {Object.entries(labels).map(([code,label])=><label key={code}><input type="checkbox"
@@ -157,41 +187,43 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
       <label><span>Cantidad de {applicationUnit==='TANQUES'?'tanques':'bombadas'}</span>
         <input type="number" min="0.01" max="100000" step="0.01" value={applicationCount}
           onChange={(event)=>setApplicationCount(event.target.value)}/></label>
-      <label><span>Capacidad (litros)</span><input name="capacity" type="number" min="0.01" max="100000"
+      <label><span>Capacidad de cada {applicationUnit==='TANQUES'?'tanque':'bombada'} (L)</span><input name="capacity" type="number" min="0.01" max="100000"
         step="0.01" defaultValue={editing?.tankCapacityLiters??''}/></label></>}
       <label className="movement-wide"><span>Observaciones</span><textarea name="notes" maxLength={5000}
         defaultValue={editing?.notes??''}/></label>
       {activities.includes('FUMIGACION')&&<div className="movement-wide cleaning-lines"><div className="movement-card-top"><h3>Productos</h3>
         <button type="button" className="secondary-button compact" onClick={()=>setLines([...lines,
           {productId:'',unitCode:'MILLILITER',quantityPerApplication:1}])}>+ Producto aplicado</button></div>
-        {lines.map((line,index)=><div className="cleaning-line" key={index}>
-          <Select aria-label="Producto" value={line.productId} required onChange={(event)=>setLines(lines.map(
+        {lines.map((line,index)=><fieldset className="cleaning-form-line" key={index}><legend>Producto {index+1}</legend>
+          <label><span>Producto *</span><Select aria-label="Producto" value={line.productId} required onChange={event=>setLines(lines.map(
             (item,i)=>i===index?{...item,productId:event.target.value}:item))}>
-            <option value="">Selecciona</option>{products.filter((item)=>item.active).map((item)=><option
-              key={item.id} value={item.id}>{item.name}</option>)}</Select>
-          <input type="number" min="0.0001" max="1000000" step="any" value={line.quantityPerApplication}
-            aria-label="Cantidad por aplicación" required onChange={(event)=>setLines(lines.map((item,i)=>
-              i===index?{...item,quantityPerApplication:Number(event.target.value)}:item))}/>
-          <Select aria-label="Unidad" value={line.unitCode} onChange={(event)=>setLines(lines.map((
-            item,i)=>i===index?{...item,unitCode:event.target.value}:item))}>
-            {options.units.map((unit)=><option key={unit.code} value={unit.code}>{unit.symbol}</option>)}</Select>
-          <strong>Total: {applicationCount?Number((Number(applicationCount)*line.quantityPerApplication)
-            .toFixed(4)):'—'}</strong><button type="button" className="secondary-button compact"
-              onClick={()=>setLines(lines.filter((_,i)=>i!==index))}>Quitar</button>
-        </div>)}</div>}
+            <option value="">Selecciona</option>{products.filter(item=>item.active||item.id===line.productId).map(item=><option
+              key={item.id} value={item.id}>{item.name}{item.active?'':' (inactivo)'}</option>)}</Select></label>
+          <label><span>Cantidad por {applicationUnit==='TANQUES'?'tanque':'bombada'} *</span><input type="number" min="0.0001" max="1000000" step="any"
+            value={line.quantityPerApplication} aria-label="Cantidad por aplicación" required onChange={event=>setLines(lines.map(
+              (item,i)=>i===index?{...item,quantityPerApplication:Number(event.target.value)}:item))}/></label>
+          <label><span>Unidad *</span><Select aria-label="Unidad" value={line.unitCode} onChange={event=>setLines(lines.map(
+            (item,i)=>i===index?{...item,unitCode:event.target.value}:item))}>
+            {options.units.map(unit=><option key={unit.code} value={unit.code}>{unit.name} ({unit.symbol})</option>)}</Select></label>
+          <label><span>Cantidad total utilizada</span><input readOnly tabIndex={-1} aria-label="Cantidad total utilizada"
+            value={applicationCount?`${formatNumber(Number(applicationCount)*line.quantityPerApplication,4)} ${unitLabel(line.unitCode)}`:''}
+            placeholder="Cantidad × aplicaciones"/><small>Se calcula automáticamente.</small></label>
+          <label className="movement-wide"><span>Observaciones del producto</span><input aria-label="Observaciones del producto" maxLength={2000} value={line.notes??''}
+            onChange={event=>setLines(lines.map((item,i)=>i===index?{...item,notes:event.target.value}:item))}/></label>
+          <button type="button" className="secondary-button compact" onClick={()=>setLines(lines.filter((_,i)=>i!==index))}>Quitar producto</button>
+        </fieldset>)}</div>}
       <div className="movement-wide cleaning-lines"><div className="movement-card-top"><h3>Operadores</h3>
         <button type="button" className="secondary-button compact" onClick={()=>setOperators([...operators,
           {name:'',function:null}])}>+ Operador</button></div>
-        {operators.map((item,index)=><div className="cleaning-line" key={index}>
-          <input aria-label="Nombre de operador" placeholder="Nombre" required minLength={2}
-            maxLength={160} value={item.name}
-            onChange={(event)=>setOperators(operators.map((entry,i)=>i===index
-              ?{...entry,name:event.target.value}:entry))}/>
-          <input aria-label="Función" placeholder="Función" maxLength={100} value={item.function??''}
-            onChange={(event)=>setOperators(operators.map((entry,i)=>i===index
-              ?{...entry,function:event.target.value}:entry))}/>
-          <button type="button" className="secondary-button compact"
-            onClick={()=>setOperators(operators.filter((_,i)=>i!==index))}>Quitar</button></div>)}</div>
+        {operators.map((item,index)=><fieldset className="cleaning-form-line" key={index}><legend>Operador {index+1}</legend>
+          <label><span>Nombre *</span><input aria-label="Nombre de operador" placeholder="Nombre" required minLength={2} maxLength={160}
+            value={item.name} onChange={event=>setOperators(operators.map((entry,i)=>i===index?{...entry,name:event.target.value}:entry))}/></label>
+          <label><span>Función</span><input aria-label="Función" placeholder="Función" maxLength={100} value={item.function??''}
+            onChange={event=>setOperators(operators.map((entry,i)=>i===index?{...entry,function:event.target.value}:entry))}/></label>
+          <label className="movement-wide"><span>Observaciones del operador</span><input aria-label="Observaciones del operador" maxLength={2000} value={item.notes??''}
+            onChange={event=>setOperators(operators.map((entry,i)=>i===index?{...entry,notes:event.target.value}:entry))}/></label>
+          <button type="button" className="secondary-button compact" onClick={()=>setOperators(operators.filter((_,i)=>i!==index))}>Quitar operador</button>
+        </fieldset>)}</div>
       {canManageMedia&&!editing&&<div className="movement-wide record-photo-picker">
         <strong>Fotografías de la limpieza</strong><small>Hasta tres imágenes. Se cargarán al guardar el borrador.</small>
         {photos.length>0&&<div className="record-photo-grid">{photos.map((file,index)=><div
@@ -210,17 +242,16 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
     </form></Modal>}
     {records===null&&!error?<LoadingState/>:records===null?<ErrorState
       message={error??'No se pudieron cargar las limpiezas.'}
-      onRetry={()=>setRevision(value=>value+1)}/>:visible.length?<Card className="cleaning-list">
-      <div className="cleaning-list-head"><span>Potrero</span><span>Inicio</span><span>Actividades</span>
-        <span>Área</span><span>Estado</span><span/></div>
-      {visible.map(item=><button type="button" className="cleaning-list-row" key={item.id}
-        onClick={()=>setSelectedId(item.id)}><span className="cleaning-identity"><span><MapPin size={19}/></span>
-          <span><strong>{item.locationName}</strong><small>{item.notes||'Sin observaciones'}</small></span></span>
-        <span>{formatDate(item.startedOn)}</span><span>{item.activities.map(activity=>labels[activity]).join(', ')}</span>
-        <span>{item.areaType==='TOTAL'?'Total':`${item.partialPercent}%`}</span>
-        <span><Badge tone={item.status==='COMPLETADO'?'success':item.status==='BORRADOR'?'warning':'danger'}>
-          {item.status==='BORRADOR'?'Borrador':item.status==='COMPLETADO'?'Completado':'Cancelado'}</Badge></span>
-        <ChevronRight size={18}/></button>)}</Card>:<EmptyState icon={Sprout} title="Sin limpiezas"
+      onRetry={()=>setRevision(value=>value+1)}/>:visible.length?<div className="cleaning-summary-list">
+      {visible.map(item=><button type="button" className="cleaning-summary-row" key={item.id} onClick={()=>setSelectedId(item.id)}>
+        <span className="cleaning-summary-icon"><MapPin size={19}/></span>
+        <span className="cleaning-summary-main"><strong>{item.locationName} · {item.activities.map(activity=>labels[activity]).join(', ')}</strong>
+          <small>{formatDate(item.startedOn)} · {item.areaType==='TOTAL'?'Todo el potrero':`${formatNumber(item.partialPercent)}% del potrero`}</small>
+          <small>{item.operators.length?item.operators.map(operator=>`${operator.name}${operator.function?` · ${operator.function}`:''}`).join(' | '):'Sin operador registrado'}</small>
+          {item.products.length>0&&<small className="cleaning-products">{item.products.map(product=>product.productName).join(', ')}</small>}
+          {item.applicationCount!=null&&<small className="cleaning-dose"><Gauge size={14}/>{formatNumber(item.applicationCount)} {item.applicationUnit==='TANQUES'?'tanques':'bombadas'}</small>}
+        </span><Badge tone={item.status==='COMPLETADO'?'success':item.status==='BORRADOR'?'warning':'danger'}>{statuses[item.status]}</Badge>
+        <span className="record-row-actions" aria-hidden="true"><ChevronRight size={18}/></span></button>)}</div>:<EmptyState icon={Sprout} title="Sin limpiezas"
         description={records.length?'Prueba otra búsqueda o filtro.':'Registra la primera labor en un potrero.'}/>}
     {viewing&&<Modal title="Detalle de la limpieza" wide onClose={()=>setSelectedId(null)}
       footer={<><Button variant="ghost" onClick={()=>setSelectedId(null)}>Cerrar</Button>
@@ -238,15 +269,18 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
         <div className="cleaning-detail-grid"><div><small>Actividades</small><strong>{viewing.activities
           .map(activity=>labels[activity]).join(', ')}</strong></div><div><small>Área intervenida</small>
           <strong>{viewing.areaType==='TOTAL'?'Total':`${viewing.partialPercent}%`}
-            {viewing.areaValue!=null?` · ${viewing.areaValue} ${viewing.areaUnitCode??''}`:''}</strong></div>
+            {viewing.areaValue!=null?` · ${formatNumber(viewing.areaValue)} ${unitLabel(viewing.areaUnitCode??'')}`:''}</strong></div>
           {viewing.applicationCount!=null&&<div><small>Aplicaciones</small><strong>
-            {viewing.applicationCount} {viewing.applicationUnit==='TANQUES'?'tanques':'bombadas'}</strong></div>}</div>
+            {formatNumber(viewing.applicationCount)} {viewing.applicationUnit==='TANQUES'?'tanques':'bombadas'}</strong></div>}
+          {viewing.tankCapacityLiters!=null&&<div><small>Capacidad por {viewing.applicationUnit==='TANQUES'?'tanque':'bombada'}</small><strong>{formatNumber(viewing.tankCapacityLiters)} L</strong></div>}
+          {viewing.tankCapacityLiters!=null&&viewing.applicationCount!=null&&<div><small>Volumen aplicado</small><strong>{formatNumber(viewing.tankCapacityLiters*viewing.applicationCount)} L</strong></div>}</div>
         {viewing.products.length>0&&<section><h3>Productos aplicados</h3><div className="cleaning-detail-lines">
           {viewing.products.map(product=><div key={product.productId}><strong>{product.productName}</strong>
-            <small>{product.totalQuantity} {product.unitCode} en total</small></div>)}</div></section>}
+            <small>{formatNumber(product.quantityPerApplication,4)} {unitLabel(product.unitCode)} por {viewing.applicationUnit==='TANQUES'?'tanque':'bombada'}</small>
+            <small>{formatNumber(product.totalQuantity,4)} {unitLabel(product.unitCode)} en total</small>{product.notes&&<p>{product.notes}</p>}</div>)}</div></section>}
         {viewing.operators.length>0&&<section><h3>Operadores</h3><div className="cleaning-detail-lines">
           {viewing.operators.map((operator,index)=><div key={`${operator.name}-${index}`}>
-            <strong>{operator.name}</strong><small>{operator.function||'Sin función indicada'}</small></div>)}</div></section>}
+            <strong>{operator.name}</strong><small>{operator.function||'Sin función indicada'}</small>{operator.notes&&<p>{operator.notes}</p>}</div>)}</div></section>}
         {viewing.notes&&<section><h3>Observaciones</h3><p>{viewing.notes}</p></section>}
         {canViewMedia&&<section><h3>Fotografías</h3><RecordMedia accessToken={accessToken}
           entityType="CLEANING" entityId={viewing.id} canManage={canManageMedia}/></section>}

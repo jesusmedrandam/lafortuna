@@ -2,6 +2,8 @@ export interface OfflineScope {
   userId: string;
   propertyId: string | null;
   roleId: string | null;
+  supportMode?:boolean;
+  supportAccountId?:string|null;
 }
 
 export interface CacheEntry {
@@ -25,7 +27,12 @@ export interface OutboxEntry {
   scope: OfflineScope;
   path: string;
   method: string;
-  bodyType: 'none' | 'json' | 'form';
+  bodyType: 'none' | 'json' | 'form' | 'binary';
+  requestHeaders?: Record<string, string>;
+  binarySize?: number;
+  serverResult?: unknown;
+  summary?:string;
+  undo?:Array<{path:string;payload:unknown;etag:string|null;existed:boolean}>;
   jsonBody: unknown;
   formParts: StoredFormPart[];
   temporaryId: string | null;
@@ -44,11 +51,13 @@ export interface SessionSnapshot<T = unknown> {
 }
 
 const DATABASE_NAME = 'sgb-v2-offline-v1';
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const CACHE = 'cache';
 const OUTBOX = 'outbox';
 const SETTINGS = 'settings';
 const SESSIONS = 'sessions';
+const MEDIA = 'local-media';
+export interface LocalMedia {id:string;userId:string;file:Blob;filename:string}
 
 let opening: Promise<IDBDatabase> | null = null;
 
@@ -69,6 +78,8 @@ function database() {
       }
       if (!db.objectStoreNames.contains(SETTINGS)) db.createObjectStore(SETTINGS, { keyPath: 'key' });
       if (!db.objectStoreNames.contains(SESSIONS)) db.createObjectStore(SESSIONS, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(MEDIA))
+        db.createObjectStore(MEDIA,{keyPath:'id'}).createIndex('userId','userId');
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -87,9 +98,19 @@ async function store(name: string, mode: IDBTransactionMode = 'readonly') {
   return (await database()).transaction(name, mode).objectStore(name);
 }
 
+async function write(name:string,action:(store:IDBObjectStore)=>void){
+  const transaction=(await database()).transaction(name,'readwrite');
+  await new Promise<void>((resolve,reject)=>{
+    transaction.oncomplete=()=>resolve();
+    transaction.onerror=()=>reject(transaction.error);
+    transaction.onabort=()=>reject(transaction.error??new Error('No se pudo guardar en este dispositivo.'));
+    action(transaction.objectStore(name));
+  });
+}
+
 export function offlineScopeKey(scope: OfflineScope) {
   return [scope.userId, scope.propertyId ?? 'none', scope.roleId ?? 'none']
-    .map(encodeURIComponent).join(':');
+    .map(encodeURIComponent).join(':')+(scope.supportMode===true?':support':scope.supportMode===false?':user':'');
 }
 
 export function offlineCacheKey(scope: OfflineScope, path: string) {
@@ -106,11 +127,20 @@ export async function putCache(scope: OfflineScope, path: string, payload: unkno
     key: offlineCacheKey(scope, path), scopeKey: offlineScopeKey(scope), path,
     payload, etag, savedAt: Date.now(),
   };
-  await result((await store(CACHE, 'readwrite')).put(entry));
+  await write(CACHE,store=>{store.put(entry);});
 }
 
 export async function listCache(scope: OfflineScope) {
   return await result((await store(CACHE)).index('scopeKey').getAll(offlineScopeKey(scope))) as CacheEntry[];
+}
+
+export async function listUserCache(userId:string){
+  const entries=await result((await store(CACHE)).getAll()) as CacheEntry[];
+  return entries.filter(entry=>entry.scopeKey.startsWith(encodeURIComponent(userId)+':'));
+}
+
+export async function removeCachedPaths(scope:OfflineScope,paths:string[]){
+  await write(CACHE,store=>{for(const path of paths)store.delete(offlineCacheKey(scope,path));});
 }
 
 export async function clearScopeCache(scope: OfflineScope) {
@@ -128,11 +158,11 @@ export async function clearScopeCache(scope: OfflineScope) {
 }
 
 export async function putOutbox(entry: OutboxEntry) {
-  await result((await store(OUTBOX, 'readwrite')).put(entry));
+  await write(OUTBOX,store=>{store.put(entry);});
 }
 
 export async function removeOutbox(id: string) {
-  await result((await store(OUTBOX, 'readwrite')).delete(id));
+  await write(OUTBOX,store=>{store.delete(id);});
 }
 
 export async function listOutbox(userId: string) {
@@ -146,12 +176,12 @@ export async function getSetting<T>(key: string): Promise<T | null> {
 }
 
 export async function putSetting<T>(key: string, value: T) {
-  await result((await store(SETTINGS, 'readwrite')).put({ key, value }));
+  await write(SETTINGS,store=>{store.put({ key, value });});
 }
 
 export async function putSessionSnapshot<T>(userId: string, payload: T) {
   const snapshot: SessionSnapshot<T> = { id: 'last-session', userId, payload, savedAt: Date.now() };
-  await result((await store(SESSIONS, 'readwrite')).put(snapshot));
+  await write(SESSIONS,store=>{store.put(snapshot);});
 }
 
 export async function getSessionSnapshot<T>() {
@@ -159,7 +189,32 @@ export async function getSessionSnapshot<T>() {
 }
 
 export async function clearSessionSnapshot() {
-  await result((await store(SESSIONS, 'readwrite')).delete('last-session'));
+  await write(SESSIONS,store=>{store.delete('last-session');});
+}
+
+export async function putLocalMedia(value:LocalMedia){await write(MEDIA,store=>{store.put(value);});}
+export async function putMediaMutation(entry:OutboxEntry,media:LocalMedia){
+  const transaction=(await database()).transaction([OUTBOX,MEDIA],'readwrite');
+  await new Promise<void>((resolve,reject)=>{
+    transaction.oncomplete=()=>resolve();
+    transaction.onerror=()=>reject(transaction.error);
+    transaction.onabort=()=>reject(transaction.error??new Error('No se pudo guardar el archivo local.'));
+    transaction.objectStore(MEDIA).put(media);
+    transaction.objectStore(OUTBOX).put(entry);
+  });
+}
+export async function getLocalMedia(userId:string,id:string){
+  const value=await result((await store(MEDIA)).get(id)) as LocalMedia|undefined;
+  return value?.userId===userId?value:null;
+}
+export async function removeLocalMedia(id:string){await write(MEDIA,store=>{store.delete(id);});}
+export async function getLocalMediaInfo(userId:string){
+  const rows=await result((await store(MEDIA)).index('userId').getAll(userId)) as LocalMedia[];
+  return {count:rows.length,bytes:rows.reduce((sum,row)=>sum+row.file.size,0)};
+}
+
+export async function listLocalMedia(userId:string){
+  return await result((await store(MEDIA)).index('userId').getAll(userId)) as LocalMedia[];
 }
 
 export async function getOfflineSize(scope: OfflineScope) {

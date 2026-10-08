@@ -1,3 +1,4 @@
+import {DateInput} from '../components/ui';
 import { type FormEvent, useEffect, useState } from 'react';
 import {
   ApiRequestError, createGroup, createLocation,listCatalogItems,
@@ -54,7 +55,7 @@ export function LocationFields({ place,grassCatalog }: { place?: PhysicalLocatio
         <option value="CORTE">Corte</option><option value="MIXTO">Mixto</option>
         <option value="DESCANSO">Descanso</option>
       </Select></label>
-      <label><span>Último descanso</span><input type="date" name="lastRestDate"
+      <label><span>Último descanso</span><DateInput type="date" name="lastRestDate"
         defaultValue={place?.lastRestDate ?? ''} /></label>
       <fieldset className="animal-colors"><legend>Pastos</legend>
         {Array.from({ length: grassCount }, (_, index) => <div key={index} className="group-inline-form">
@@ -75,7 +76,7 @@ export function LocationFields({ place,grassCatalog }: { place?: PhysicalLocatio
             <option value="">Sin área</option><option value="HECTARE">ha</option>
             <option value="SQUARE_METER">m²</option>
           </Select></label>
-          <label><span>Siembra</span><input type="date" name="grassSowing"
+          <label><span>Siembra</span><DateInput type="date" name="grassSowing"
             defaultValue={place?.grasses?.[index]?.sowingDate ?? ''} /></label>
           <label><span>Observaciones</span><input name="grassNotes" maxLength={300}
             defaultValue={place?.grasses?.[index]?.notes ?? ''} /></label>

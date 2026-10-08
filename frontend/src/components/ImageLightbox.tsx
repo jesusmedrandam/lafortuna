@@ -19,6 +19,7 @@ interface ImageLightboxProps {
   initialIndex: number;
   onClose: () => void;
   actions?: (item: LightboxMedia) => ReactNode;
+  details?: (item: LightboxMedia) => ReactNode;
   minimalControls?: boolean;
 }
 
@@ -58,7 +59,7 @@ async function downloadMedia(item:LightboxMedia) {
   }
 }
 
-export function ImageLightbox({items,initialIndex,onClose,actions,minimalControls=false}:ImageLightboxProps) {
+export function ImageLightbox({items,initialIndex,onClose,actions,details,minimalControls=true}:ImageLightboxProps) {
   const [index,setIndex]=useState(initialIndex);
   const stageRef=useRef<HTMLDivElement|null>(null);
   const transitionTimer=useRef<number|null>(null);
@@ -148,6 +149,7 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
     historyEntryActive.current=true;
     const onPopState=()=>{
       if(!historyEntryActive.current)return;
+      if(window.history.state?.sgbLightbox===marker)return;
       historyEntryActive.current=false;
       onCloseRef.current();
     };
@@ -175,6 +177,7 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
     className={`image-lightbox ${minimalControls?'lightbox-minimal-controls':''}`}
     role="dialog"
     aria-modal="true"
+    aria-label="Visor de fotos y videos"
     onMouseDown={(event)=>{if(event.target===event.currentTarget)onClose();}}
     onTouchStart={(event)=>{
       if(current.type==='VIDEO'||transitionActive.current)return;
@@ -256,7 +259,7 @@ export function ImageLightbox({items,initialIndex,onClose,actions,minimalControl
         {minimalControls?<IconButton className="lightbox-download-overlay" label="Descargar archivo" onClick={(event)=>{event.stopPropagation();void downloadMedia(current);}}><Download size={22}/></IconButton>:null}
       </div>
       <div className="image-lightbox-details">
-        <div><strong>{current.title}</strong><small>{[current.subtitle,current.date?formatDate(current.date):null,items.length>1?`${index+1} de ${items.length}`:null].filter(Boolean).join(' · ')}</small></div>
+        <div>{details?details(current):<><strong>{current.title}</strong><small>{[current.subtitle,current.date?formatDate(current.date):null,items.length>1?`${index+1} de ${items.length}`:null].filter(Boolean).join(' · ')}</small></>}</div>
         {actions?.(current)}
       </div>
     </div>

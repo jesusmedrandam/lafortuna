@@ -2,16 +2,20 @@ name: Android
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [feature/sgb-v2-interfaz]
+    paths: ['android/**', 'frontend/**', '.github/workflows/android.yml']
   push:
-    branches: [feature/sgb-v2-android]
-    paths:
-      - 'android/**'
-      - 'frontend/**'
-      - '.github/workflows/android.yml'
+    branches: [feature/sgb-v2-android, feature/sgb-v2-interfaz]
+    paths: ['android/**', 'frontend/**', '.github/workflows/android.yml']
+
+permissions:
+  contents: read
 
 jobs:
   debug-apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: android
@@ -32,6 +36,21 @@ jobs:
       - name: Build bundled frontend
         working-directory: frontend
         run: npm run build
+      - name: Verify offline data and mobile screens
+        working-directory: frontend
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: |
+          npm run test:offline
+          node tests/service-worker.test.mjs
+          node tests/cleaning-browser.test.mjs
+          node tests/settings-screen.test.mjs
+          node tests/health-browser.test.mjs
+          node tests/pastures-browser.test.mjs
+          node tests/animal-profile.test.mjs
+          node tests/animal-edit.test.mjs
+          node tests/session-mode.test.mjs
+          node tests/session-startup.test.mjs
       - uses: gradle/actions/setup-gradle@v4
       - name: Validate and compile debug APK
         run: ./gradlew --no-daemon :app:lintDebug :app:assembleDebug
