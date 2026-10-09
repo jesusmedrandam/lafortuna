@@ -84,7 +84,7 @@ public final class OfflineSyncWorker extends Worker {
                     store.finish(entry.optString("id"), entry.optString("idempotencyKey"), false);
                     return Result.success();
                 }
-                if (response.status == 0 || response.status >= 500) return Result.retry();
+                if (response.status == 0 || response.status == 429 || response.status >= 500) return Result.retry();
                 // A deterministic validation/permission/conflict error is left in IndexedDB for review.
                 store.finish(entry.optString("id"), entry.optString("idempotencyKey"), false);
                 return Result.success();

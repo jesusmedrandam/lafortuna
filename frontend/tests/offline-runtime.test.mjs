@@ -443,3 +443,42 @@ window.SGBAndroid.reservePendingMutation=()=>true;
 await runtime.discardPendingMutation(nativeStarted.id);
 assert.equal((await get('/animals/animal-a')).description,'Cambio ajeno confirmado');
 console.log('PASS: pending changes already sent by Android cannot be edited with a new key or discarded before confirmation.');
+
+// Cleanup preflight, duplicate draft protection, product aliases and server backoff.
+online=false;runtime=await load();await runtime.configureOfflineRuntime(manageScope,'test-token');
+await runtime.putCache(manageScope,'/cleanings',[]);await runtime.putCache(manageScope,'/cleanings/products',[]);
+const cleaning={locationId:'pasture-a',startedOn:'2026-10-01',areaType:'TOTAL',activities:['FUMIGACION'],applicationUnit:'TANQUES',applicationCount:2,
+ products:[],operators:[{name:'Ana',notes:'Protección'}]};
+const offlineProduct=await change('/catalogs/products',{name:'Producto sin conexión'},'POST');
+assert.equal(offlineProduct.active,true);assert.equal((await get('/cleanings/products'))[0].id,offlineProduct.id);
+assert.equal((await get('/catalogs/products'))[0].id,offlineProduct.id);
+const application={...cleaning,products:[{productId:offlineProduct.id,unitCode:'MILLILITER',quantityPerApplication:3}]};
+await assert.rejects(()=>change('/cleanings',{...application,applicationCount:null},'POST'),/cuántos tanques/);
+await assert.rejects(()=>change('/cleanings',{...application,operators:[{name:'Ana'},{name:' ana '}]},'POST'),/responsables distintos/);
+await assert.rejects(()=>change('/cleanings',{...application,products:[{...application.products[0],notes:'x'.repeat(301)}]},'POST'),/300 caracteres/);
+const draft=await change('/cleanings',application,'POST');
+await assert.rejects(()=>change('/cleanings',application,'POST'),/borrador ya está guardado/);
+assert.equal((await get('/cleanings')).length,1);assert.equal((await runtime.listOutbox(manageScope.userId)).length,2);
+let cleanupAttempts=0;const keys=[];const originalNow=Date.now;let checkClock=originalNow();Date.now=()=>checkClock;
+runtime.installOfflineTransport(async(path,init)=>{cleanupAttempts++;keys.push(new Headers(init.headers).get('x-idempotency-key'));
+ throw Object.assign(new Error('El servidor pidió esperar'),{status:429,code:'SESSION_REFRESH_RATE_LIMIT',retryAt:checkClock+2000});});
+online=true;await runtime.syncOfflineMutations();
+assert.equal(cleanupAttempts,1);assert.ok((await runtime.listOutbox(manageScope.userId)).every(row=>row.state==='PENDING'));
+await runtime.syncOfflineMutations();assert.equal(cleanupAttempts,1,'Immediate retry respects server pause');
+await assert.rejects(()=>runtime.downloadPaths(['/cleanings','/cleanings/options']),/Tus cambios siguen guardados/);
+assert.equal(cleanupAttempts,1,'Download does not amplify refresh throttling');
+checkClock+=2100;
+runtime.installOfflineTransport(async(path,init)=>{cleanupAttempts++;keys.push(new Headers(init.headers).get('x-idempotency-key'));const body=JSON.parse(init.body);
+ if(path==='/catalogs/products')return {data:{...body,id:'product-confirmed',active:true,version:1},etag:null,notModified:false};
+ assert.equal(path,'/cleanings');assert.equal(body.products[0].productId,'product-confirmed','Queued cleanup uses confirmed product ID');
+ return {data:{...body,id:'cleaning-confirmed',status:'BORRADOR',version:1},etag:null,notModified:false};});
+await runtime.syncOfflineMutations();assert.equal((await runtime.listOutbox(manageScope.userId)).length,0);
+assert.equal(keys[0],keys[1],'A retry retains its original idempotency key');
+assert.equal((await get('/cleanings')).length,1);assert.equal((await get('/cleanings'))[0].id,'cleaning-confirmed');
+assert.equal((await runtime.runtimeState()).retryAt,0);Date.now=originalNow;online=true;
+runtime=await load();await runtime.configureOfflineRuntime(manageScope,'test-token');
+// Download error reports preserve the server reason and stop the remaining batch.
+let cleanupDownloads=0;runtime.installOfflineTransport(async()=>{cleanupDownloads++;throw Object.assign(new Error('Tu sesión venció. Inicia sesión de nuevo.'),{status:401,code:'UNAUTHORIZED'});});
+await assert.rejects(()=>runtime.downloadPaths(['/unavailable','/cleanings/options']),/Tu sesión venció/);
+assert.equal(cleanupDownloads,1);
+console.log('PASS: cleanup validation, unique drafts, account product aliases, preserved pending data, rate-limit backoff, stable keys and readable download errors.');

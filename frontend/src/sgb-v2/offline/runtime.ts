@@ -3,7 +3,7 @@ import {
   putSetting,removeOutbox,getLocalMedia,putMediaMutation,getLocalMediaInfo,listLocalMedia,removeLocalMedia,
   removeCachedPaths,listUserCache,type OfflineScope,type OutboxEntry,type StoredFormPart,
 } from './database';
-import {validateLocalMutation} from './validation';
+import {LocalValidationError,validateLocalMutation} from './validation';
 import {mediaThumbnailUrl,optimizedCloudinaryMediaUrl} from '../../media';
 import {dataCategoryForPath,defaultDownloadPreferences,downloadCategoryLabel,normalizeDownloadPreferences,
   photoCategoryForPath,photoCategoryForType,type DownloadPreferences} from './preferences';
@@ -23,6 +23,7 @@ export class OfflineUnavailableError extends Error {
 }
 
 export interface OfflineRuntimeState {
+  retryAt?:number;
   online:boolean;
   wifi:boolean;
   automaticDownloads:boolean;
@@ -54,6 +55,9 @@ let apiBase='';
 let lastCreatedAt=0;
 let mutationChain:Promise<unknown>=Promise.resolve();
 let cacheGeneration=0;
+let retryAt=0;
+let downloadTask:{key:string;promise:Promise<{downloaded:number;failed:number;errors:string[]}>}|null=null;
+const refreshing=new Set<string>();
 const mediaUrls=new Map<string,string>();
 
 function emit(name:string,detail?:unknown){
@@ -256,6 +260,7 @@ async function optimisticRecord(entry:OutboxEntry){
     appliedAt:current?.appliedAt??null,cancelledAt:current?.cancelledAt??null,
     animals:Array.isArray(input.animalIds)?await Promise.all(input.animalIds.map(async id=>({id,
       name:await findCachedName(entry.scope,id)??'Animal',earTagCode:null}))):current?.animals??[]};
+  if(['/cleanings/products','/catalogs/products'].includes(entry.path))return {active:true,category:null,activeIngredient:null,formulatedBy:null,description:null,...common};
   if(entry.path==='/cleanings'||/^\/cleanings\/[^/]+$/.test(entry.path))return {...common,
     locationName:await findCachedName(entry.scope,input.locationId)??current?.locationName??'Potrero',
     status:current?.status??'BORRADOR',completedAt:current?.completedAt??null,cancelledAt:current?.cancelledAt??null,
@@ -403,6 +408,7 @@ function targetForMutation(path:string){
     [/^\/animals\/classification$/,'/animals/classification',null],
     [/^\/reproduction\/settings$/,'/reproduction/settings',null],
     [/^\/cleanings\/products(?:\/|$)/,'/cleanings/products',null],
+    [/^\/catalogs\/products(?:\/|$)/,'/catalogs/products',null],
     [/^\/reproduction\/heats(?:\/|$)/,'/reproduction','heats'],
     [/^\/reproduction\/services(?:\/|$)/,'/reproduction','services'],
     [/^\/reproduction\/pregnancies(?:\/|$)/,'/reproduction','pregnancies'],
@@ -567,7 +573,11 @@ async function projectEntry(entry:OutboxEntry,record:Record<string,unknown>,crea
   if(['/health-records/medicines','/health-records/medicines/structured','/health-records/medicines/classification','/catalogs/medicines','/catalogs/medicines/classification'].includes(entry.path)
     ||entry.method==='PATCH'&&/^\/catalogs\/medicines\/[^/]+$/.test(entry.path)){
     const alias=entry.path.startsWith('/health-records/medicines')?'/catalogs/medicines':'/health-records/medicines';
-    await projectMedicineAlias(entry,record,create,replacementId,alias);
+    await projectCatalogAlias(entry,record,create,replacementId,alias);
+  }
+  if(/^\/(?:cleanings|catalogs)\/products(?:\/|$)/.test(entry.path)){
+    const alias=entry.path.startsWith('/cleanings/')?'/catalogs/products':'/cleanings/products';
+    await projectCatalogAlias(entry,record,create,replacementId,alias);
   }
   if(entry.path.split('?')[0]==='/media'||entry.path.startsWith('/media/')){
     if(entry.path!=='/media/usage')await projectMedia(entry,Array.isArray(record.attachments)?record.attachments.map(bodyRecord):undefined);return;
@@ -603,7 +613,7 @@ async function projectEntry(entry:OutboxEntry,record:Record<string,unknown>,crea
   if(entry.path.startsWith('/health-records/campaigns/'))
     await projectTreatedConditions(entry,replacementId??originalId,record);
 }
-async function projectMedicineAlias(entry:OutboxEntry,record:Record<string,unknown>,create:boolean,replacementId:string|undefined,path:string){
+async function projectCatalogAlias(entry:OutboxEntry,record:Record<string,unknown>,create:boolean,replacementId:string|undefined,path:string){
   const id=entry.temporaryId??String(record.id);const cached=await getCache(entry.scope,path);
   let payload=entry.method==='DELETE'?removeCollection(cached?.payload??[],id,null)
     :updateCollection(cached?.payload??[],id,{...record,id:replacementId??record.id},create,null);
@@ -663,7 +673,8 @@ async function reprojectQueued(scope:OfflineScope,rebase=false,rebaseVersions=tr
 }
 
 function errorInfo(error:unknown){
-  const value=error as {status?:number;code?:string;message?:string};
+  const value=error as {status?:number;code?:string;message?:string;retryAt?:number};
+  if(value?.status===429)retryAt=Math.max(retryAt,value.retryAt&&value.retryAt>Date.now()?value.retryAt:Date.now()+60_000);
   return {status:Number(value?.status??0),code:String(value?.code??'REQUEST_FAILED'),
     message:value?.message??'No se pudo sincronizar el cambio.'};
 }
@@ -717,6 +728,7 @@ async function sendEntry(entry:OutboxEntry){
   if(!transport||!activeToken)throw new OfflineUnavailableError('No hay una sesión disponible para sincronizar.');
   const replacements=await getSetting<Record<string,string>>(`temporary-ids:${entry.scope.userId}`)??{};
   const path=replaceIds(entry.path,replacements);
+  if(entry.bodyType==='json')validateLocalMutation({...entry,path,jsonBody:replaceValues(entry.jsonBody,replacements)},null);
   const headers=new Headers({...entry.requestHeaders,authorization:`Bearer ${activeToken}`,'x-idempotency-key':entry.idempotencyKey});
   if(entry.bodyType==='json')headers.set('content-type','application/json');
   const result=entry.bodyType==='binary'&&entry.serverResult!==undefined?entry.serverResult:
@@ -762,7 +774,7 @@ async function sendEntry(entry:OutboxEntry){
     }
     await rewindPendingFrom(entry);
     const current=await cachedRecord({...entry,path,temporaryId:null});
-    await projectEntry({...entry,path},{...current,...actual,__syncState:null,__mutationId:null},false,actualId??undefined);
+    await projectEntry({...entry,path},{...current,...actual,__syncState:null,__mutationId:null},Boolean(entry.temporaryId),actualId??undefined);
   }
   if(entry.temporaryId&&actualId){
     await saveReplacement(entry.scope.userId,entry.temporaryId,actualId);
@@ -779,6 +791,7 @@ async function sendEntry(entry:OutboxEntry){
 }
 
 export function syncOfflineMutations():Promise<void>{
+  if(Date.now()<retryAt)return Promise.resolve();
   if(syncTask)return syncTask;
   const operation=mutationChain.then(syncQueue);
   mutationChain=operation.catch(()=>{});
@@ -809,7 +822,7 @@ async function syncQueue(){
         await sendEntry(entry);syncProgress={...syncProgress!,completed:syncProgress!.completed+1,loaded:0,bytes:0};await publishState();
       }catch(error){
         const info=errorInfo(error);entry.attempts+=1;entry.lastError=info.message;entry.errorCode=info.code;
-        if(info.status>0&&info.status<500&&info.code!=='IDEMPOTENCY_IN_PROGRESS')entry.state='FAILED';
+        if(info.status>0&&info.status<500&&info.status!==429&&info.code!=='IDEMPOTENCY_IN_PROGRESS')entry.state='FAILED';
         await putOutbox(entry);
         if(entry.state==='FAILED')try{window.SGBAndroid?.removeMirroredMutation?.(entry.id);}catch{/* Solo Android. */}
         const optimistic=await optimisticRecord(entry);
@@ -848,7 +861,9 @@ function applyServerCache(scope:OfflineScope,path:string,payload:unknown,etag:st
 }
 
 async function backgroundRefresh<T>(scope:OfflineScope,path:string,init:RequestInit){
-  if(!transport||!canAutomaticallyDownload()||!selectedData(path))return;
+  if(!transport||!canAutomaticallyDownload()||!selectedData(path)||downloadTask||Date.now()<retryAt)return;
+  const key=offlineScopeKey(scope)+path;if(refreshing.has(key))return;refreshing.add(key);
+  try{
   if((await listOutbox(scope.userId)).some(entry=>sameScope(scope,entry.scope)
     &&dataCategoryForPath(entry.path)===dataCategoryForPath(path)))return;
   const generation=cacheGeneration;
@@ -869,10 +884,14 @@ async function backgroundRefresh<T>(scope:OfflineScope,path:string,init:RequestI
       if(!await applyServerCache(scope,path,fresh,response.etag,generation))return;
       emit('sgb-v2-cache-updated',{path,scopeKey:offlineScopeKey(scope)});
     }else if(current)await putCache(scope,path,current.payload,response.etag??current.etag);
-  }catch{/* El caché válido continúa siendo la fuente visible. */}
+  }catch(reason){errorInfo(reason);/* El caché válido continúa siendo la fuente visible. */}
+  }finally{refreshing.delete(key);}
 }
 
 async function derivedCache<T>(scope:OfflineScope,path:string):Promise<T|null>{
+  if(path==='/cleanings/products'||path==='/catalogs/products'){
+    const cached=await getCache<T>(scope,path==='/cleanings/products'?'/catalogs/products':'/cleanings/products');if(cached)return cached.payload;
+  }
   if(path==='/health-records/medicines'||path==='/catalogs/medicines'){
     const alias=path==='/health-records/medicines'?'/catalogs/medicines':'/health-records/medicines';
     const cached=await getCache<T>(scope,alias);if(cached)return cached.payload;
@@ -1006,6 +1025,9 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
 
   const body=await storedBody(init.body);
   const queued=await listOutbox(activeScope.userId);
+  if(path==='/cleanings'&&verb==='POST'&&queued.some(entry=>entry.path===path&&entry.method===verb
+    &&entry.state==='PENDING'&&sameScope(entry.scope,activeScope!)&&JSON.stringify(entry.jsonBody)===JSON.stringify(body.jsonBody)))
+    throw new LocalValidationError('Este borrador ya está guardado y pendiente de sincronizar. Ábrelo desde el listado para editarlo.');
   lastCreatedAt=queued.reduce((latest,entry)=>Math.max(latest,entry.createdAt+1),Math.max(Date.now(),lastCreatedAt+1));
   const requestHeaders:Record<string,string>={};
   const originalHeaders=new Headers(init.headers);
@@ -1025,13 +1047,13 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
   await projectWithUndo(entry);
   emit('sgb-v2-cache-updated',{path,scopeKey:offlineScopeKey(entry.scope)});await publishState();
 
-  if(isRuntimeOnline()&&!syncing&&queued.length===0){
+  if(isRuntimeOnline()&&!syncing&&queued.length===0&&Date.now()>=retryAt){
     syncing=true;syncProgress={completed:0,total:1,current:entry.summary,loaded:0,bytes:entry.binarySize??0};await publishState();
     try{const result=await sendEntry(entry);syncProgress={...syncProgress,completed:1,loaded:0,bytes:0};await publishState();
       return result as T;
     }catch(error){
       const info=errorInfo(error);entry.attempts=1;entry.lastError=info.message;entry.errorCode=info.code;
-      if(info.status>0&&info.status<500&&info.code!=='IDEMPOTENCY_IN_PROGRESS'){
+      if(info.status>0&&info.status<500&&info.status!==429&&info.code!=='IDEMPOTENCY_IN_PROGRESS'){
         entry.state='FAILED';await putOutbox(entry);await projectEntry(entry,{...optimistic,
           __syncState:'FAILED',__syncError:info.message},false);
         try{window.SGBAndroid?.removeMirroredMutation?.(entry.id);}catch{/* Solo Android. */}
@@ -1145,13 +1167,20 @@ async function downloadNativeMedia(items:NativeMediaDownload[]){
   }
 }
 
-export async function downloadPaths(paths:string[],options:{automatic?:boolean}={}){
+export function downloadPaths(paths:string[],options:{automatic?:boolean}={}):Promise<{downloaded:number;failed:number;errors:string[]}>{
+  const key=JSON.stringify([activeScope,paths,Boolean(options.automatic)]);
+  if(downloadTask)return downloadTask.key===key?downloadTask.promise:downloadTask.promise.catch(()=>undefined).then(()=>downloadPaths(paths,options));
+  const promise=performDownloadPaths([...new Set(paths)],options).finally(()=>{downloadTask=null;});
+  downloadTask={key,promise};return promise;
+}
+async function performDownloadPaths(paths:string[],options:{automatic?:boolean}){
   if(!activeScope||!activeToken||!transport||!isRuntimeOnline())throw new OfflineUnavailableError(
     'Conéctate a internet para descargar los datos.');
+  if(Date.now()<retryAt)throw new Error(`El servidor pidió una pausa. Podrás sincronizar en ${Math.max(1,Math.ceil((retryAt-Date.now())/60_000))} minuto(s). Tus cambios siguen guardados en este dispositivo.`);
   const scope={...activeScope};const token=activeToken;
-  if(options.automatic&&!canAutomaticallyDownload())return {downloaded:0,failed:0};
+  if(options.automatic&&!canAutomaticallyDownload())return {downloaded:0,failed:0,errors:[]};
   const preferences=normalizeDownloadPreferences(downloadPreferences);
-  let downloaded=0;let failed=0;const payloads:Array<{path:string;payload:unknown}>=[];
+  let downloaded=0;let failed=0;let stop=false;const errors:string[]=[];const payloads:Array<{path:string;payload:unknown}>=[];
   for(const requestedPath of paths){
     let path=requestedPath;let more=true;let page=1;
     while(more){
@@ -1174,8 +1203,13 @@ export async function downloadPaths(paths:string[],options:{automatic?:boolean}=
         const record=bodyRecord(payload);more=requestedPath.startsWith('/animals?')&&record.hasMore===true&&page<500
           ||requestedPath.startsWith('/media?')&&Array.isArray(payload)&&payload.length===500&&page<10000;
         page+=1;
-      }catch{failed+=1;more=false;}
+      }catch(reason){const info=errorInfo(reason);failed+=1;more=false;
+        errors.push(`${downloadCategoryLabel(dataCategoryForPath(path))}: ${info.message}${info.status===429
+          ?` Tus cambios siguen guardados. Volveremos a intentar después de ${Math.max(1,Math.ceil((retryAt-Date.now())/60_000))} minuto(s).`:''}`);
+        stop=info.status===429||info.status===401||info.status===0;
+      }
     }
+    if(stop)break;
   }
   if(!activeScope||!sameScope(activeScope,scope))throw new Error(
     'La sesión o propiedad cambió. Actualiza los datos de la propiedad seleccionada.');
@@ -1184,8 +1218,8 @@ export async function downloadPaths(paths:string[],options:{automatic?:boolean}=
     await reprojectQueued(scope);
     emit('sgb-v2-cache-updated',{scopeKey:offlineScopeKey(scope)});await publishState();
   }
-  if(!downloaded&&failed)throw new Error('No fue posible descargar los datos de esta propiedad.');
-  return {downloaded,failed};
+  if(!downloaded&&failed)throw new Error(errors[0]);
+  return {downloaded,failed,errors};
 }
 
 export async function runtimeState():Promise<OfflineRuntimeState>{
@@ -1193,7 +1227,7 @@ export async function runtimeState():Promise<OfflineRuntimeState>{
     cachedEntries:0,cachedBytes:0,mediaFiles:0,mediaBytes:0,mediaPending:0,mediaFailed:0,lastDownload:null,syncProgress};
   const [entries,size,local]=await Promise.all([listOutbox(activeScope.userId),getOfflineSize(activeScope),getLocalMediaInfo(activeScope.userId)]);
   const nativeMedia=readNativeMediaInfo();
-  return {online:isRuntimeOnline(),wifi:isRuntimeWifi(),automaticDownloads,preferences:downloadPreferences,pending:entries.filter(item=>item.state==='PENDING').length,
+  return {retryAt:retryAt>Date.now()?retryAt:0,online:isRuntimeOnline(),wifi:isRuntimeWifi(),automaticDownloads,preferences:downloadPreferences,pending:entries.filter(item=>item.state==='PENDING').length,
     failed:entries.filter(item=>item.state==='FAILED').length,syncing,syncProgress,cachedEntries:size.entries,
     cachedBytes:size.bytes,mediaFiles:Number(nativeMedia.count??0)+local.count,mediaBytes:Number(nativeMedia.bytes??0)+local.bytes,
     mediaPending:Number(nativeMedia.pending??0),mediaFailed:Number(nativeMedia.failed??0),lastDownload:size.savedAt};

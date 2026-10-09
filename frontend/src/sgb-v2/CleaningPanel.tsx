@@ -1,14 +1,15 @@
 import {DateInput} from '../components/ui';
-import {type FormEvent,useEffect,useMemo,useState} from 'react';
+import {type FormEvent,useEffect,useMemo,useRef,useState} from 'react';
 import {ArrowUpDown,Axe,ChevronRight,Edit3,Gauge,ImagePlus,MapPin,Plus,SlidersHorizontal,Scissors,SprayCan,Sprout,Trash2,X} from 'lucide-react';
 import {useLocation,useNavigate,useSearchParams} from 'react-router-dom';
 import {Badge,Button,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
   IconButton,LoadingState,Modal,Select} from '../components/ui';
 import {formatDate,formatNumber} from '../utils';
-import {ApiRequestError,applyCleaning,cancelCleaning,createCleaning,createCleaningProduct,
-  getCleaningOptions,getCleaningProducts,getCleanings,listCatalogItems,updateCleaning,uploadMedia,
+import {ApiRequestError,applyCleaning,cancelCleaning,createCleaning,
+  getCleaningOptions,getCleaningProducts,getCleanings,updateCleaning,uploadMedia,
   type CatalogItem,type CleaningInput,type CleaningOptions,type CleaningProduct,type CleaningRecord} from './api';
 import {RecordMedia} from './RecordMedia';
+import {CleaningProductCatalog} from './CleaningProductCatalog';
 const labels={FUMIGACION:'Fumigación',TALA_SELECTIVA:'Tala selectiva',
   DESBROCE:'Desbroce',OTRA:'Otra labor'};
 const activityIcons={FUMIGACION:SprayCan,TALA_SELECTIVA:Axe,DESBROCE:Scissors,OTRA:Sprout};
@@ -18,8 +19,8 @@ const message=(error:unknown)=>error instanceof ApiRequestError?error.message:
   error instanceof Error?error.message:'No se pudo guardar la limpieza.';
 type ProductLine=CleaningInput['products'][number];
 type OperatorLine=CleaningInput['operators'][number];
-export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia}:{accessToken:string;
-  canManage:boolean;canViewMedia:boolean;canManageMedia:boolean}){
+export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia,canEditProducts=false}:{accessToken:string;
+  canManage:boolean;canViewMedia:boolean;canManageMedia:boolean;canEditProducts?:boolean}){
   const [records,setRecords]=useState<CleaningRecord[]|null>(null);
   const [options,setOptions]=useState<CleaningOptions|null>(null);
   const [products,setProducts]=useState<CleaningProduct[]>([]);
@@ -28,11 +29,16 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState<string|null>(null);
   const [showForm,setShowForm]=useState(false);
-  const [showProduct,setShowProduct]=useState(false);
+  const saving=useRef(false);
   const [editing,setEditing]=useState<CleaningRecord|null>(null);
   const [photos,setPhotos]=useState<File[]>([]);
   const [params,setParams]=useSearchParams();const navigate=useNavigate();const route=useLocation();
-  const selectedId=params.get('limpieza');
+  const selectedId=params.get('limpieza');const showProduct=params.has('productos');
+  function setShowProduct(open:boolean){
+    if(!open&&route.state?.cleaningProducts){navigate(-1);return;}
+    const next=new URLSearchParams(params);if(open)next.set('productos','1');else{next.delete('productos');next.delete('producto');}
+    setParams(next,{replace:!open,state:open?{cleaningProducts:true}:null});
+  }
   function setSelectedId(id:string|null){
     if(!id&&route.state?.cleaningDetail){navigate(-1);return;}
     const next=new URLSearchParams(params);if(id)next.set('limpieza',id);else next.delete('limpieza');
@@ -52,9 +58,8 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
   const [lines,setLines]=useState<ProductLine[]>([]);
   const [operators,setOperators]=useState<OperatorLine[]>([]);
   useEffect(()=>{let active=true;void Promise.all([getCleanings(accessToken),
-    getCleaningOptions(accessToken),getCleaningProducts(accessToken),
-    listCatalogItems(accessToken,'AGROCHEMICAL_CATEGORIES')]).then(([items,choices,catalog,types])=>{
-    if(active){setRecords(items);setOptions(choices);setProducts(catalog);setCategories(types);}
+    getCleaningOptions(accessToken),getCleaningProducts(accessToken)]).then(([items,choices,catalog])=>{
+    if(active){setRecords(items);setOptions(choices);setProducts(catalog);setCategories(choices.categories??[]);}
   }).catch((failure)=>{if(active)setError(message(failure));});return ()=>{active=false;};
   },[accessToken,revision]);
   function reset(){setEditing(null);setShowForm(false);setPhotos([]);setError(null);
@@ -71,14 +76,7 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
     try{await action();done?.();setRevision((value)=>value+1);}
     catch(failure){setError(message(failure));window.scrollTo({top:0,behavior:'smooth'});}
     finally{setBusy(false);}}
-  function saveProduct(event:FormEvent<HTMLFormElement>){event.preventDefault();
-    const data=new FormData(event.currentTarget);
-    void run(()=>createCleaningProduct(accessToken,{name:String(data.get('name')).trim(),
-      category:String(data.get('category')).trim()||null,
-      activeIngredient:String(data.get('activeIngredient')).trim()||null,
-      formulatedBy:String(data.get('formulatedBy')).trim()||null,
-      description:String(data.get('description')).trim()||null}),()=>setShowProduct(false));}
-  async function save(event:FormEvent<HTMLFormElement>){event.preventDefault();const data=new FormData(event.currentTarget);
+  async function save(event:FormEvent<HTMLFormElement>){event.preventDefault();if(saving.current||busy)return;const data=new FormData(event.currentTarget);
     const spray=activities.includes('FUMIGACION');
     if(spray&&new Set(lines.map(line=>line.productId)).size!==lines.length){
       setError('No repitas un producto en la misma limpieza.');return;
@@ -93,7 +91,7 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
       areaType,partialPercent:areaType==='PARCIAL'?Number(data.get('partialPercent')):null,
       notes:String(data.get('notes')).trim()||null,products:spray?lines:[],operators,
       ...(editing?{expectedVersion:editing.version}:{})};
-    setBusy(true);setError(null);let saved:CleaningRecord|null=null;
+    saving.current=true;setBusy(true);setError(null);let saved:CleaningRecord|null=null;
     try{
       saved=editing?await updateCleaning(accessToken,editing.id,input):await createCleaning(accessToken,input);
       for(const file of photos)await uploadMedia(accessToken,{file,entityType:'CLEANING',
@@ -102,7 +100,7 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
     }catch(failure){if(saved){reset();setRevision(value=>value+1);setSelectedId(saved.id);
         setError(`La limpieza se guardó, pero no se completó la carga de fotografías: ${message(failure)}`);
       }else setError(message(failure));}
-    finally{setBusy(false);}
+    finally{saving.current=false;setBusy(false);}
   }
   const location=options?.locations.find((item)=>item.id===locationId);
   const unitLabel=(code:string)=>options?.units.find(item=>item.code===code)?.symbol??
@@ -131,9 +129,9 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
         onClick={()=>setOrder(value=>value==='NEWEST'?'OLDEST':value==='OLDEST'?'AZ':value==='AZ'?'ZA':'NEWEST')}><ArrowUpDown size={18}/></IconButton>
         <IconButton label="Filtros de limpieza" className={filtersOpen||activeFilters?'active':''} onClick={()=>setFiltersOpen(value=>!value)}>
           <SlidersHorizontal size={18}/>{activeFilters>0&&<span className="filter-count">{activeFilters}</span>}</IconButton>
-        {canManage&&<IconButton label="Nuevo producto" onClick={()=>{
+        {<IconButton label="Administrar productos" onClick={()=>{
           setError(null);setShowProduct(true);}}>
-          <Plus size={18}/><Sprout size={15}/></IconButton>}</>}/>
+          <Sprout size={21}/></IconButton>}</>}/>
     {filtersOpen&&<section className="advanced-filters"><div className="advanced-filters-heading"><h2>Filtrar limpiezas</h2>
       <div className="advanced-filter-actions"><IconButton label="Limpiar filtros" onClick={()=>setFilters({locationId:'',since:'',until:'',status:''})}><Trash2 size={17}/></IconButton>
         <IconButton label="Cerrar filtros" onClick={()=>setFiltersOpen(false)}><X size={18}/></IconButton></div></div>
@@ -144,21 +142,12 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
         <label><span>Estado</span><Select value={filters.status} onChange={event=>setFilters({...filters,status:event.target.value})}><option value="">Todos los estados</option>
           {Object.entries(statuses).map(([code,name])=><option key={code} value={code}>{name}</option>)}</Select></label></div></section>}
     {error&&<div role="alert" className="form-error admin-error">{error}</div>}
-    {canManage&&showProduct&&<Modal title="Nuevo producto compartido en la cuenta" wide
-      onClose={()=>setShowProduct(false)} footer={<Button variant="ghost"
-        onClick={()=>setShowProduct(false)}>Cerrar</Button>}><form className="movement-form" onSubmit={saveProduct}>
-      {error&&<div role="alert" className="form-error movement-wide">{error}</div>}
-      <label><span>Nombre *</span><input name="name" required minLength={2} maxLength={160}/></label>
-      <label><span>Categoría *</span><Select name="category" required><option value="">Selecciona</option>
-        {categories.filter(item=>item.active).map(item=><option key={item.id} value={item.name}>{item.name}</option>)}
-      </Select><small>Agrega categorías nuevas desde Catálogos.</small></label>
-      <label><span>Principio activo</span><textarea name="activeIngredient" maxLength={2000}/></label>
-      <label><span>Formulado por</span><input name="formulatedBy" maxLength={200}/></label>
-      <label className="movement-wide"><span>Descripción</span><textarea name="description" maxLength={2000}/></label>
-      <button className="primary-button compact" disabled={busy}>Guardar producto</button></form></Modal>}
+    {showProduct&&<Modal title="Administrar productos de limpieza" wide onClose={()=>setShowProduct(false)}>
+      <CleaningProductCatalog accessToken={accessToken} canManage={canManage} canEdit={canEditProducts} categories={categories}/>
+    </Modal>}
     {canManage&&showForm&&options&&<Modal title={editing?'Editar borrador':'Nueva limpieza'} wide
-      onClose={reset} footer={<Button variant="ghost" onClick={reset}>Cerrar</Button>}>
-      <form className="movement-form" onSubmit={save} key={editing?.id??'new'}>
+      onClose={()=>{if(!saving.current)reset();}} footer={<Button variant="ghost" disabled={busy} onClick={reset}>Cerrar</Button>}>
+      <form className="movement-form" onSubmit={save} key={editing?.id??'new'}><fieldset disabled={busy} className="movement-wide cleaning-product-fields">
       {error&&<div role="alert" className="form-error movement-wide">{error}</div>}
       <label><span>Potrero *</span><Select required value={locationId}
         onChange={(event)=>setLocationId(event.target.value)}><option value="">Selecciona</option>
@@ -208,7 +197,7 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
           <label><span>Cantidad total utilizada</span><input readOnly tabIndex={-1} aria-label="Cantidad total utilizada"
             value={applicationCount?`${formatNumber(Number(applicationCount)*line.quantityPerApplication,4)} ${unitLabel(line.unitCode)}`:''}
             placeholder="Cantidad × aplicaciones"/><small>Se calcula automáticamente.</small></label>
-          <label className="movement-wide"><span>Observaciones del producto</span><input aria-label="Observaciones del producto" maxLength={2000} value={line.notes??''}
+          <label className="movement-wide"><span>Observaciones del producto</span><input aria-label="Observaciones del producto" maxLength={300} value={line.notes??''}
             onChange={event=>setLines(lines.map((item,i)=>i===index?{...item,notes:event.target.value}:item))}/></label>
           <button type="button" className="secondary-button compact" onClick={()=>setLines(lines.filter((_,i)=>i!==index))}>Quitar producto</button>
         </fieldset>)}</div>}
@@ -220,7 +209,7 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
             value={item.name} onChange={event=>setOperators(operators.map((entry,i)=>i===index?{...entry,name:event.target.value}:entry))}/></label>
           <label><span>Función</span><input aria-label="Función" placeholder="Función" maxLength={100} value={item.function??''}
             onChange={event=>setOperators(operators.map((entry,i)=>i===index?{...entry,function:event.target.value}:entry))}/></label>
-          <label className="movement-wide"><span>Observaciones del operador</span><input aria-label="Observaciones del operador" maxLength={2000} value={item.notes??''}
+          <label className="movement-wide"><span>Observaciones del operador</span><input aria-label="Observaciones del operador" maxLength={300} value={item.notes??''}
             onChange={event=>setOperators(operators.map((entry,i)=>i===index?{...entry,notes:event.target.value}:entry))}/></label>
           <button type="button" className="secondary-button compact" onClick={()=>setOperators(operators.filter((_,i)=>i!==index))}>Quitar operador</button>
         </fieldset>)}</div>
@@ -239,7 +228,7 @@ export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia
       <button className="primary-button compact" disabled={busy||!activities.length||!locationId
         ||activities.includes('FUMIGACION')&&lines.length>0&&!applicationCount}>
         {editing?'Guardar borrador':'Crear borrador'}</button>
-    </form></Modal>}
+    </fieldset></form></Modal>}
     {records===null&&!error?<LoadingState/>:records===null?<ErrorState
       message={error??'No se pudieron cargar las limpiezas.'}
       onRetry={()=>setRevision(value=>value+1)}/>:visible.length?<div className="cleaning-summary-list">

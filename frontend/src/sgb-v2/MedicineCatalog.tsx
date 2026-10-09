@@ -10,6 +10,7 @@ export function MedicineCatalog({accessToken,canManage,canEdit=false,units,route
   const [params,setParams]=useSearchParams();const navigate=useNavigate();
   const [editing,setEditing]=useState(false);const [busy,setBusy]=useState(false);const [error,setError]=useState('');
   const [search,setSearch]=useState('');const [active,setActive]=useState(true);
+  const [editingVersion,setEditingVersion]=useState<number|null>(null);
   const displayUnits=units.length?units:medicineDoseUnits;
   const selected=medicines?.find(item=>item.id===params.get('medicamento'));
   const showForm=params.get('medicamento')==='nuevo';
@@ -25,7 +26,7 @@ export function MedicineCatalog({accessToken,canManage,canEdit=false,units,route
     return()=>{mounted=false;clearTimeout(timer);window.removeEventListener('sgb-v2-cache-updated',changed);};},[accessToken]);
   async function save(input:Omit<HealthMedicine,'id'|'active'>){setBusy(true);setError('');
     try{
-      const saved=editing&&selected?await updateCatalogMedicine(accessToken,selected.id,input,active,selected.version!):
+      const saved=editing&&selected?await updateCatalogMedicine(accessToken,selected.id,input,active,editingVersion!):
         await createCatalogMedicine(accessToken,input);
       setMedicines(previous=>[saved,...previous?.filter(item=>item.id!==saved.id)??[]]);setEditing(false);
       if(showForm)navigate(-1);
@@ -62,7 +63,7 @@ export function MedicineCatalog({accessToken,canManage,canEdit=false,units,route
         <div><dt>Indicaciones</dt><dd>{selected.indications||'Sin registrar'}</dd></div>
         <div><dt>Retiro de leche</dt><dd>{selected.withdrawalMilkDays} días</dd></div>
         <div><dt>Retiro de carne</dt><dd>{selected.withdrawalMeatDays} días</dd></div>
-      </dl>{canEdit&&selected.version!=null&&<Button onClick={()=>{setActive(selected.active);setEditing(true);}}>Editar medicamento</Button>}</>}
+      </dl>{canEdit&&selected.version!=null&&<Button onClick={()=>{setActive(selected.active);setEditingVersion(selected.version!);setEditing(true);}}>Editar medicamento</Button>}</>}
     </Modal>}
   </>;
 }

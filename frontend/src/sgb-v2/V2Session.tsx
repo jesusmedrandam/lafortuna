@@ -88,6 +88,7 @@ export function V2SessionProvider({children}:{children:ReactNode}){
 
   const renew=useCallback(()=>{
     if(!isRuntimeOnline()||!current.current)return Promise.resolve();
+    if(new Date(current.current.accessExpiresAt).getTime()>Date.now()+60_000)return syncOfflineMutations();
     if(renewing.current)return renewing.current;
     const started=generation.current;const userId=current.current.overview.user.id;
     renewing.current=refreshSession().then(async payload=>{

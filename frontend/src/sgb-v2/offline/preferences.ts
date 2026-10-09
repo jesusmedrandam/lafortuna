@@ -12,7 +12,7 @@ export const dataChoices:DataChoice[]=[
   {id:'catalogs',label:'Opciones, propietarios y marquillas',group:'catalogs',permission:'CATALOG_VIEW',
     paths:['/owners','/owners/users','/animal-brands','/catalogs/reference','/catalogs/BREEDS/items',
       '/catalogs/COLORS/items','/catalogs/MOVEMENT_REASONS/items','/catalogs/HEALTH_CONDITION_TYPES/items',
-      '/catalogs/TREATMENT_TYPES/items','/catalogs/ADMINISTRATION_ROUTES/items','/catalogs/medicines','/catalogs/GRASS_TYPES/items','/catalogs/MEDIA_TAGS/items']},
+      '/catalogs/TREATMENT_TYPES/items','/catalogs/ADMINISTRATION_ROUTES/items','/catalogs/medicines','/catalogs/products','/catalogs/GRASS_TYPES/items','/catalogs/MEDIA_TAGS/items']},
   {id:'movements',label:'Registros de movimientos',group:'movements',permission:'MOVEMENT_VIEW',module:'MOVEMENTS',paths:['/movements','/movements/options']},
   {id:'weighings',label:'Registros de pesajes',group:'weighings',permission:'WEIGHING_VIEW',module:'WEIGHING',paths:['/weighings','/weighings/options']},
   {id:'activities',label:'Registros de actividades',group:'activities',permission:'ACTIVITY_VIEW',module:'TASKS',paths:['/activities','/activities/options']},

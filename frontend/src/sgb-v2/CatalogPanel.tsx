@@ -2,13 +2,14 @@ import {type FormEvent,useEffect,useMemo,useState} from 'react';
 import {
   ApiRequestError,createBrand,createCatalogItem,createOwner,getAnimalClassificationPolicy,
   getCatalogReference,listAccountUsers,listBrands,listCatalogItems,listOwners,setBrandActive,
-  setCatalogItemActive,updateAnimalClassificationPolicy,updateBrandOwners,
+  updateCatalogItem,updateAnimalClassificationPolicy,updateBrandOwners,
   type AnimalClassificationPolicy,type CatalogItem,type CatalogReference,type EditableCatalogCode,
   type LivestockBrand,type LivestockOwner,
 } from './api';
 import {Modal,Select} from '../components/ui';
 import {useNavigate,useSearchParams} from 'react-router-dom';
 import {MedicineCatalog} from './MedicineCatalog';
+import {CleaningProductCatalog} from './CleaningProductCatalog';
 import {medicineDoseUnits} from './MedicineForm';
 
 const catalogs:Array<{code:EditableCatalogCode;name:string;description:string}>=[
@@ -25,7 +26,7 @@ const catalogs:Array<{code:EditableCatalogCode;name:string;description:string}>=
   {code:'SALE_PRODUCTS',name:'Productos de venta',description:'Productos distintos de animales'},
 ];
 const classificationCodes=['VACA','VACONA','TERNERA','TORO','TORETE','TERNERO'] as const;
-type SpecialTab='CLASSIFICATION'|'OWNERS'|'BRANDS'|'MEDICINES'|'DOSE_UNITS';
+type SpecialTab='CLASSIFICATION'|'OWNERS'|'BRANDS'|'MEDICINES'|'PRODUCTS'|'DOSE_UNITS';
 type CatalogTab=SpecialTab|EditableCatalogCode;
 
 export function CatalogPanel({accessToken,canManage,canEditMedicines=false,commerceEnabled=false}:{
@@ -34,8 +35,8 @@ export function CatalogPanel({accessToken,canManage,canEditMedicines=false,comme
     (code!=='BUYERS'&&code!=='SALE_PRODUCTS')),[commerceEnabled]);
   const [params,setParams]=useSearchParams();const navigate=useNavigate();
   const requested=params.get('catalogo');
-  const tab=requested&&['CLASSIFICATION','OWNERS','BRANDS','MEDICINES','DOSE_UNITS',...availableCatalogs.map(item=>item.code)].includes(requested)?requested as CatalogTab:null;
-  const setTab=(value:CatalogTab)=>{const next=new URLSearchParams(params);next.set('catalogo',value);next.delete('elemento');next.delete('medicamento');setParams(next);};
+  const tab=requested&&['CLASSIFICATION','OWNERS','BRANDS','MEDICINES','PRODUCTS','DOSE_UNITS',...availableCatalogs.map(item=>item.code)].includes(requested)?requested as CatalogTab:null;
+  const setTab=(value:CatalogTab)=>{const next=new URLSearchParams(params);next.set('catalogo',value);next.delete('elemento');next.delete('medicamento');next.delete('producto');setParams(next);};
   const openItem=(id:string)=>{const next=new URLSearchParams(params);next.set('elemento',id);setParams(next);};
   const [search,setSearch]=useState('');
   useEffect(()=>setSearch(''),[tab]);
@@ -85,12 +86,13 @@ export function CatalogPanel({accessToken,canManage,canEditMedicines=false,comme
     }catch(failure){setError(message(failure));}finally{setBusy(false);}
   }
 
-  async function changeItem(code:EditableCatalogCode,id:string,active:boolean){
+  async function editItem(event:FormEvent<HTMLFormElement>,code:EditableCatalogCode,item:CatalogItem){
+    event.preventDefault();if(busy||item.version==null)return;const data=new FormData(event.currentTarget);
     setBusy(true);setError(null);
-    try{await setCatalogItemActive(accessToken,code,id,active);
-      setItems(previous=>({...previous,[code]:(previous[code]??[]).map(entry=>
-        entry.id===id?{...entry,active}:entry)}));
-    }catch(failure){setError(message(failure));}finally{setBusy(false);}
+    try{const saved=await updateCatalogItem(accessToken,code,item.id,{name:String(data.get('name')).trim(),
+      active:data.get('active')==='on',expectedVersion:item.version});
+      setItems(previous=>({...previous,[code]:(previous[code]??[]).map(row=>row.id===saved.id?saved:row)}));
+    }catch(reason){setError(message(reason));}finally{setBusy(false);}
   }
 
   async function addNamedOwner(event:FormEvent<HTMLFormElement>){
@@ -154,6 +156,7 @@ export function CatalogPanel({accessToken,canManage,canEditMedicines=false,comme
         <small>Las opciones se comparten entre las propiedades de esta cuenta.</small></div>
       {!tab&&<nav className="catalog-hub" aria-label="Tipos de catálogo">
         <button type="button" className={tab==='MEDICINES'?'active':''} onClick={()=>setTab('MEDICINES')}>Medicamentos</button>
+        <button type="button" onClick={()=>setTab('PRODUCTS')}>Productos de limpieza</button>
         <button type="button" className={tab==='DOSE_UNITS'?'active':''} onClick={()=>setTab('DOSE_UNITS')}>Unidades de dosis</button>
         <button type="button" className={tab==='CLASSIFICATION'?'active':''} onClick={()=>setTab('CLASSIFICATION')}>
           Clasificación</button>
@@ -166,12 +169,14 @@ export function CatalogPanel({accessToken,canManage,canEditMedicines=false,comme
       </nav>}
 
       {tab&&<div className="catalog-workspace-card">
-        {tab!=='MEDICINES'&&tab!=='CLASSIFICATION'&&<label className="catalog-search"><span className="sr-only">Buscar opciones</span>
+        {tab!=='MEDICINES'&&tab!=='PRODUCTS'&&tab!=='CLASSIFICATION'&&<label className="catalog-search"><span className="sr-only">Buscar opciones</span>
           <input type="search" placeholder="Buscar por nombre…" value={search} onChange={event=>setSearch(event.target.value)}/></label>}
         {tab==='MEDICINES'&&<MedicineCatalog accessToken={accessToken} canManage={canManage} canEdit={canEditMedicines}
           units={reference.units.filter(unit=>unit.contextCode==='MEDICINE_DOSE')}
           routes={items.ADMINISTRATION_ROUTES??[]} treatmentTypes={items.TREATMENT_TYPES??[]}
           classifications={classification?Object.entries(classification.names).map(([code,name])=>({code,name})):undefined}/>}
+        {tab==='PRODUCTS'&&<CleaningProductCatalog accessToken={accessToken} catalog canManage={canManage}
+          canEdit={canEditMedicines} categories={items.AGROCHEMICAL_CATEGORIES??[]}/>}
         {tab==='DOSE_UNITS'&&<><header><div><h3>Unidades de dosis</h3><p>Selecciona una de estas unidades al registrar el medicamento.</p></div></header>
           <div className="catalog-item-list">{list(medicineDoseUnits).map(unit=><button type="button" className="catalog-detail-row" key={unit.code} onClick={()=>openItem(unit.code)}>
             <span><strong>{unit.name}</strong><small>{unit.symbol}</small></span><span aria-hidden="true">›</span></button>)}</div></>}
@@ -258,8 +263,13 @@ export function CatalogPanel({accessToken,canManage,canEditMedicines=false,comme
             <div><dt>Estado</dt><dd>{selectedItem.active?'Activa':'Inactiva · conserva su historial'}</dd></div>
             <div><dt>Origen</dt><dd>{selectedItem.systemDefined?'Opción del sistema':'Opción de esta cuenta'}</dd></div>
             {selectedItem.speciesCode&&<div><dt>Especie</dt><dd>{reference.species.find(item=>item.code===selectedItem.speciesCode)?.name??selectedItem.speciesCode}</dd></div>}</dl>
-            {canManage&&!selectedItem.systemDefined&&<label className="checkbox"><input type="checkbox" checked={selectedItem.active} disabled={busy}
-              onChange={event=>void changeItem(selectedCatalog.code,selectedItem.id,event.target.checked)}/>Opción activa</label>}</>}
+            {canEditMedicines&&!selectedItem.systemDefined&&selectedItem.version!=null&&<details className="catalog-add">
+              <summary>Editar opción</summary><form className="movement-form" key={`${selectedItem.id}:${selectedItem.version}`}
+                onSubmit={event=>void editItem(event,selectedCatalog.code,selectedItem)}>
+                <label><span>Nombre</span><input name="name" required minLength={2} maxLength={160} defaultValue={selectedItem.name} disabled={busy}/></label>
+                <label className="checkbox"><input name="active" type="checkbox" defaultChecked={selectedItem.active} disabled={busy}/>Opción activa</label>
+                <button className="primary-button compact" disabled={busy}>Guardar cambios</button></form></details>}
+</>}
           {selectedUnit&&<dl className="catalog-detail-grid"><div><dt>Símbolo</dt><dd>{selectedUnit.symbol}</dd></div>
             <div><dt>Uso</dt><dd>Dosis de medicamentos</dd></div></dl>}
         </Modal>}

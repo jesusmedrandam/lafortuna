@@ -203,6 +203,7 @@ function Panel({kind}:{kind:'animals'|'movements'|'reproduction'|'production'|'h
       canManage={hasPermission('HEALTH_MANAGE')} canViewMedicines={hasPermission('CATALOG_VIEW')} initialAnimalId={initialAnimalId}/>;
     case 'cleanings':return <CleaningPanel accessToken={token}
       canManage={hasPermission('CLEANING_MANAGE')} canViewMedia={hasPermission('MEDIA_VIEW')}
+      canEditProducts={Boolean(hasPermission('CATALOG_MANAGE')&&(overview.supportMode||['OWNER','ADMINISTRATOR'].includes(property?.roles.find(role=>role.id===overview.activeContext?.roleId)?.code??'')))}
       canManageMedia={hasPermission('MEDIA_MANAGE')}/>;
     case 'activities':return <ActivityPanel accessToken={token} canManage={hasPermission('ACTIVITY_MANAGE')}
       canViewMedia={hasPermission('MEDIA_VIEW')&&modules.includes('MULTIMEDIA')}
