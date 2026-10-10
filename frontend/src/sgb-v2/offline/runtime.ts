@@ -103,6 +103,7 @@ export async function configureOfflineRuntime(scope:OfflineScope|null,token:stri
     window.SGBAndroid?.setAutomaticMediaDownloads?.(false);
   }catch{/* Solo Android. */}
   if(scope&&!syncing)await reprojectQueued(scope);
+  await expireLocalDrafts();
   await publishState();
 }
 
@@ -118,6 +119,44 @@ export async function setDownloadPreferences(value:DownloadPreferences){
   if(activeScope)await putSetting(`download-preferences:${activeScope.userId}`,downloadPreferences);
   await publishState();
 }
+
+const draftRoots=['/cleanings','/health-records/campaigns','/movements','/activities'];
+const draftLifetime=24*60*60*1000;
+function expiredDraft(value:unknown){const row=bodyRecord(value);const created=Date.parse(String(row.createdAt??''));
+ return row.status==='BORRADOR'&&Number.isFinite(created)&&created<=Date.now()-draftLifetime;}
+function mentions(entry:OutboxEntry,id:string){return JSON.stringify([entry.path,entry.jsonBody,entry.formParts.map(part=>part.value)]).includes(id);}
+async function sweepDrafts(){
+ if(!activeScope)return;
+ const entries=await listOutbox(activeScope.userId);const removed=new Set<string>();
+ const roots=entries.filter(entry=>entry.method==='POST'&&draftRoots.includes(entry.path)&&entry.temporaryId&&entry.createdAt<=Date.now()-draftLifetime);
+ for(const entry of entries)if(!entry.temporaryId&&draftRoots.some(root=>entry.path.startsWith(root+'/'))&&expiredDraft(await cachedRecord(entry)))roots.push(entry);
+ for(const root of roots){
+  // ponytail: repeated dependency scans suit short queues; index relation IDs if large queues become slow.
+  const id=root.temporaryId??entityId(root.path,null);const related=[root];const references=new Set([id]);
+  for(let index=0;index<related.length;index++){
+   const entry=related[index]!;references.add('local-object-'+entry.id);if(entry.temporaryId)references.add(entry.temporaryId);
+   for(const next of entries)if(!related.some(value=>value.id===next.id)&&[...references].some(value=>mentions(next,value)))related.push(next);
+  }
+  // Applied offline operations retain their queue until the server confirms them.
+  if(related.some(entry=>entry.path.endsWith('/apply')||entry.serverResult!==undefined))continue;
+  try{for(const entry of related)reservePending(entry);}catch{continue;}
+  for(const entry of related)removed.add(entry.id);
+ }
+ if(!removed.size)return;
+ cacheGeneration++;
+ const scopes=new Map(entries.filter(entry=>removed.has(entry.id)).map(entry=>[offlineScopeKey(entry.scope),entry.scope]));
+ for(const scope of scopes.values())await restorePending(entries.filter(entry=>sameScope(entry.scope,scope)));
+ for(const entry of entries.filter(entry=>removed.has(entry.id))){await removeOutbox(entry.id);
+  try{window.SGBAndroid?.removeMirroredMutation?.(entry.id);}catch{/* Solo Android. */}
+  if(entry.bodyType==='binary'){await removeLocalMedia(entry.id);const key=entry.scope.userId+':'+entry.id;
+   const url=mediaUrls.get(key);if(url)URL.revokeObjectURL(url);mediaUrls.delete(key);}
+  if(entry.temporaryId)await projectEntry({...entry,method:'DELETE'}, {id:entry.temporaryId},false);
+ }
+ for(const scope of scopes.values())await reprojectQueued(scope,true);
+ emit('sgb-v2-cache-updated');
+}
+export function expireLocalDrafts():Promise<void>{const operation=mutationChain.then(async()=>{await sweepDrafts();
+ emit('sgb-v2-cache-updated');await publishState();});mutationChain=operation.catch(()=>{});return operation;}
 
 function authenticated(init:RequestInit){return new Headers(init.headers).has('authorization');}
 function method(init:RequestInit){return String(init.method??'GET').toUpperCase();}
@@ -317,7 +356,7 @@ async function hydrateLocalMedia<T>(scope:OfflineScope,value:T,path?:string):Pro
     }
   }
   const visit=async(value:unknown):Promise<unknown>=>{
-    if(Array.isArray(value))return Promise.all(value.map(visit));
+    if(Array.isArray(value))return Promise.all(value.filter(item=>!expiredDraft(item)).map(visit));
     if(!value||typeof value!=='object')return value;
     const row=value as Record<string,unknown>;const id=row.local_media_id;
     if(typeof row.profile_local_media_id==='string'){
@@ -799,6 +838,7 @@ export function syncOfflineMutations():Promise<void>{
 }
 async function syncQueue(){
   if(syncing||!activeScope||!activeToken||!transport||!isRuntimeOnline())return;
+  await sweepDrafts();
   syncing=true;await publishState();
   const original={...activeScope};
   try{
@@ -1023,6 +1063,7 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
   }
   if(!mutationAllowed(path,init))return (await send<T>(path,init)).data;
 
+  await sweepDrafts();
   const body=await storedBody(init.body);
   const queued=await listOutbox(activeScope.userId);
   if(path==='/cleanings'&&verb==='POST'&&queued.some(entry=>entry.path===path&&entry.method===verb
@@ -1036,7 +1077,9 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
     path,method:verb,...body,requestHeaders,temporaryId:temporaryId(path,verb),state:'PENDING',attempts:0,
     createdAt:lastCreatedAt,lastError:null,errorCode:null};
   entry.summary=await pendingChangeSummary(entry);
-  validateLocalMutation(entry,await cachedRecord(entry));
+  const current=await cachedRecord(entry);
+  if(draftRoots.some(root=>path.startsWith(root+'/'))&&expiredDraft(current))throw new LocalValidationError('Este borrador se eliminó al cumplir 24 horas sin aplicarse.');
+  validateLocalMutation(entry,current);
   const optimistic=await optimisticRecord(entry);
   if(entry.bodyType==='binary'){
     const part=entry.formParts[0]!;const file=part.value as Blob;
@@ -1390,9 +1433,10 @@ async function publishState(){
   const state=await runtimeState();
   if(activeScope){
     let barrier=false;
-    for(const entry of await listOutbox(activeScope.userId)){
+    const entries=await listOutbox(activeScope.userId);
+    for(const entry of entries){
       // ponytail: media relation IDs are remapped in WebView; extend the native worker before syncing these in background.
-      barrier=barrier||Boolean(activeScope.supportMode)||Boolean(entry.scope.supportMode)||entry.state==='FAILED'||entry.bodyType==='binary'||entry.bodyType==='form'
+      barrier=barrier||(entry.method==='POST'&&draftRoots.includes(entry.path)&&!entries.some(other=>other.path===`${entry.path}/${entry.temporaryId}/apply`))||Boolean(activeScope.supportMode)||Boolean(entry.scope.supportMode)||entry.state==='FAILED'||entry.bodyType==='binary'||entry.bodyType==='form'
         ||entry.method==='PATCH'&&entry.path.startsWith('/media/objects/');
       try{
         if(barrier)window.SGBAndroid?.removeMirroredMutation?.(entry.id);

@@ -606,3 +606,21 @@
 .cleaning-product-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;min-width:0;margin:0;padding:0;border:0}
 .cleaning-product-fields>.muted{grid-column:1/-1}
 @media(max-width:620px){.cleaning-product-fields{grid-template-columns:1fr}}
+
+/* One surface for account options and compact history rows. */
+.user-profile-editor .card {display:grid;gap:12px;}
+.user-profile-editor .account-option {border-radius:0;border-bottom:1px solid var(--border);padding:12px 0;}
+.audit-event-list {gap:0;}
+.audit-event {padding:9px 0;flex-direction:row;align-items:center;border-bottom:1px solid var(--border);gap:8px;}
+.audit-event strong {font-size:.88rem;}.audit-event p {margin:2px 0;font-size:.85rem;}.audit-event small {font-size:.75rem;}
+.audit-event>.icon-button {flex:none;align-self:center;}
+.property-selector-group {margin-bottom:20px;}.property-selector-group h2 {font-size:1rem;}
+.property-circle-list {display:flex;gap:16px;overflow-x:auto;padding:4px 3px 12px;}
+.property-circle-list>button {background:transparent;border:0;color:var(--text);display:flex;flex-direction:column;align-items:center;gap:8px;width:100px;flex:none;cursor:pointer;font:inherit;font-size:.8rem;}
+.property-circle {width:64px;height:64px;border-radius:50%;display:grid;place-items:center;border:2px solid var(--border);color:var(--primary);font-weight:700;font-size:1.25rem;}
+.property-circle-list>button[aria-pressed="true"] .property-circle {border-color:var(--primary);background:var(--surface-soft);}
+.property-circle-list>button:focus-visible {outline:2px solid var(--primary);outline-offset:2px;}
+.property-info-heading {display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.property-information {display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin:16px 0 24px;}
+.property-information dt {color:var(--muted);font-size:.8rem;}.property-information dd {margin:5px 0 0;overflow-wrap:anywhere;}
+.property-settings-panel fieldset {border:0;padding:0;min-width:0;}

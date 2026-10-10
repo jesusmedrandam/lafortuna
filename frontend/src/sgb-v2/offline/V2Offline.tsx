@@ -5,7 +5,7 @@ import {Link} from 'react-router-dom';
 import {useV2Session} from '../V2Session';
 import {downloadPaths,getOfflineDetails,isRuntimeOnline,removeDownloadedData,removeDownloadedMedia,
   retryFailedMutations,runtimeState,setAutomaticDownloads,setDownloadPreferences,syncOfflineMutations,
-  discardPendingMutation,editPendingMutation,pendingMutationFields,
+  discardPendingMutation,editPendingMutation,pendingMutationFields,expireLocalDrafts,
   type OfflineDetails,type OfflineRuntimeState} from './runtime';
 import {availableDownloadChoices,defaultDownloadPreferences,downloadCategoryLabel,downloadGroups,
   selectedDownloadPaths,type DownloadPreferences,type PhotoMode} from './preferences';
@@ -50,6 +50,9 @@ export function V2OfflineProvider({children}:{children:ReactNode}){
       window.removeEventListener('offline',connectivity);connection?.removeEventListener('change',connectivity);
       if(refreshTimer.current)window.clearTimeout(refreshTimer.current);};
   },[refresh]);
+  useEffect(()=>{if(!session)return;const expire=()=>{void expireLocalDrafts().catch(reason=>setDownloadError(message(reason)));};
+    expire();const timer=window.setInterval(expire,60000);window.addEventListener('focus',expire);
+    return()=>{window.clearInterval(timer);window.removeEventListener('focus',expire);};},[session?.overview.user.id]);
   useEffect(()=>{if(session&&isRuntimeOnline())void syncOfflineMutations();},
     [session?.overview.activeContext?.propertyId,session?.overview.activeContext?.roleId,state.online]);
   useEffect(()=>{if(!session||!state.online||!state.pending)return;

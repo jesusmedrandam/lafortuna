@@ -482,3 +482,37 @@ let cleanupDownloads=0;runtime.installOfflineTransport(async()=>{cleanupDownload
 await assert.rejects(()=>runtime.downloadPaths(['/unavailable','/cleanings/options']),/Tu sesión venció/);
 assert.equal(cleanupDownloads,1);
 console.log('PASS: cleanup validation, unique drafts, account product aliases, preserved pending data, rate-limit backoff, stable keys and readable download errors.');
+
+// A real queued draft expires from its original creation time, including edits and attachments.
+online=false;const expiryScope={userId:'expiry-user',propertyId:'expiry-property',roleId:'owner'};
+runtime=await load();await runtime.configureOfflineRuntime(expiryScope,'test-token');
+const realNow=Date.now;let draftClock=realNow();Date.now=()=>draftClock;
+try{
+ await runtime.putCache(expiryScope,'/cleanings',[]);
+ const firstDraft=await change('/cleanings',cleaning,'POST');
+ assert.equal(mirrored.has((await runtime.listOutbox(expiryScope.userId))[0].id),false,'Unapplied drafts stay out of the Android background worker');
+ draftClock+=23*60*60*1000;
+ await change('/cleanings/'+firstDraft.id,{...cleaning,expectedVersion:1,notes:'Edited near expiry'},'PUT');
+ await runtime.putCache(expiryScope,'/media',[]);
+ const attached=await runtime.uploadMedia('test-token',{file:new File(['draft-photo'],'draft.jpg',{type:'image/jpeg'}),entityType:'CLEANING',entityId:firstDraft.id});
+ const photoEntry=(await runtime.listOutbox(expiryScope.userId)).find(entry=>entry.bodyType==='binary');
+ await runtime.updateMediaDetails('test-token','local-object-'+photoEntry.id,{description:'Draft attachment description',capturedOn:null,animalIds:[],expectedAttachmentIds:attached.attachmentIds,tagIds:[]});
+ const other=await change('/catalogs/products',{name:'Keep independent product'},'POST');
+ await runtime.expireLocalDrafts();assert.equal((await get('/cleanings')).length,1,'Draft survives before 24 hours');
+ draftClock+=60*60*1000;
+ await runtime.expireLocalDrafts();
+ assert.equal(state.media.has(photoEntry.id),false,'Expired draft attachments leave local storage');
+ assert.ok((await runtime.listOutbox(expiryScope.userId)).every(entry=>!entry.path.includes('local-object-'+photoEntry.id)),'Dependent photo metadata leaves the queue');
+ assert.equal((await get('/cleanings')).length,0,'Editing does not extend the 24-hour lifetime');
+ assert.ok((await runtime.listOutbox(expiryScope.userId)).every(entry=>!entry.path.startsWith('/cleanings')),'Expired root and dependent edits leave the queue');
+ assert.equal((await get('/catalogs/products'))[0].id,other.id,'Independent catalog changes survive');
+ const appliedDraft=await change('/cleanings',cleaning,'POST');await change('/cleanings/'+appliedDraft.id+'/apply',{},'POST');
+ draftClock+=25*60*60*1000;await runtime.expireLocalDrafts();
+ assert.ok((await runtime.listOutbox(expiryScope.userId)).some(entry=>entry.path.endsWith('/apply')),'Applied offline work is retained until confirmed');
+ assert.equal((await get('/cleanings'))[0].status,'COMPLETADO');
+ await runtime.putCache(expiryScope,'/activities',[{id:'old-server-draft',status:'BORRADOR',createdAt:new Date(draftClock-24*60*60*1000).toISOString()},
+  {id:'applied-server',status:'COMPLETADA',createdAt:new Date(draftClock-48*60*60*1000).toISOString()}]);
+ assert.deepEqual((await get('/activities')).map(row=>row.id),['applied-server'],'Cached server drafts expire offline too');
+ await assert.rejects(()=>change('/activities/old-server-draft/apply',{},'POST'),/24 horas/);
+}finally{Date.now=realNow;}
+console.log('PASS: draft expiry at 24 hours, dependent queue cleanup, unchanged creation deadline and applied-work preservation.');

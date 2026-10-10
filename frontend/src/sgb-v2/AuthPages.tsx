@@ -3,6 +3,7 @@ import {Eye,EyeOff,KeyRound,LogIn,UserPlus} from 'lucide-react';
 import {Link,useNavigate,useSearchParams} from 'react-router-dom';
 import {Button,Field,Input} from '../components/ui';
 import {confirmUserEmailChange,register,requestPasswordReset,resendVerification,resetPassword,verifyEmail} from './api';
+import {PropertyInformationFields,propertyInformationFrom} from './PropertyInformationFields';
 import {useV2Session} from './V2Session';
 
 const failure=(reason:unknown)=>reason instanceof Error?reason.message:'No se pudo completar la solicitud.';
@@ -40,7 +41,8 @@ export function V2Register(){
   async function submit(event:FormEvent){
     event.preventDefault();if(values.password!==values.confirmation){setError('Las contraseñas no coinciden.');return;}
     setBusy(true);setError('');try{
-      await register({displayName:values.displayName,propertyName:values.propertyName,
+      const propertyInformation=propertyInformationFrom(event.currentTarget as HTMLFormElement);
+      await register({displayName:values.displayName,propertyName:propertyInformation.name,propertyInformation,
         email:values.email,password:values.password});
       navigate(`/activar?correo=${encodeURIComponent(values.email)}`,{replace:true});
     }catch(reason){setError(failure(reason));}finally{setBusy(false);}
@@ -50,11 +52,11 @@ export function V2Register(){
     {error&&<div className="form-alert form-alert-error" role="alert">{error}</div>}
     <form className="form-stack" onSubmit={submit}><div className="form-grid">
       <Field label="Nombre completo" required><Input value={values.displayName} onChange={event=>update('displayName',event.target.value)} minLength={2} required/></Field>
-      <Field label="Primera propiedad" required><Input value={values.propertyName} onChange={event=>update('propertyName',event.target.value)} minLength={2} required/></Field>
+      
       <Field label="Correo electrónico" required><Input type="email" autoComplete="email" value={values.email} onChange={event=>update('email',event.target.value)} required/></Field>
       <Field label="Contraseña" hint="Al menos 12 caracteres, una letra y un número." required><Input type="password" autoComplete="new-password" minLength={12} value={values.password} onChange={event=>update('password',event.target.value)} required/></Field>
       <Field label="Confirmar contraseña" required><Input type="password" autoComplete="new-password" minLength={12} value={values.confirmation} onChange={event=>update('confirmation',event.target.value)} required/></Field>
-    </div><Button type="submit" loading={busy}><UserPlus size={18}/>Crear cuenta</Button></form>
+    </div><h3>Primera propiedad</h3><PropertyInformationFields/><Button type="submit" loading={busy}><UserPlus size={18}/>Crear cuenta</Button></form>
     <div className="auth-footer"><Link to="/login">Ya tengo cuenta</Link></div>
   </div>;
 }

@@ -33,11 +33,10 @@ export function V2AuditPage(){
         {choices.map(value=><option key={value} value={value}>{auditAction(value)}</option>)}
       </Select></div>:undefined}/>
     {data===null&&!error?<LoadingState/>:data===null?<ErrorState message={error} onRetry={()=>setRevision(value=>value+1)}/>
-      :rows.length?<div className="audit-event-list">{rows.map(item=><article className="card audit-event" key={item.id}>
+      :rows.length?<div className="audit-event-list">{rows.map(item=><article className="audit-event" key={item.id}>
         <div><strong>{auditAction(item.action)}</strong><p>{auditRecordName(item)}</p>
           <small>{auditActor(item)} · {formatDateTime(item.occurredAt)}</small></div>
-        <Button variant="ghost" onClick={()=>setSelected(item)} aria-label={`Ver cambio: ${auditRecordName(item)}`}>
-          <Eye size={16}/>Ver detalle</Button>
+        <IconButton onClick={()=>setSelected(item)} label={`Ver cambio: ${auditRecordName(item)}`}><Eye size={18}/></IconButton>
       </article>)}</div>:<EmptyState icon={ClipboardList} title={search||action?'No encontramos esos cambios':'Sin cambios registrados'}
         description={search||action?'Prueba otra búsqueda o quita el filtro.':'Los cambios realizados en esta propiedad aparecerán aquí.'}/>}
     {data&&(page>1||data.hasMore)&&<div className="animal-pages"><Button variant="secondary" disabled={page===1}

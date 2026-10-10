@@ -71,7 +71,10 @@ export interface SessionOverview {
   ownedAccount: null | { id: string; name: string; status: string; maxProperties: number; usedProperties: number };
 }
 
+export interface PropertyInformation {name:string;ownerName:string;areaValue:number;areaUnitCode:'HECTARE'|'SQUARE_METER';address:string}
 export interface PropertySettings {
+  property:PropertyInformation&{id:string;timezone:string};
+  canViewModules:boolean;
   account: { id: string; name: string; maxProperties: number; usedProperties: number };
   canCreate: boolean;
   canManageModules: boolean;
@@ -417,6 +420,7 @@ export async function login(email: string, password: string, deviceId: string) {
 export function register(input: {
   displayName: string;
   propertyName?: string;
+  propertyInformation?:PropertyInformation;
   email: string;
   password: string;
   invitationToken?: string;
@@ -1227,9 +1231,9 @@ export function applyActivity(accessToken:string,id:string){return request<Activ
 export function cancelActivity(accessToken:string,id:string){return request<ActivityRecord>(
   `/activities/${encodeURIComponent(id)}/cancel`,{method:'POST',headers:bearer(accessToken)});}
 
-export function createAccountProperty(accessToken: string, name: string) {
+export function createAccountProperty(accessToken: string, input: PropertyInformation) {
   return request<{ accountId: string; propertyId: string; roleId: string }>('/property-settings/properties', {
-    method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name }),
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
   });
 }
 
@@ -1389,3 +1393,5 @@ export async function uploadMedia(accessToken:string,input:{file:File;animalIds?
       'content-type':file.type||'application/octet-stream',
       'x-media-kind':file.type.startsWith('video/')?'VIDEO':'IMAGE'},body:file});
 }
+
+export function updatePropertyInformation(token:string,input:PropertyInformation){return request<PropertyInformation>('/property-settings/information',{method:'PATCH',headers:bearer(token),body:JSON.stringify(input)});}
