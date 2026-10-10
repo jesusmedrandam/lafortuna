@@ -9,7 +9,7 @@ import {PropertySettingsPanel} from './PropertySettingsPanel';
 import {useV2Session} from './V2Session';
 import {UserProfileEditor} from './UserProfileEditor';
 
-const sections={cuenta:'Mi cuenta',apariencia:'Apariencia',panel:'Mi panel',propiedad:'Propiedad y módulos'};
+const sections={cuenta:'Mi cuenta',apariencia:'Apariencia',panel:'Mi panel',propiedad:'Propiedades'};
 type SettingsSection=keyof typeof sections;
 
 function ColorSetting({title,description,value,onChange,presets=[]}:{title:string;description:string;
@@ -62,7 +62,7 @@ export function V2SettingsPage(){
   const [error,setError]=useState('');const [signingOut,setSigningOut]=useState(false);
   const overview=session!.overview;const property=overview.properties.find(item=>item.id===overview.activeContext?.propertyId);
   const role=property?.roles.find(item=>item.id===overview.activeContext?.roleId);
-  const canViewProperty=Boolean(property&&hasPermission('MODULE_VIEW'));
+  const canViewProperty=Boolean(property);
   const requested=params.get('seccion');
   const section=requested&&Object.hasOwn(sections,requested)&&(requested!=='propiedad'||canViewProperty)?requested as SettingsSection:null;
   const open=(next:SettingsSection)=>{setError('');setParams({seccion:next});};
@@ -71,13 +71,13 @@ export function V2SettingsPage(){
       <span className="settings-card-icon"><Icon size={23}/></span><span><strong>{label}</strong><small>{description}</small></span>
       <ChevronRight size={18}/></button>)}</div>;
   const administration=[
-    ...(canViewProperty?[{label:'Propiedad y módulos',description:'Configura las funciones de la propiedad y crea nuevas propiedades.',icon:Warehouse,action:()=>open('propiedad')}]:[]),
+    ...(canViewProperty?[{label:'Propiedades',description:'Tus propiedades, colaboraciones y políticas de operación.',icon:Warehouse,action:()=>open('propiedad')}]:[]),
     {label:'Roles y permisos',description:'Elige tu propiedad y rol; administra los accesos permitidos.',icon:Users,action:()=>navigate('/roles-permisos')},
     ...(property&&hasPermission('CATALOG_VIEW')?[{label:'Catálogos',description:'Clasificaciones, etiquetas y opciones de los registros.',icon:SlidersHorizontal,action:()=>navigate('/catalogos')}]:[]),
     ...(property&&hasPermission('AUDIT_VIEW')?[{label:'Historial de cambios',description:'Consulta qué cambió, quién lo hizo y cuándo.',icon:ClipboardList,action:()=>navigate('/auditoria')}]:[]),
   ];
   return <div className="settings-page settings-content v2-settings-page">
-    <PageHeader title={section?sections[section]:'Configuración'} description={section?undefined:'Tu cuenta, el diseño y las opciones de la propiedad, organizados por secciones.'}/>
+    {section&&<PageHeader title={section==='cuenta'?({perfil:'Editar perfil',clave:'Cambiar contraseña',correo:'Cambiar correo electrónico',sesiones:'Sesiones activas'}[params.get('opcion')??'']??sections[section]):sections[section]}/>}
     {!section&&<>
       <section className="settings-hub-section"><h2>Cuenta</h2>{cards([
         {label:'Mi cuenta',description:'Tu perfil, foto, contraseña y sesión actual.',icon:UserCircle,action:()=>open('cuenta')},
@@ -91,17 +91,17 @@ export function V2SettingsPage(){
         {label:'Descargas',description:'Contenido sin conexión, descargas con Wi-Fi y espacio del dispositivo.',icon:CloudDownload,action:()=>navigate('/sin-conexion')},
       ])}</section>
     </>}
-    {section==='cuenta'&&<div className="v2-account-settings"><UserProfileEditor/><Card>
+    {section==='cuenta'&&<div className="v2-account-settings"><UserProfileEditor footer={<>
       <dl><div><dt>Propiedad actual</dt><dd>{property?.name??'Sin propiedad seleccionada'}</dd></div>
         <div><dt>Rol actual</dt><dd>{overview.supportMode?'Soporte de sistema':role?.name??'Sin rol seleccionado'}</dd></div></dl>
       <div className="inline-actions"><Link className="secondary-button compact" to="/roles-permisos">Roles y permisos</Link>
         <Button variant="secondary" loading={signingOut} onClick={()=>{setSigningOut(true);setError('');void signOut()
           .catch(reason=>setError(reason instanceof Error?reason.message:'No se pudo cerrar la sesión.')).finally(()=>setSigningOut(false));}}>
-          <LogOut size={17}/>Cerrar sesión</Button></div></Card></div>}
+          <LogOut size={17}/>Cerrar sesión</Button></div></>}/></div>}
     {section==='apariencia'&&<AppearanceSection/>}
     {section==='panel'&&<DashboardPreferencesEditor userId={overview.user.id}/>}
     {section==='propiedad'&&<PropertySettingsPanel accessToken={session!.accessToken} onSettingsChanged={reloadOverview}
-      onPropertyCreated={async(propertyId,roleId)=>{await selectContext(propertyId,roleId);navigate('/');}}/>}
+      onPropertyCreated={async(propertyId,roleId)=>{await selectContext(propertyId,roleId);}}/>}
     {error&&<p className="form-error" role="alert">{error}</p>}
   </div>;
 }

@@ -25,7 +25,7 @@ export const runtimeState=async()=>({...state});export const isRuntimeOnline=()=
 export const setAutomaticDownloads=async automaticDownloads=>{state={...state,automaticDownloads};announce();};
 export const setDownloadPreferences=async preferences=>{state={...state,preferences};window.savedOfflinePreferences=preferences;announce();};
 export const downloadPaths=async(paths,options={})=>{window.offlineDownloads.push({paths,options});return {downloaded:paths.length,failed:0};};
-export const syncOfflineMutations=async()=>{};export const retryFailedMutations=async()=>{};
+export const expireLocalDrafts=async()=>{};export const syncOfflineMutations=async()=>{};export const retryFailedMutations=async()=>{};
 export const discardPendingMutation=async id=>{window.offlineRemovals.push('change:'+id);details.changes=details.changes.filter(item=>item.id!==id);};
 export const editPendingMutation=async(id,fields)=>{window.pendingCorrection={id,fields};};
 export const pendingMutationFields=item=>item.jsonBody??{};

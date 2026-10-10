@@ -1,12 +1,12 @@
-import {useState,type FormEvent} from 'react';
-import {Camera,ChevronDown,UserCircle} from 'lucide-react';
+import {useState,type ReactNode,type FormEvent} from 'react';
+import {Camera,ChevronRight,UserCircle} from 'lucide-react';
 import {Button,Card,Field,Input,PasswordInput} from '../components/ui';
 import {changeUserPassword,requestUserEmailChange} from './api';
 import {useV2Session} from './V2Session';
 import {useLocation,useNavigate,useSearchParams} from 'react-router-dom';
 import {AccountSessions} from './AccountSessions';
 
-export function UserProfileEditor(){
+export function UserProfileEditor({footer}:{footer?:ReactNode}){
   const {session,saveProfile}=useV2Session();const user=session!.overview.user;
   const [params,setParams]=useSearchParams();const section=params.get('opcion');
   const navigate=useNavigate();const location=useLocation();
@@ -67,14 +67,14 @@ export function UserProfileEditor(){
     finally{setEmailBusy(false);}
   };
   const option=(label:string,key:string,action?:()=>void)=><Button variant="ghost" className="account-option"
-    aria-expanded={section===key} aria-controls={`account-${key}`} disabled={profileBusy||photoBusy||passwordBusy||emailBusy}
+    disabled={profileBusy||photoBusy||passwordBusy||emailBusy}
     onClick={()=>{if(section===key)setSection(null);else if(action)action();else setSection(key);}}>
-    <span>{label}</span><ChevronDown size={18}/></Button>;
+    <span>{label}</span><ChevronRight size={18}/></Button>;
   return <div className="user-profile-editor">
-    <Card><h2>Tu perfil</h2><div className="v2-account-heading"><div className="account-avatar">
+    <Card>{(!section||editing)&&<div className="v2-account-heading"><div className="account-avatar">
       {selectedPhoto?<img src={selectedPhoto} alt="Tu foto de perfil"/>:<UserCircle size={52}/>}</div>
-      <div><strong>{user.displayName}</strong><p>{user.email}</p></div></div>
-      {option('Editar perfil','perfil',()=>{setDisplayName(user.displayName);setPhoto(undefined);setProfileError('');setProfileMessage('');setEditing(true);})}
+      <div><strong>{user.displayName}</strong><p>{user.email}</p></div></div>}
+      {!section&&option('Editar perfil','perfil',()=>{setDisplayName(user.displayName);setPhoto(undefined);setProfileError('');setProfileMessage('');setEditing(true);})}
       {editing&&<form id="account-perfil" onSubmit={save}>
         <fieldset disabled={profileBusy||photoBusy}>
           <Field label="Nombre"><Input name="displayName" autoComplete="name" required minLength={2} maxLength={160}
@@ -86,10 +86,9 @@ export function UserProfileEditor(){
             <Button type="submit" loading={profileBusy}>Guardar perfil</Button>
             <Button type="button" variant="secondary" onClick={()=>{setEditing(false);setPhoto(undefined);setProfileError('');}}>Cancelar</Button></div>
         </fieldset></form>}
-      {profileError&&<p className="form-error" role="alert">{profileError}</p>}
-      {profileMessage&&<p className="form-success" role="status">{profileMessage}</p>}
-    </Card>
-    <Card>{option('Cambiar contraseña','clave')}
+      {(!section||section==='perfil')&&profileError&&<p className="form-error" role="alert">{profileError}</p>}
+      {(!section||section==='perfil')&&profileMessage&&<p className="form-success" role="status">{profileMessage}</p>}
+      {!section&&option('Cambiar contraseña','clave')}
       {section==='clave'&&<form id="account-clave" onSubmit={password}><p>Usa al menos 12 caracteres, con letras y números.</p><fieldset disabled={passwordBusy}>
         <Field label="Contraseña actual"><PasswordInput name="currentPassword" autoComplete="current-password" required maxLength={128}
           value={currentPassword} onChange={event=>setCurrentPassword(event.target.value)}/></Field>
@@ -100,18 +99,16 @@ export function UserProfileEditor(){
         <Button type="submit" loading={passwordBusy}>Guardar contraseña</Button>
         <Button type="button" variant="secondary" onClick={()=>{setSection(null);setCurrentPassword('');setNewPassword('');setConfirmation('');setPasswordError('');}}>Cancelar</Button>
       </fieldset></form>}
-      {passwordError&&<p className="form-error" role="alert">{passwordError}</p>}
-      {passwordMessage&&<p className="form-success" role="status">{passwordMessage}</p>}
-    </Card>
-    <Card>{option('Cambiar correo electrónico','correo')}
+      {(!section||section==='clave')&&passwordError&&<p className="form-error" role="alert">{passwordError}</p>}
+      {(!section||section==='clave')&&passwordMessage&&<p className="form-success" role="status">{passwordMessage}</p>}
+      {!section&&option('Cambiar correo electrónico','correo')}
       {section==='correo'&&<form id="account-correo" onSubmit={email}><p>Confirma tu contraseña y verifica el nuevo correo. Al confirmar se cerrarán tus sesiones para proteger tu cuenta.</p>
         <fieldset disabled={emailBusy}><Field label="Nuevo correo electrónico"><Input name="email" type="email" autoComplete="email" maxLength={254} required/></Field>
           <Field label="Contraseña actual"><PasswordInput name="emailPassword" autoComplete="current-password" maxLength={128} required/></Field>
           <div className="inline-actions"><Button type="submit" loading={emailBusy}>Enviar confirmación</Button>
             <Button type="button" variant="secondary" onClick={()=>{setSection(null);setEmailError('');}}>Cancelar</Button></div></fieldset></form>}
-      {emailError&&<p className="form-error" role="alert">{emailError}</p>}
-      {emailMessage&&<p className="form-success" role="status">{emailMessage}</p>}
-    </Card>
-    <Card>{option('Sesiones activas','sesiones')}{section==='sesiones'&&<div id="account-sesiones"><AccountSessions/></div>}</Card>
+      {(!section||section==='correo')&&emailError&&<p className="form-error" role="alert">{emailError}</p>}
+      {(!section||section==='correo')&&emailMessage&&<p className="form-success" role="status">{emailMessage}</p>}
+      {!section&&option('Sesiones activas','sesiones')}{section==='sesiones'&&<div id="account-sesiones"><AccountSessions/></div>}{!section&&footer}</Card>
   </div>;
 }

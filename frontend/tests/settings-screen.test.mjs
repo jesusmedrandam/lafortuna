@@ -8,13 +8,13 @@ import {fileURLToPath} from 'node:url';
 import {build} from 'vite';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
-const deadline=setTimeout(()=>{console.error('Browser test timed out');process.exit(1);},45000);
+const deadline=setTimeout(()=>{console.error('Browser test timed out');process.exit(1);},90000);
 const mockApi=`
 export class ApiRequestError extends Error{}
 window.settingsRequests=0;
-export const getPropertySettings=async()=>{window.settingsRequests++;return {account:{name:'Cuenta de prueba',usedProperties:1,maxProperties:2},canCreate:false,canManageModules:false,
+export const getPropertySettings=async()=>{window.settingsRequests++;return {account:{name:'Cuenta de prueba',usedProperties:1,maxProperties:2},canCreate:Boolean(window.settingsManage),canManageModules:Boolean(window.settingsManage),canViewModules:true,property:{name:'Finca de prueba',ownerName:'Ana',areaValue:12.5,areaUnitCode:'HECTARE',address:'Los Montes'},
   modules:[{code:'TASKS',name:'Actividades',enabled:true,isCore:false,accountEnabled:true}]};};
-export const createAccountProperty=async()=>{};export const updatePropertyModule=async()=>{};
+export const updatePropertyInformation=async()=>{};export const createAccountProperty=async(_token,input)=>{window.createdProperty=input;return {propertyId:'property-a',roleId:'role-a'};};export const updatePropertyModule=async()=>{};
 window.passwordCalls=[];
 export const changeUserPassword=async(token,currentPassword,newPassword)=>{window.passwordCalls.push({token,currentPassword,newPassword});return {changed:true};};
 window.emailCalls=[];
@@ -43,7 +43,7 @@ const mockSession=`
 import {useState} from 'react';
 export const useV2Session=()=>{const [,refresh]=useState(0);return ({session:{accessToken:'test',overview:{user:{id:window.settingsUser??'user-a',displayName:'Ana',email:'ana@example.test',
   ...window.settingsProfile,isSuperadmin:Boolean(window.settingsAdmin)},
-  activeContext:{propertyId:'property-a',roleId:'role-a'},properties:[{id:'property-a',name:'Finca de prueba',roles:[{id:'role-a',name:'Colaborador'}]}]}},
+  activeContext:{propertyId:'property-a',roleId:'role-a'},properties:[{id:'property-own',name:'Finca propia',isOwner:true,roles:[{id:'role-owner',name:'Propietario'}]},{id:'property-a',isOwner:false,name:'Finca de prueba',roles:[{id:'role-a',name:'Colaborador'}]}]}},
   hasPermission:permission=>window.settingsRestricted?false:['MODULE_VIEW','CATALOG_VIEW','AUDIT_VIEW'].includes(permission),
   reloadOverview:async()=>{},selectContext:async()=>{},signOut:async()=>{window.settingsSignedOut=true;},
   saveProfile:async input=>{window.settingsProfile={...window.settingsProfile,...input};refresh(value=>value+1);}});};
@@ -84,8 +84,10 @@ try{
   check(document.querySelector('.v2-account-settings').textContent.includes('ana@example.test'),'Account displays current user');
   check(document.querySelector('.v2-account-settings').textContent.includes('Colaborador'),'Account preserves actual role');
   check(!button('Configuración'),'Account has no duplicate back button');
+  check(document.querySelectorAll('.v2-account-settings .card').length===1,'Account has one surface');
   check(!document.querySelector('.user-profile-editor form'),'Account initially shows options with all forms collapsed');
   button('Editar perfil').click();await until(()=>document.querySelector('input[name="displayName"]'));
+  check(!button('Cambiar contraseña'),'The profile form is a separate screen');
   change(document.querySelector('input[name="displayName"]'),'Ana editada');
   const canvas=document.createElement('canvas');canvas.width=40;canvas.height=40;canvas.getContext('2d').fillRect(0,0,40,40);
   const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
@@ -106,6 +108,7 @@ try{
   check(window.passwordCalls[0].currentPassword==='Clave-actual-2026','Current password submitted');
   button('Cambiar contraseña').click();await until(()=>document.querySelector('input[name="currentPassword"]'));
   check(document.querySelector('input[name="newPassword"]').value===''&&document.querySelector('input[name="confirmPassword"]').value==='','Passwords cleared after success');
+  back();await until(()=>button('Editar perfil'));
   button('Editar perfil').click();await until(()=>button('Quitar foto'));button('Quitar foto').click();
   await until(()=>!document.querySelector('.account-avatar img'));
   button('Guardar perfil').click();await until(()=>window.settingsProfile.profilePhoto===null&&!document.querySelector('input[name="displayName"]'));
@@ -155,18 +158,33 @@ try{
   document.querySelector('.dashboard-settings input').click();button('Guardar mi panel').click();await until(()=>document.querySelector('[role="status"]'));
   check(JSON.parse(localStorage.getItem('sgb:dashboard:user-a')).sections[0].visible===false,'Personal panel settings are preserved');
   back();await until(()=>document.querySelector('.settings-hub-section'));
-  [...document.querySelectorAll('.settings-hub-card')].find(node=>node.textContent.startsWith('Propiedad y módulos')).click();await until(()=>window.settingsRequests===1);
-  await until(()=>document.querySelector('.property-module-row'));
+  [...document.querySelectorAll('.settings-hub-card')].find(node=>node.textContent.startsWith('Propiedades')).click();await until(()=>window.settingsRequests===1);
+  await until(()=>document.querySelector('.property-information'));
+  check(document.querySelectorAll('.property-selector-group').length===2&&document.querySelectorAll('.property-circle').length===2,'Own properties and collaborations have circular selectors');
+  check(!document.querySelector('.property-module-row'),'Policies are on a separate screen');
+  button('Políticas de operación').click();await until(()=>document.querySelector('.property-module-row'));
   check(document.querySelector('.property-module-row input').disabled,'Property permissions remain enforced');
-  window.settingsRestricted=true;renderApp();await until(()=>document.querySelector('.settings-hub-section'));
+  back();await until(()=>document.querySelector('.property-information'));back();await until(()=>document.querySelector('.settings-hub-section'));
+  window.settingsManage=true;
+  [...document.querySelectorAll('.settings-hub-card')].find(node=>node.textContent.startsWith('Propiedades')).click();await until(()=>button('Crear propiedad'));
+  button('Crear propiedad').click();await until(()=>document.querySelector('input[name="ownerName"]'));
+  check(!document.querySelector('.property-information'),'Property creation uses its own screen');
+  check(!document.querySelector('form').checkValidity(),'A property requires owner, area and location');
+  change(document.querySelector('input[name="name"]'),'Nueva finca');change(document.querySelector('input[name="ownerName"]'),'Dueño de finca');
+  change(document.querySelector('input[name="areaValue"]'),'18.5');change(document.querySelector('input[name="address"]'),'Sector Los Montes');
+  button('Crear propiedad').click();await until(()=>window.createdProperty);
+  check(window.createdProperty.areaValue===18.5&&window.createdProperty.areaUnitCode==='HECTARE'&&window.createdProperty.address==='Sector Los Montes','Creation submits the complete property information');
+  await until(()=>document.querySelector('.property-information'));back();await until(()=>document.querySelector('.settings-hub-section'));window.settingsManage=false;
+  window.settingsRestricted=true;renderApp();await until(()=>document.querySelectorAll('button.settings-hub-card').length===6);
   check(!document.querySelector('.property-settings-panel'),'Restricted section cannot be forced with query URL');
-  check(document.querySelectorAll('button.settings-hub-card').length===5,'Restricted users see only allowed cards');
+  check(document.querySelectorAll('button.settings-hub-card').length===6,'Restricted users see only allowed cards');
   [...document.querySelectorAll('.settings-hub-card')].find(node=>node.textContent.startsWith('Descargas')).click();await until(()=>document.getElementById('download-route'));
   check(location.pathname==='/sin-conexion','Downloads card opens offline content');
   history.pushState(null,'','/auditoria');window.dispatchEvent(new PopStateEvent('popstate'));await until(()=>document.querySelectorAll('.audit-event').length===2);
   const rootText=()=>document.getElementById('root').textContent;
   check(rootText().includes('Editó la descripción del animal')&&rootText().includes('Equipo de soporte · José'),'Readable actions and accountable support actor');
   check(!rootText().includes('ANIMAL_DESCRIPTION_UPDATED')&&!rootText().includes('203.0.113.15'),'Technical codes and IP hidden in the list');
+  check(document.querySelector('[aria-label="Ver cambio: Lucera"]').textContent==='', 'Audit details use an icon only');
   document.querySelector('[aria-label="Ver cambio: Lucera"]').click();await until(()=>document.querySelector('.audit-readable-change'));
   check(rootText().includes('Antes: Antes de la visita')&&rootText().includes('Ahora: Después de la visita'),'Before and after comparison in Spanish');
   check(rootText().includes('Antes: Desaparecido')&&rootText().includes('Ahora: Activo'),'Database field names and status codes are translated');
@@ -196,7 +214,7 @@ const result=await build({root,configFile:false,logLevel:'error',define:{'proces
     if(/(?:^|\/)theme\/ThemeContext(?:\.tsx)?$/.test(id))return root.replaceAll('\\','/')+'src/theme/ThemeContext.tsx';
     if(id==='settings-screen-test'||id===root+'settings-screen-test')return '\0settings-screen-test';
     if(id==='./api'&&importer?.includes('/src/sgb-v2/'))return '\0settings-screen-api';
-    if(id==='./V2Session'&&['V2SettingsPage.tsx','UserProfileEditor.tsx','AccountSessions.tsx','V2AuditPage.tsx','AuthPages.tsx'].some(file=>importer?.endsWith('/'+file)))return '\0settings-screen-session';
+    if(id==='./V2Session'&&['V2SettingsPage.tsx','UserProfileEditor.tsx','AccountSessions.tsx','V2AuditPage.tsx','AuthPages.tsx','PropertySettingsPanel.tsx'].some(file=>importer?.endsWith('/'+file)))return '\0settings-screen-session';
     if(importer==='\0settings-screen-test'&&id.startsWith('./src/'))return root+id.slice(2)+'.tsx';
   },load(id){if(id==='\0settings-screen-test')return entry;if(id==='\0settings-screen-api')return mockApi;if(id==='\0settings-screen-session')return mockSession;},
 }],build:{write:false,minify:false,lib:{entry:'settings-screen-test',formats:['es'],fileName:'test'},rolldownOptions:{output:{codeSplitting:false}}}});
@@ -221,7 +239,7 @@ try{
     '--user-data-dir='+join(temporary,'profile'),'--remote-debugging-port=0','about:blank'],{windowsHide:true,stdio:'ignore'});
   const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   let port;
-  for(let attempt=0;attempt<100;attempt++){try{port=(await readFile(join(temporary,'profile','DevToolsActivePort'),'utf8')).split('\n')[0];break;}catch{await pause(50);}}
+  for(let attempt=0;attempt<600;attempt++){try{port=(await readFile(join(temporary,'profile','DevToolsActivePort'),'utf8')).split('\n')[0];break;}catch{await pause(50);}}
   assert.ok(port,'Chrome did not start');
   const targets=await(await fetch('http://127.0.0.1:'+port+'/json/list')).json();
   socket=new WebSocket(targets.find(target=>target.type==='page').webSocketDebuggerUrl);

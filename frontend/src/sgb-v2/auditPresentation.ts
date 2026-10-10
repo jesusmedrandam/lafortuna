@@ -2,6 +2,9 @@ import {formatDate} from '../utils';
 import type {AuditRecord} from './api';
 
 const actions:Record<string,string>={
+  PROPERTY_INFORMATION_UPDATED:'Actualizó la información de la propiedad',
+  MOVEMENT_DRAFT_EXPIRED:'Eliminó un borrador de traslado tras 24 horas',HEALTH_CAMPAIGN_DRAFT_EXPIRED:'Eliminó un borrador de tratamiento tras 24 horas',
+  CLEANING_DRAFT_EXPIRED:'Eliminó un borrador de limpieza tras 24 horas',ACTIVITY_DRAFT_EXPIRED:'Eliminó un borrador de actividad tras 24 horas',
   ACCOUNT_CREATED:'Creó una cuenta',ACCOUNT_REGISTERED:'Registró una cuenta',
   ANIMAL_CREATED:'Registró un animal',ANIMAL_DESCRIPTION_UPDATED:'Editó la descripción del animal',
   ANIMAL_STATUS_CHANGED:'Cambió el estado del animal',ANIMAL_MOVED_TO_TRASH:'Movió un animal a la papelera',ANIMAL_RESTORED:'Restauró un animal',
@@ -62,7 +65,7 @@ const entities:Record<string,string>={ANIMAL:'Animal',ANIMAL_WEIGHING:'Pesaje',A
   PROPERTY_MODULE:'Función de la propiedad',PROPERTY_MEMBERSHIP:'Colaborador',PROPERTY_INVITATION:'Invitación',
   CATALOG_ITEM:'Opción del catálogo',ADMINISTRATIVE_ACCOUNT:'Cuenta',USER_SESSION:'Sesión',
   COMMERCE:'Compra o venta',FINANCE_ACCOUNT:'Cuenta de dinero',FINANCE_MOVEMENT:'Ingreso o egreso'};
-const fields:Record<string,string>={name:'Nombre',displayName:'Nombre',description:'Descripción',notes:'Notas',
+const fields:Record<string,string>={ownerName:'Propietario',areaValue:'Extensión',address:'Ubicación',expiredAt:'Eliminación automática',name:'Nombre',displayName:'Nombre',description:'Descripción',notes:'Notas',
   previousEmail:'Correo anterior',newEmail:'Nuevo correo',sessionCount:'Sesiones cerradas',currentSessionClosed:'Cerró este dispositivo',
   activeIngredient:'Principio activo',defaultUnitCode:'Unidad de dosis',doseAmount:'Cantidad de referencia',doseWeight:'Peso de referencia',
   doseWeightUnitCode:'Unidad de peso',administrationRoutes:'Vías de administración',doseClassificationRanges:'Rangos por clasificación',
@@ -83,7 +86,7 @@ const fields:Record<string,string>={name:'Nombre',displayName:'Nombre',descripti
   destinationLocationId:'Ubicación de destino',animalId:'Animal',cowId:'Vaca',motherId:'Madre',fatherId:'Padre',
   moduleCode:'Función',enabledModules:'Funciones habilitadas',isFalse:'Celo falso',voidedAt:'Anulación',
   cancelledAt:'Cancelación',completedAt:'Finalización',maxProperties:'Límite de propiedades'};
-const values:Record<string,string>={ACTIVE:'Activo',INACTIVE:'Inactivo',MISSING:'Desaparecido',DEAD:'Fallecido',
+const values:Record<string,string>={BORRADOR:'Borrador',COMPLETADO:'Completado',COMPLETADA:'Completada',CANCELADO:'Cancelado',CANCELADA:'Cancelada',ACTIVE:'Activo',INACTIVE:'Inactivo',MISSING:'Desaparecido',DEAD:'Fallecido',
   MILLIGRAM:'mg',GRAM:'g',MILLILITER:'ml',LITER:'l',UNIT:'unidad',DOSE:'dosis',
   VACUNA:'Vacuna',DESPARASITACION:'Desparasitación',ENFERMEDAD:'Tratamiento de enfermedad',OTRO:'Otro tratamiento',
   ORAL:'Oral',INTRAMUSCULAR:'Intramuscular',SUBCUTANEA:'Subcutánea',INTRAVENOSA:'Intravenosa',TOPICA:'Tópica',OTRA:'Otra',
