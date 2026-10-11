@@ -538,13 +538,16 @@ const birthScope={userId:'birth-offline',propertyId:'birth-property',roleId:'own
 online=false;await runtime.configureOfflineRuntime(birthScope,'test-token');
 await runtime.putCache(birthScope,'/reproduction',{heats:[],services:[],births:[],losses:[],pregnancies:[{id:'pregnancy-a',cowId:'cow-a',cowName:'Madre',status:'CONFIRMED'}]});
 await runtime.putCache(birthScope,'/animals?page=1',{items:[{id:'cow-a',name:'Madre',sex:'FEMALE',speciesCode:'BOVINE',owners:[{id:'owner-a',name:'Ana',percent:100,isPrimary:true}]}],page:1,total:1,hasMore:false});
+await runtime.putCache(birthScope,'/owners',[{id:'owner-b',name:'Luis'}]);
 const queuedNewborn=await change('/reproduction/births',{pregnancyId:'pregnancy-a',occurredOn:'2026-10-10',kind:'NORMAL',stillbornCount:0,
- calves:[{name:'Cría offline',sex:'FEMALE',initialWeight:31,initialWeightUnitCode:'KILOGRAM'},{name:'Segunda cría offline',sex:'MALE'}]},'POST');
+ calves:[{name:'Cría offline',sex:'FEMALE',initialWeight:31,initialWeightUnitCode:'KILOGRAM'},{name:'Segunda cría offline',sex:'MALE',owners:[{partyId:'owner-b',percent:100,isPrimary:true}]}]},'POST');
 let newbornList=(await runtime.getCache(birthScope,'/animals?page=1')).payload;
 assert.equal(newbornList.items.length,3,'The mother and both calves are immediately listed');
 assert.equal(newbornList.total,3);
 assert.equal((await runtime.getCache(birthScope,'/animals/'+queuedNewborn.calves[0].id)).payload.mother.animalId,'cow-a');
-assert.equal((await runtime.getCache(birthScope,'/animals/'+queuedNewborn.calves[1].id)).payload.owners[0].name,'Ana');
+assert.equal((await runtime.getCache(birthScope,'/animals/'+queuedNewborn.calves[0].id)).payload.owners[0].name,'Ana','Inherit mother ownership when none is selected');
+assert.equal((await runtime.getCache(birthScope,'/animals/'+queuedNewborn.calves[1].id)).payload.owners[0].name,'Luis','Resolve the selected owner in the offline calf profile');
+assert.equal((await runtime.getCache(birthScope,'/animals/'+queuedNewborn.calves[1].id)).payload.primaryOwnerName,'Luis');
 assert.equal((await runtime.getCache(birthScope,'/reproduction')).payload.pregnancies[0].status,'BORN','A queued birth closes the pregnancy locally');
 await assert.rejects(()=>change('/reproduction/births',{pregnancyId:'pregnancy-a',occurredOn:'2026-10-10',calves:[{name:'Repetida',sex:'FEMALE'}],stillbornCount:0},'POST'),/ya está guardado/);
 await runtime.uploadMedia('test-token',{file:new File([new Uint8Array([255,216,255,217])],'calf.jpg',{type:'image/jpeg'}),animalIds:[queuedNewborn.calves[0].id],relationCode:'PROFILE'});

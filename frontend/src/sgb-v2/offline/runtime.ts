@@ -1515,10 +1515,12 @@ async function projectBirthAnimals(entry:OutboxEntry,birth:Record<string,unknown
       pregnancy?.externalFather?{name:pregnancy.externalFather}:null;
     const animalEntry={...entry,path:'/animals',temporaryId:calf.id,jsonBody:{...details,
       speciesCode:'BOVINE',birthDate:birth.occurredOn??input.occurredOn,entryDate:birth.occurredOn??input.occurredOn}};
-    const animal=await optimisticRecord(animalEntry);const code=details.sex==='MALE'?'TERNERO':'TERNERA';
+    const animal=bodyRecord(await optimisticRecord(animalEntry));const code=details.sex==='MALE'?'TERNERO':'TERNERA';
     await projectEntry(animalEntry,{...animal,...details,id:calf.id,
       classification:details.classification??{code,name:bodyRecord(policy.names)[code]??(code==='TERNERO'?'Ternero':'Ternera')},
-      owners:details.owners??mother?.owners??[],primaryOwnerName:details.primaryOwnerName??mother?.primaryOwnerName??null,
+      owners:Array.isArray(details.owners)&&details.owners.some(owner=>bodyRecord(owner).partyId)
+        ?animal.owners:details.owners??mother?.owners??[],
+      primaryOwnerName:details.primaryOwnerName??animal.primaryOwnerName??mother?.primaryOwnerName??null,
       mother:details.mother??{animalId:motherId,name:birth.motherName??mother?.name??pregnancy?.cowName??'Madre'},
       father:details.father??father,__syncState:birth.__syncState??null,__mutationId:birth.__mutationId??null},true);
   }
