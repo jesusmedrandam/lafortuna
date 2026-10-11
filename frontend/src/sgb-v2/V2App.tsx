@@ -191,6 +191,7 @@ function Panel({kind}:{kind:'animals'|'movements'|'reproduction'|'production'|'h
       initialAnimalId={id??new URLSearchParams(window.location.search).get('animal')??undefined}
       initialCreate={new URLSearchParams(window.location.search).get('create')==='1'}
       initialEdit={new URLSearchParams(window.location.search).get('accion')==='EDITAR'}
+      onCreated={(id,notice)=>navigate(`/animales/${encodeURIComponent(id)}`,{replace:true,state:{animalCreationNotice:notice}})}
       onBack={()=>navigate('/animales')}/>;
     case 'movements':return <MovementPanel accessToken={token} propertyId={property!.id}
       canManage={hasPermission('MOVEMENT_MANAGE')} canCancel={hasPermission('MOVEMENT_CANCEL')}

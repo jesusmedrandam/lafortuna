@@ -892,6 +892,9 @@ export interface ReproductionSettings {
 export function getReproductionSettings(accessToken: string) {
   return request<ReproductionSettings>('/reproduction/settings', { headers: bearer(accessToken) });
 }
+export function getAnimalParentRules(accessToken:string){
+  return request<Pick<ReproductionSettings,'minimumCowMonths'|'minimumBullMonths'>>('/animals/parent-age-rules',{headers:bearer(accessToken)});
+}
 export function updateReproductionSettings(accessToken: string, input: ReproductionSettings) {
   return request<ReproductionSettings>('/reproduction/settings', {
     method: 'PUT', headers: bearer(accessToken), body: JSON.stringify(input),
@@ -906,6 +909,7 @@ export function getReproductionCandidates(accessToken: string) {
 export function createHeat(accessToken: string, input: {
   cowId: string; bullId?: string | null; startsOn: string; endsOn?: string | null;
   isFalse: boolean; notes?: string | null;
+  trueHeatId?:string;
 }) {
   return request<ReproductionHeat>('/reproduction/heats', {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),

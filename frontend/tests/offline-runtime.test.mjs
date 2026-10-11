@@ -586,3 +586,38 @@ assert.equal(refreshedRules.minimumBullMonths,24,'Read the current owner policy 
 await assert.rejects(()=>runtime.offlineRequest('/reproduction/settings',{headers},async()=>{throw Object.assign(new Error('Sin permiso'),{status:403});}),/Sin permiso/);
 online=false;
 console.log('PASS: current owner rules replace stale online reads and permission failures never fall back to cached policies.');
+
+const heatScope={userId:'heat-cycle-offline',propertyId:'heat-property',roleId:'owner'};
+await runtime.configureOfflineRuntime(heatScope,'test-token');
+await runtime.putCache(heatScope,'/reproduction',{heats:[{id:'heat-original',cowId:'cow-a',startsOn:'2026-08-01',isFalse:false}],services:[],pregnancies:[],births:[],losses:[]});
+const heatInput={cowId:'cow-a',startsOn:'2026-09-01',isFalse:false};
+await assert.rejects(()=>change('/reproduction/heats',heatInput,'POST'),/Elige cuál conservar/);
+await change('/reproduction/heats',{...heatInput,trueHeatId:'heat-original'},'POST');
+let trueHeats=(await get('/reproduction')).heats.filter(heat=>!heat.isFalse);
+assert.deepEqual(trueHeats.map(heat=>heat.id),['heat-original'],'Keeping the original makes the new heat false offline');
+const newTrueHeat=await change('/reproduction/heats',{...heatInput,startsOn:'2026-10-01',trueHeatId:'NEW'},'POST');
+trueHeats=(await get('/reproduction')).heats.filter(heat=>!heat.isFalse);
+assert.deepEqual(trueHeats.map(heat=>heat.id),[newTrueHeat.id]);
+runtime=await load();await runtime.configureOfflineRuntime(heatScope,'test-token');
+assert.deepEqual((await get('/reproduction')).heats.filter(heat=>!heat.isFalse).map(heat=>heat.id),[newTrueHeat.id],'True heat choice survives restart');
+const replacementEntry=(await runtime.listOutbox(heatScope.userId)).find(entry=>entry.jsonBody.trueHeatId==='NEW');
+await runtime.discardPendingMutation(replacementEntry.id);
+assert.deepEqual((await get('/reproduction')).heats.filter(heat=>!heat.isFalse).map(heat=>heat.id),['heat-original'],'Discard restores the former true heat');
+await change('/reproduction/heats',{...heatInput,startsOn:'2026-10-01',trueHeatId:'NEW'},'POST');
+let heatWrites=0;
+runtime.installOfflineTransport(async(path,init)=>{
+ if(path==='/reproduction/heats'&&init.method==='POST'){
+  const input=JSON.parse(init.body);heatWrites++;
+  return {data:{...input,id:'heat-server-'+heatWrites,isFalse:input.trueHeatId!=='NEW'},etag:null,notModified:false};
+ }
+ return {data:{},etag:null,notModified:false};
+});
+online=true;await runtime.syncOfflineMutations();online=false;
+assert.equal(heatWrites,2);assert.equal((await runtime.listOutbox(heatScope.userId)).length,0);
+assert.deepEqual((await get('/reproduction')).heats.filter(heat=>!heat.isFalse).map(heat=>heat.id),['heat-server-2'],'Sync replaces the true heat ID without reviving false heats');
+await runtime.putCache(heatScope,'/reproduction',{heats:[{id:'old-cycle',cowId:'cow-a',startsOn:'2026-08-01',isFalse:false}],services:[],pregnancies:[],births:[{id:'birth-a',motherId:'cow-a',occurredOn:'2026-09-01'}],losses:[]});
+await change('/reproduction/heats',{cowId:'cow-a',startsOn:'2026-10-01',isFalse:false},'POST');
+assert.equal((await get('/reproduction')).heats.filter(heat=>!heat.isFalse).length,2,'A new cycle preserves historical true heats');
+await runtime.putCache(heatScope,'/reproduction',{heats:[{id:'same-day-heat',cowId:'cow-b',startsOn:'2026-09-01',isFalse:false}],services:[],pregnancies:[],births:[{id:'birth-b',motherId:'cow-b',occurredOn:'2026-09-01'}],losses:[]});
+await assert.rejects(()=>change('/reproduction/heats',{cowId:'cow-b',startsOn:'2026-09-01',isFalse:false},'POST'),/Elige cuál conservar/);
+console.log('PASS: one true heat per cycle offline, explicit choice, restart, discard, sync and birth cycle reset.');

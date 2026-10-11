@@ -4,6 +4,8 @@ import {
   removeCachedPaths,listUserCache,type OfflineScope,type OutboxEntry,type StoredFormPart,
 } from './database';
 import {LocalValidationError,validateLocalMutation} from './validation';
+import {cycleTrueHeats} from '../reproductionCycle';
+import type {ReproductionRecords} from '../api';
 import {mediaThumbnailUrl,optimizedCloudinaryMediaUrl} from '../../media';
 import {dataCategoryForPath,defaultDownloadPreferences,downloadCategoryLabel,normalizeDownloadPreferences,
   photoCategoryForPath,photoCategoryForType,type DownloadPreferences} from './preferences';
@@ -326,6 +328,7 @@ async function optimisticRecord(entry:OutboxEntry){
       heatId:input.heatId??null,serviceId:input.serviceId??null,bullId:input.bullId??null,
       fatherId:input.fatherId??null,externalFather:input.externalFather??null,cancelled:false,hasPregnancy:false,
       status:'CONFIRMED',endsOn:input.endsOn??null,notes:input.notes??null,
+      isFalse:input.trueHeatId?input.trueHeatId!=='NEW':Boolean(input.isFalse),
       liveCount:Array.isArray(input.calves)?input.calves.length:0,stillbornCount:Number(input.stillbornCount??0),
       calves:Array.isArray(input.calves)?input.calves.map((value,index)=>({...bodyRecord(value),id:`${id}-calf-${index}`})):[]};
   }
@@ -642,6 +645,8 @@ async function projectEntry(entry:OutboxEntry,record:Record<string,unknown>,crea
   const id=replacementId??String(record.id??originalId);
   const entries=await listCache(entry.scope);
   if(entry.path.endsWith('/settings')||entry.path==='/animals/classification'){
+    if(entry.path==='/reproduction/settings')await putCache(entry.scope,'/animals/parent-age-rules',
+      {minimumCowMonths:record.minimumCowMonths,minimumBullMonths:record.minimumBullMonths});
     await putCache(entry.scope,entry.path,record);return;
   }
   if(create&&!entries.some(cache=>cache.path===target.root||cache.path.startsWith(`${target.root}?`))){
@@ -657,6 +662,12 @@ async function projectEntry(entry:OutboxEntry,record:Record<string,unknown>,crea
       &&(!query.get('page')||query.get('page')==='1');
     let payload=entry.method==='DELETE'?removeCollection(cached.payload,originalId,target.field)
       :updateCollection(cached.payload,originalId,{...record,id},insert,target.field);
+    if(entry.path==='/reproduction/heats'&&bodyRecord(entry.jsonBody).trueHeatId){
+      const input=bodyRecord(entry.jsonBody);
+      for(const heat of cycleTrueHeats(cached.payload as ReproductionRecords,String(input.cowId),String(input.startsOn)))
+        if(heat.id!==input.trueHeatId&&heat.id!==originalId&&heat.id!==id)
+          payload=updateCollection(payload,heat.id,{isFalse:true},false,'heats');
+    }
     if(replacementId&&replacementId!==originalId){
       payload=updateCollection(payload,replacementId,{...record,id:replacementId},false,target.field);
       payload=JSON.parse(JSON.stringify(payload).replaceAll(originalId,replacementId)) as unknown;
@@ -1079,8 +1090,9 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
     const requestScope={...activeScope};const generation=cacheGeneration;
     const saveAutomatically=canAutomaticallyDownload()&&selectedData(path);
     const cached=await getCache<T>(activeScope,path);
-    if((path==='/reproduction/settings'||path==='/animals/classification')&&isRuntimeOnline()
-      &&!(await listOutbox(activeScope.userId)).some(entry=>entry.path===path)){
+    if((path==='/reproduction/settings'||path==='/animals/classification'||path==='/animals/parent-age-rules')&&isRuntimeOnline()
+      &&!(await listOutbox(activeScope.userId)).some(entry=>sameScope(entry.scope,activeScope!)
+        &&(entry.path===path||path==='/animals/parent-age-rules'&&entry.path==='/reproduction/settings'))){
       try{
         const response=await send<T>(path,{...init,cache:'no-cache'});
         if(saveAutomatically&&canAutomaticallyDownload()&&activeScope&&sameScope(requestScope,activeScope)
@@ -1128,6 +1140,15 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
   const current=await cachedRecord(entry);
   if(draftRoots.some(root=>path.startsWith(root+'/'))&&expiredDraft(current))throw new LocalValidationError('Este borrador se eliminó al cumplir 24 horas sin aplicarse.');
   validateLocalMutation(entry,current);
+  if(path==='/reproduction/heats'&&verb==='POST'){
+    const input=bodyRecord(entry.jsonBody);const cached=await getCache(activeScope,'/reproduction');
+    if(cached&&!input.isFalse){
+      const previous=cycleTrueHeats(cached.payload as ReproductionRecords,String(input.cowId),String(input.startsOn));
+      if(previous.length&&!input.trueHeatId)throw new LocalValidationError('Ya hay un celo verdadero en este ciclo. Elige cuál conservar como verdadero.');
+      if(input.trueHeatId&&(previous.length===0||input.trueHeatId!=='NEW'&&!previous.some(heat=>heat.id===input.trueHeatId)))
+        throw new LocalValidationError('El celo verdadero cambió. Vuelve a abrir el registro y elige otra vez.');
+    }
+  }
   const optimistic=await optimisticRecord(entry);
   if(entry.bodyType==='binary'){
     const part=entry.formParts[0]!;const file=part.value as Blob;

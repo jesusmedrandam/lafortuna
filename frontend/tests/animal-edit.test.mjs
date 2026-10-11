@@ -22,15 +22,19 @@ const saved={id:'animal-a',name:'Lucera',description:'Notas guardadas',version:7
   initialWeight:null,initialWeightUnitCode:null,earTagCode:'A1',group:null,location:null};
 window.calls=[];window.backCount=0;window.failSection=null;
 export const getAnimal=async()=>structuredClone(saved);
-export const getAnimals=async()=>({items:[structuredClone(saved)],total:1,hasMore:false});
+export const getAnimals=async()=>({items:[structuredClone(saved),
+ {...saved,id:'young-father',name:'Macho joven',sex:'MALE',birthDate:'2026-01-01'},
+ {...saved,id:'adult-father',name:'Macho adulto',sex:'MALE',birthDate:'2020-01-01'},
+ {...saved,id:'unknown-father',name:'Macho sin nacimiento',sex:'MALE',birthDate:null}],total:4,hasMore:false});
 export const listCatalogItems=async(_token,code)=>[{id:code==='BREEDS'?'breed-new':'color-new',
   name:code==='BREEDS'?'Nueva raza':'Nuevo color',active:true,speciesCode:'BOVINE'}];
 export const listOwners=async()=>[{id:'owner-new',name:'Nuevo dueño',active:true,kind:'EXTERNAL_PERSON'}];
 export const listBrands=async()=>[{id:'brand-new',name:'Nueva marquilla',active:true}];
 export const listAccountUsers=async()=>[];
-export const listGroups=async()=>[];
+export const listGroups=async()=>[{id:'group-a',name:'Grupo de prueba',active:true}];
 export const listLocations=async()=>[];
 export const getMedia=async()=>[];
+export const getAnimalParentRules=async()=>({minimumCowMonths:18,minimumBullMonths:24});
 export const getAnimalClassificationPolicy=async()=>({names:{}});
 async function update(section,input){
   window.calls.push({section,...structuredClone(input)});
@@ -50,7 +54,7 @@ export const updateAnimalOwners=(_t,_id,input)=>update('owners',input);
 export const updateAnimalCatalogs=(_t,_id,input)=>update('catalogs',input);
 export const updateAnimalBrands=(_t,_id,input)=>update('brands',input);
 export const updateAnimalParents=(_t,_id,input)=>update('parents',input);
-export const createAnimal=async()=>{};
+export const createAnimal=async(_token,input)=>({...saved,...input,id:'animal-created'});
 export const createCatalogItem=async()=>{};
 export const createOwner=async()=>{};
 export const uploadMedia=async()=>{};
@@ -59,16 +63,18 @@ export const deleteMedia=async()=>{};
 const entry=`
 import {createElement} from 'react';
 import {createRoot} from 'react-dom/client';
+import {flushSync} from 'react-dom';
 import {AnimalPanel} from './src/sgb-v2/AnimalPanel';
 const check=(condition,message)=>{if(!condition)throw new Error(message);};
 const tick=()=>new Promise(resolve=>setTimeout(resolve,20));
 async function until(condition){for(let n=0;n<100;n++){if(condition())return;await tick();}
-  throw new Error('Timeout waiting for form');}
+  throw new Error('Timeout waiting for form: '+condition+' '+document.body.innerText.slice(0,2200));}
 const field=(name,value)=>document.querySelector('[name="'+name+'"]'+
   (value?'[value="'+value+'"]':''));
 const form=()=>document.querySelector('#animal-edit-panel form');
 const submit=()=>form().dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
-createRoot(document.getElementById('root')).render(createElement(AnimalPanel,{
+const animalRoot=createRoot(document.getElementById('root'));
+animalRoot.render(createElement(AnimalPanel,{
   accessToken:'test',canCreate:false,canUpdate:true,canViewCatalogs:true,canManageBrands:false,
   canViewMedia:false,canManageMedia:false,canViewLocations:false,modules:[],
   initialAnimalId:'animal-a',initialEdit:true,onNavigate(){},onBack(){window.backCount++;},
@@ -111,6 +117,23 @@ try{
   check(window.calls.filter(call=>call.section==='description').length===2,'Retry must not repeat saved changes');
   field('ownerIds','owner-new').click();await tick();field('description').value='No guardar';submit();await tick();
   check(window.calls.length===8&&window.backCount===3,'Invalid owners must block every write');
+  flushSync(()=>animalRoot.render(createElement(AnimalPanel,{key:'create',accessToken:'test',canCreate:true,canUpdate:true,
+    canViewCatalogs:true,canViewMedia:false,canManageMedia:false,canViewLocations:false,modules:[],initialCreate:true,
+    onCreated(id){window.createdAnimal=id;},onNavigate(){}})));
+  await until(()=>document.querySelector('.animal-create [name="ownerIds"]'));
+  async function choose(name,value){const select=field(name);select.nextElementSibling.click();await tick();
+    const label=[...select.options].find(option=>option.value===value).textContent;
+    [...document.querySelectorAll('[role="option"]')].find(option=>option.textContent===label).click();await tick();}
+  await choose('fatherMode','animal');await until(()=>field('fatherAnimalId')?.querySelector('option[value="adult-father"]'));
+  check(!field('fatherAnimalId').querySelector('option[value="young-father"]'),'Young fathers are hidden in animal creation');
+  check(field('fatherAnimalId').querySelector('option[value="unknown-father"]'),'Parents without birth date are allowed');
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field('birthDate'),'2021-01-01');
+  field('birthDate').dispatchEvent(new Event('input',{bubbles:true}));field('birthDate').dispatchEvent(new Event('change',{bubbles:true}));await tick();
+  check(!field('fatherAnimalId').querySelector('option[value="adult-father"]'),'Parent age uses the calf birth date');
+  await choose('fatherAnimalId','unknown-father');field('name').value='Animal nuevo';await choose('sex','FEMALE');await choose('groupId','group-a');
+  field('ownerIds','owner-new').click();await tick();document.querySelector('.animal-create').requestSubmit();
+  await until(()=>window.createdAnimal==='animal-created');
+  check(!document.querySelector('.animal-detail'),'Creation calls the current profile route instead of opening the old profile');
   document.getElementById('result').textContent='PASS: saved selections, single save, sequential versions, partial retry, validation';
 }catch(error){document.getElementById('result').textContent='FAIL: '+error.stack;}
 `;

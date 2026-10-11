@@ -23,7 +23,14 @@ export const getAnimal=async(_token,id)=>id==='animal-a'?structuredClone(animal)
 export const getMedia=async(_token,_type,id)=>{if(id!=='animal-a')throw new Error('No local photos for this animal');
   return [{id:'photo-a',entity_id:'animal-a',kind:'IMAGE',relation_code:'GENERAL',description:'Foto de Lucera',
     url:'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="40" height="40"/%3E',created_at:'2026-10-01T12:00:00Z'}];};
-export const uploadMedia=async()=>{};
+export class ApiRequestError extends Error{}
+export const uploadMedia=async()=>{};export const deleteMediaObject=async()=>{};
+export const getReproductionCandidates=async()=>{if(window.profileReproFail)throw new Error('No fue posible cargar los animales. Reintenta.');return [{id:'animal-a',name:'Lucera',sex:'FEMALE',birthDate:'2024-01-01'},{id:'animal-b',name:'Bruno',sex:'FEMALE',birthDate:null}];};
+export const listGroups=async()=>[];export const listCatalogItems=async()=>[];export const listOwners=async()=>[];
+export const createHeat=async(_token,input)=>{window.profileHeat=input;};export const createService=async()=>{};
+export const createPregnancy=async()=>{};export const recordBirth=async()=>{};export const recordLoss=async()=>{};
+export const finishHeat=async()=>{};export const cancelHeat=async()=>{};export const cancelPregnancy=async()=>{};export const cancelService=async()=>{};
+
 export const getAnimalStatusEvents=async()=>[];
 export const getAnimalStatusOptions=async()=>[{id:'animal-a',name:'Lucera',earTagCode:'A1',status:'ACTIVE',version:1}];
 export const createAnimalStatusEvent=async(_token,input)=>{window.savedStatus=input;return {id:'status-new',...input};};
@@ -113,7 +120,15 @@ try{
   window.readOnly=false;render('animal-a');await until(()=>historyCard('Pesajes')&&document.querySelector('[aria-label="Reproducción"]'));
   document.querySelector('[aria-label="Reproducción"]').click();await until(()=>document.querySelector('.v2-animal-sheet'));
   check(!document.querySelector('.v2-animal-sheet').textContent.includes('Registrar parto'),'No birth action without a confirmed pregnancy');
-  document.querySelector('.v2-animal-sheet [aria-label="Cerrar"]').click();
+  [...document.querySelectorAll('.v2-animal-sheet button')].find(node=>node.textContent==='Registrar celo').click();
+  await until(()=>document.querySelector('.reproduction-forms form:not([hidden])'));
+  const heatForm=document.querySelector('.reproduction-forms form:not([hidden])');
+  const save=heatForm.querySelector('button');const bounds=save.getBoundingClientRect();
+  check(document.elementFromPoint(bounds.x+bounds.width/2,bounds.y+bounds.height/2)?.closest('button')===save,'Heat form is not covered by the profile overlay');
+  heatForm.requestSubmit();await until(()=>document.body.innerText.includes('¿Cuál celo deseas dejar como verdadero?'));
+  [...document.querySelectorAll('button')].find(node=>node.textContent==='Dejar el nuevo celo como verdadero').click();
+  await until(()=>window.profileHeat&&!document.querySelector('.v2-animal-action-host'));
+  check(window.profileHeat.cowId==='animal-a','Real profile heat saves the selected mother');
   window.profilePregnancy=true;window.profileRevision=1;render('animal-a');await tick();await tick();await until(()=>historyCard('Preñeces')&&document.querySelector('[aria-label="Reproducción"]'));
   document.querySelector('[aria-label="Reproducción"]').click();await until(()=>document.querySelector('.v2-animal-sheet'));
   check(document.querySelector('.v2-animal-sheet').textContent.includes('Registrar parto'),'A confirmed pregnancy enables birth');
@@ -125,15 +140,27 @@ try{
   window.profileSections=[];window.profileRevision=3;render('animal-a');await tick();await tick();await until(()=>historyCard('Pesajes'));
   check(!document.querySelector('[aria-label="Reproducción"]'),'No actions when all reproduction sections are disabled');
   window.profileSections=undefined;window.profileRevision=4;render('animal-a');await tick();await tick();await until(()=>historyCard('Pesajes'));
+  render('animal-b');await tick();await tick();await until(()=>document.querySelector('h1')?.textContent==='Bruno'&&document.querySelector('[aria-label="Reproducción"]'));
+  document.querySelector('[aria-label="Reproducción"]').click();await until(()=>document.querySelector('.v2-animal-sheet'));
+  [...document.querySelectorAll('.v2-animal-sheet button')].find(node=>node.textContent==='Registrar celo').click();
+  await until(()=>document.querySelector('.reproduction-forms form:not([hidden])'));
+  window.profileHeat=null;document.querySelector('.reproduction-forms form:not([hidden])').requestSubmit();
+  await until(()=>window.profileHeat&&!document.querySelector('.v2-animal-action-host'));
+  check(window.profileHeat.cowId==='animal-b','An animal without birth date can save heat from the profile');
+  window.profileReproFail=true;document.querySelector('[aria-label="Reproducción"]').click();await until(()=>document.querySelector('.v2-animal-sheet'));
+  [...document.querySelectorAll('.v2-animal-sheet button')].find(node=>node.textContent==='Registrar celo').click();
+  await until(()=>document.querySelector('.v2-animal-action-host .modal')?.textContent.includes('No fue posible cargar'));
+  const close=[...document.querySelectorAll('.v2-animal-action-host .modal button')].find(node=>node.textContent==='Cerrar');
+  check(close,'An error shows a visible form message and close action');close.click();await until(()=>!document.querySelector('.v2-animal-action-host'));
   document.getElementById('result').textContent='PASS: reference profile icons/style, absent fields, split histories, expansion, child links and role permissions';
 }catch(error){document.getElementById('result').textContent='FAIL: '+error.stack;}
 `;
-const panels=['AnimalPanel','MovementPanel','HealthPanel','ReproductionPanel','ProductionPanel','V2WeighingsPage','V2CommercePage'];
+const panels=['AnimalPanel','MovementPanel','HealthPanel','ProductionPanel','V2WeighingsPage','V2CommercePage'];
 const result=await build({root,configFile:false,logLevel:'error',define:{'process.env.NODE_ENV':'"production"'},plugins:[{
   name:'animal-profile-test',enforce:'pre',resolveId(id,importer){
     importer=importer?.replaceAll('\\','/');
     if(id==='animal-profile-test'||id===root+'animal-profile-test')return '\0profile-test';
-    if(importer?.endsWith('/V2AnimalStatusPage.tsx')){
+    if(importer?.endsWith('/V2AnimalStatusPage.tsx')||importer?.endsWith('/ReproductionPanel.tsx')||importer?.endsWith('/RecordMedia.tsx')){
       if(id==='./api')return '\0profile-api';if(id==='./V2Session')return '\0profile-session';
     }
     if(importer?.endsWith('/V2AnimalDetail.tsx')){
