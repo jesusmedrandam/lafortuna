@@ -49,6 +49,7 @@ jobs:
           node tests/service-worker.test.mjs
           node tests/cleaning-browser.test.mjs
           node tests/settings-screen.test.mjs
+          node tests/reproduction-browser.test.mjs
           node tests/health-browser.test.mjs
           node tests/pastures-browser.test.mjs
           node tests/animal-profile.test.mjs
@@ -62,4 +63,5 @@ jobs:
         with:
           name: sgb-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
 

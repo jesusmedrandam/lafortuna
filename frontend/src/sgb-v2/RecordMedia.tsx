@@ -1,8 +1,9 @@
 import {useEffect,useState} from 'react';
 import {ApiRequestError,deleteMediaObject,getMedia,uploadMedia,type MediaItem} from './api';
 
-export function RecordMedia({accessToken,entityType,entityId,canManage}:{accessToken:string;
-  entityType:string;entityId:string;canManage:boolean}){
+export function RecordMedia({accessToken,entityType,entityId,canManage,title='Fotos de la limpieza'}:{accessToken:string;
+  entityType:string;entityId:string;canManage:boolean;title?:string}){
+  const limit=entityType==='REPRODUCTION_BIRTH'?Infinity:3;
   const [photos,setPhotos]=useState<MediaItem[]>([]);
   const [file,setFile]=useState<File|null>(null);
   const [busy,setBusy]=useState(false);
@@ -16,22 +17,22 @@ export function RecordMedia({accessToken,entityType,entityId,canManage}:{accessT
     try{await action();setFile(null);setRevision(current=>current+1);}
     catch(failure){setError(failure instanceof ApiRequestError?failure.message:'No se pudo guardar la foto.');}
     finally{setBusy(false);}}
-  return <section className="record-photos" aria-label="Fotos de la limpieza">
-    <h4>Fotos de la limpieza <small>{photos.length}/3</small></h4>
+  return <section className="record-photos" aria-label={title}>
+    <h4>{title} <small>{photos.length}{Number.isFinite(limit)?`/${limit}`:''}</small></h4>
     {error&&<p className="form-error" role="alert">{error}</p>}
     {photos.length>0&&<div className="record-photo-grid">{photos.map(photo=><div key={photo.id}>
       <a href={photo.url} target="_blank" rel="noreferrer"><img src={photo.thumbnailUrl??photo.url}
-        alt="Foto de la limpieza" loading="lazy"/></a>
+        alt={title} loading="lazy"/></a>
       {canManage&&<button type="button" className="secondary-button compact" disabled={busy}
         onClick={()=>{if(window.confirm('¿Eliminar esta foto del almacenamiento?'))
           void execute(()=>deleteMediaObject(accessToken,photo.storage_object_id));}}>
         Eliminar</button>}</div>)}</div>}
-    {canManage&&photos.length<3&&<div className="record-photo-add">
-      <input type="file" accept="image/jpeg,image/png,image/webp,image/heic" aria-label="Foto de la limpieza"
+    {canManage&&photos.length<limit&&<div className="record-photo-add">
+      <input type="file" accept="image/jpeg,image/png,image/webp,image/heic" aria-label={title}
         onChange={event=>setFile(event.target.files?.[0]??null)}/>
       <button type="button" className="secondary-button compact" disabled={!file||busy}
         onClick={()=>{if(file)void execute(()=>uploadMedia(accessToken,{file,entityType,entityId}));}}>
         {busy?'Procesando…':'Agregar foto'}</button></div>}
-    {!photos.length&&!canManage&&<p className="muted">No hay fotos de esta limpieza.</p>}
+    {!photos.length&&!canManage&&<p className="muted">No hay fotografías registradas.</p>}
   </section>;
 }

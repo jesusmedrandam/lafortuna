@@ -14,7 +14,7 @@ export class ApiRequestError extends Error{}
 window.settingsRequests=0;
 export const getPropertySettings=async()=>{window.settingsRequests++;return {account:{name:'Cuenta de prueba',usedProperties:1,maxProperties:2},canCreate:Boolean(window.settingsManage),canManageModules:Boolean(window.settingsManage),canViewModules:true,property:{name:'Finca de prueba',ownerName:'Ana',areaValue:12.5,areaUnitCode:'HECTARE',address:'Los Montes'},
   modules:[{code:'TASKS',name:'Actividades',enabled:true,isCore:false,accountEnabled:true}]};};
-export const updatePropertyInformation=async()=>{};export const createAccountProperty=async(_token,input)=>{window.createdProperty=input;return {propertyId:'property-a',roleId:'role-a'};};export const updatePropertyModule=async()=>{};
+export const createOwnAccount=async()=>({propertyId:'property-own',roleId:'role-owner'});export const updatePropertyInformation=async()=>{};export const createAccountProperty=async(_token,input)=>{window.createdProperty=input;return {propertyId:'property-a',roleId:'role-a'};};export const updatePropertyModule=async()=>{};
 window.passwordCalls=[];
 export const changeUserPassword=async(token,currentPassword,newPassword)=>{window.passwordCalls.push({token,currentPassword,newPassword});return {changed:true};};
 window.emailCalls=[];

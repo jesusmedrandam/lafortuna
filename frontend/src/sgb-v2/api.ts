@@ -138,6 +138,7 @@ export interface AnimalSummary {
   groups:Array<{name:string;count:number}>;sex:Array<{sex:'FEMALE'|'MALE';count:number}>;
 }
 export interface AnimalClassificationPolicy {
+  accountId?:string;canManageRules?:boolean;
   femaleAdultMonths:number;maleAdultMonths:number;
   names:{VACA:string;VACONA:string;TERNERA:string;TORO:string;TORETE:string;TERNERO:string};
 }
@@ -857,7 +858,8 @@ export interface ReproductionPregnancy {
 export interface ReproductionBirth {
   id: string; pregnancyId: string; motherId: string; motherName: string;
   occurredOn: string; liveCount: number; stillbornCount: number; notes: string | null;
-  calves: Array<{ id: string; name: string; sex: Animal['sex'] }>;
+  kind?:'NORMAL'|'ASSISTED'|'CAESAREAN'|'UNKNOWN';
+  calves: Array<BirthCalfInput & {id:string}>;
 }
 export interface ReproductionLoss {
   id: string; pregnancyId: string; cowId: string; cowName: string;
@@ -876,8 +878,9 @@ export interface ReproductionService {
   materialCode: string | null; quality: string | null; technician: string | null;
   supplier: string | null; notes: string | null; cancelled: boolean; hasPregnancy: boolean;
 }
-export interface ReproductionCandidate { id: string; name: string; sex: Animal['sex'] }
+export interface ReproductionCandidate { id: string; name: string; sex: Animal['sex'];birthDate?:string|null }
 export interface ReproductionSettings {
+  accountId?:string;canManageRules?:boolean;
   daysAfterBirthHeat: number; daysAfterBirthPregnancy: number;
   daysAfterLossHeat: number; daysAfterLossPregnancy: number;
   minimumCowMonths: number; minimumBullMonths: number;
@@ -933,9 +936,12 @@ export function createPregnancy(accessToken: string, input: {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
   });
 }
+export interface BirthCalfInput {name:string;sex:Animal['sex'];earTagCode?:string;description?:string|null;
+  groupId?:string;initialWeight?:number;initialWeightUnitCode?:string;breedIds?:string[];colorIds?:string[];
+  owners?:Array<{partyId:string;percent:number;isPrimary:boolean}>;birthCondition?:'ALIVE'|'WEAK'|'UNKNOWN';}
 export function recordBirth(accessToken: string, input: {
   pregnancyId: string; occurredOn: string;
-  calves: Array<{ name: string; sex: Animal['sex']; earTagCode?: string }>;
+  kind?:ReproductionBirth['kind'];calves:BirthCalfInput[];
   stillbornCount: number; notes?: string | null;
 }) {
   return request<ReproductionBirth>('/reproduction/births', {
@@ -1237,9 +1243,9 @@ export function createAccountProperty(accessToken: string, input: PropertyInform
   });
 }
 
-export function createOwnAccount(accessToken: string, name: string) {
+export function createOwnAccount(accessToken: string, input: PropertyInformation) {
   return request<{ accountId: string; propertyId: string; roleId: string }>('/my-account', {
-    method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name }),
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
   });
 }
 

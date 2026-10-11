@@ -181,13 +181,13 @@ export function CatalogPanel({accessToken,canManage,canEditMedicines=false,comme
           <div className="catalog-item-list">{list(medicineDoseUnits).map(unit=><button type="button" className="catalog-detail-row" key={unit.code} onClick={()=>openItem(unit.code)}>
             <span><strong>{unit.name}</strong><small>{unit.symbol}</small></span><span aria-hidden="true">›</span></button>)}</div></>}
         {tab==='CLASSIFICATION'&&classification&&<><header><div><h3>Clasificación de animales</h3>
-          <p>Define las edades y nombres usados automáticamente en el inventario.</p></div></header>
+          <p>Estas edades y nombres se aplican a todas las propiedades del dueño de la cuenta.</p></div></header>
           <p className="catalog-help">Las vacas tienen crías registradas; los toros tienen crías o figuran como padres en una preñez confirmada. Los demás se clasifican por sexo y edad.</p>
           <dl className="catalog-detail-grid"><div><dt>Hembras adultas desde</dt><dd>{classification.femaleAdultMonths} meses</dd></div>
             <div><dt>Machos adultos desde</dt><dd>{classification.maleAdultMonths} meses</dd></div>
             {classificationCodes.map(code=><div key={code}><dt>{classification.names[code]}</dt><dd>{code==='VACA'?'Hembra con crías registradas':code==='TORO'?'Macho con descendencia':
               `${['VACONA','TERNERA'].includes(code)?'Hembra':'Macho'} ${['TERNERA','TERNERO'].includes(code)?'joven':'adulto'}`}</dd></div>)}</dl>
-          {canManage&&<details className="catalog-add"><summary>Editar clasificación</summary>
+          {canManage&&classification.canManageRules&&<details className="catalog-add"><summary>Editar clasificación</summary>
           <form className="classification-form" key={JSON.stringify(classification)} onSubmit={saveClassification}>
             <label><span>Hembras adultas desde (meses)</span><input name="femaleAdultMonths" type="number"
               min="1" max="120" required defaultValue={classification.femaleAdultMonths} disabled={!canManage||busy}/></label>
