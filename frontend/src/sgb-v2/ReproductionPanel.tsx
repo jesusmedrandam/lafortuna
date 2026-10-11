@@ -1,13 +1,18 @@
 import {DateInput} from '../components/ui';
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
-import {ArrowUpDown,Baby,ChevronRight,Plus,Settings2} from 'lucide-react';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {ArrowUpDown,Baby,ChevronRight,Plus,Settings2,Heart,Stethoscope,CalendarClock,TriangleAlert,Syringe} from 'lucide-react';
 import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
   IconButton,LoadingState,Modal,Select} from '../components/ui';
+import {reachedReproductionAge} from './reproductionAge';
 import {formatDate} from '../utils';
+import {useNavigate} from 'react-router-dom';
+import {useV2Session} from './V2Session';
+import {RecordMedia} from './RecordMedia';
 import {
   ApiRequestError, cancelHeat, cancelPregnancy, cancelService, createHeat, createPregnancy, createService,
   getReproduction, getReproductionCandidates, getReproductionSettings,
-  recordBirth, recordLoss, updateReproductionSettings,
+  recordBirth, recordLoss, updateReproductionSettings,uploadMedia,listGroups,listCatalogItems,listOwners,
+  type LivestockGroup,type CatalogItem,type LivestockOwner,type BirthCalfInput,type ReproductionBirth,
   type ReproductionCandidate, type ReproductionRecords, type ReproductionSettings,
 } from './api';
 
@@ -29,6 +34,13 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   accessToken: string; canManage: boolean; initialAnimalId?:string|undefined;
   initialAction?:string;onCompleted?:()=>void;
 }) {
+  const navigate=useNavigate();const {hasPermission,session}=useV2Session();
+  const multimediaEnabled=!session||Boolean(session.overview.properties.find(property=>property.id===session.overview.activeContext?.propertyId)?.enabledModules.includes('MULTIMEDIA'));
+  const canUpload=multimediaEnabled&&hasPermission('MEDIA_MANAGE');
+  const saving=useRef(false);const savedBirth=useRef<ReproductionBirth|null>(null);
+  const birthData=useRef<FormData|null>(null);
+  const [birthSaved,setBirthSaved]=useState(false);
+  const [birthOptions,setBirthOptions]=useState<{groups:LivestockGroup[];breeds:CatalogItem[];colors:CatalogItem[];owners:LivestockOwner[]}>({groups:[],breeds:[],colors:[],owners:[]});
   const [records, setRecords] = useState<ReproductionRecords | null>(null);
   const [candidates, setCandidates] = useState<ReproductionCandidate[]>([]);
   const [settings, setSettings] = useState<ReproductionSettings | null>(null);
@@ -38,9 +50,10 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeForm, setActiveForm] = useState<'HEAT'|'PREGNANCY'|'SERVICE'|'BIRTH'|'LOSS'|null>(null);
-  const closeForm=()=>{setActiveForm(null);if(initialAction)onCompleted?.();};
+  const closeForm=()=>{if(saving.current)return;if(savedBirth.current){setError('El parto ya está registrado. Pulsa Completar fotografías para terminar.');return;}setActiveForm(null);if(initialAction)onCompleted?.();};
   const [settingsOpen,setSettingsOpen]=useState(false);
   const [selectedCategory,setSelectedCategory]=useState<ReproductionKind|null>(null);
+  const [upcoming,setUpcoming]=useState(false);
   const [selectedRecord,setSelectedRecord]=useState<string|null>(null);
   const [search,setSearch]=useState('');
   const [newest,setNewest]=useState(true);
@@ -55,7 +68,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
     setCowId(initialAnimalId);setActiveForm(form);setPrefilledAnimalId(initialAnimalId);
   },[initialAnimalId,prefilledAnimalId,candidates,canManage,initialAction]);
   const males = candidates.filter((animal) => animal.sex === 'MALE');
-  const confirmed = records?.pregnancies.filter((pregnancy) => pregnancy.status === 'CONFIRMED') ?? [];
+  const confirmed = records?.pregnancies.filter((pregnancy) => pregnancy.status === 'CONFIRMED'&&!records?.births.some(birth=>birth.pregnancyId===pregnancy.id)) ?? [];
   const rows=useMemo<ReproductionRow[]>(()=>records?[
     ...records.heats.map(item=>({id:item.id,kind:'HEAT' as const,name:item.cowName,
       date:item.startsOn,summary:`${item.isFalse?'Celo aparente':'Celo'}${item.endsOn?` · Fin ${formatDate(item.endsOn)}`:''}`,
@@ -86,10 +99,10 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
     ...records.losses.filter(item=>item.cowId===initialAnimalId).map(item=>item.id),
   ]:[]),[records,initialAnimalId]);
   const visible=useMemo(()=>rows.filter(item=>(!initialAnimalId||relatedIds.has(item.id))&&
-    (!selectedCategory||selectedCategory===item.kind)&&
+    (!selectedCategory||selectedCategory===item.kind)&&(!upcoming||item.kind==='PREGNANCY'&&item.status==='Confirmada')&&
     `${item.name} ${item.summary} ${item.notes??''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
     .sort((a,b)=>(newest?-1:1)*a.date.localeCompare(b.date)),
-    [rows,selectedCategory,search,newest,initialAnimalId,relatedIds]);
+    [rows,selectedCategory,search,newest,initialAnimalId,relatedIds,upcoming]);
   const viewing=rows.find(item=>`${item.kind}:${item.id}`===selectedRecord);
 
   useEffect(() => {
@@ -103,18 +116,37 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
     return () => { active = false; };
   }, [accessToken, revision]);
 
+  useEffect(()=>{if(activeForm!=='BIRTH')return;let active=true;
+    void Promise.all([hasPermission('GROUP_VIEW')?listGroups(accessToken):Promise.resolve([]),
+      hasPermission('CATALOG_VIEW')?listCatalogItems(accessToken,'BREEDS'):Promise.resolve([]),
+      hasPermission('CATALOG_VIEW')?listCatalogItems(accessToken,'COLORS'):Promise.resolve([]),
+      hasPermission('ANIMAL_VIEW')?listOwners(accessToken):Promise.resolve([])]).then(([groups,breeds,colors,owners])=>{
+        if(active)setBirthOptions({groups:groups.filter(x=>x.active),breeds:breeds.filter(x=>x.active),colors:colors.filter(x=>x.active),owners:owners.filter(x=>x.active)});
+      }).catch(reason=>{if(active)setError(errorMessage(reason));});return()=>{active=false;};
+  },[activeForm,accessToken,hasPermission]);
   async function run(operation: () => Promise<unknown>, form?: HTMLFormElement) {
-    setBusy(true); setError(null);
+    if(saving.current)return;saving.current=true;setBusy(true); setError(null);
     try { await operation(); form?.reset();setActiveForm(null);setSettingsOpen(false);
       setSelectedRecord(null);setRevision((value) => value + 1);if(initialAction)onCompleted?.(); }
     catch (failure) { setError(errorMessage(failure)); }
-    finally { setBusy(false); }
+    finally { saving.current=false;setBusy(false); }
   }
 
+  function checkAges(data:FormData,eventField:string,cowField='cowId',fatherField='fatherId'){
+    const eventOn=String(data.get(eventField));
+    for(const [key,months] of [[cowField,settings?.minimumCowMonths],['donorId',settings?.minimumCowMonths],[fatherField,settings?.minimumBullMonths]] as const){
+      const animal=candidates.find(item=>item.id===String(data.get(key)));
+      if(animal&&months!==undefined&&!reachedReproductionAge(animal.birthDate,eventOn,months)){
+        setError(`${animal.name} debe tener al menos ${months} meses en la fecha del evento.`);return false;
+      }
+    }
+    return true;
+  }
   function heat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
+    if(!checkAges(data,'startsOn','cowId','bullId'))return;
     void run(() => createHeat(accessToken, {
       cowId: String(data.get('cowId')), bullId: optional(data, 'bullId'),
       startsOn: String(data.get('startsOn')), endsOn: optional(data, 'endsOn'),
@@ -126,6 +158,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
+    if(!checkAges(data,'confirmedOn'))return;
     const days = optional(data, 'gestationDays');
     const serviceId = optional(data, 'serviceId');
     const service = records?.services.find((row) => row.id === serviceId);
@@ -144,6 +177,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
+    if(!checkAges(data,'occurredOn'))return;
     void run(() => createService(accessToken, {
       cowId: String(data.get('cowId')), heatId: optional(data, 'heatId'),
       fatherId: optional(data, 'fatherId'), externalFather: optional(data, 'externalFather'),
@@ -156,19 +190,46 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   }
 
   function birth(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const calves = Array.from({ length: calfCount }, (_, index) => ({
-      name: String(data.get(`calfName:${index}`) || '').trim(),
-      sex: String(data.get(`calfSex:${index}`)) as 'FEMALE' | 'MALE',
-      ...(optional(data, `calfTag:${index}`) ? { earTagCode: optional(data, `calfTag:${index}`)! } : {}),
-    }));
-    void run(() => recordBirth(accessToken, {
-      pregnancyId: String(data.get('pregnancyId')),
-      occurredOn: String(data.get('occurredOn')), calves,
-      stillbornCount: Number(data.get('stillbornCount') || 0), notes: optional(data, 'notes'),
-    }), form);
+    event.preventDefault();const form=event.currentTarget;const data=birthData.current??new FormData(form);
+    const photos:Array<{file:File;animalIndex?:number;relationCode?:'PROFILE'|'COVER'}>=[];
+    for(const file of data.getAll('birthPhoto'))if(file instanceof File&&file.size)photos.push({file});
+    const calves:BirthCalfInput[]=Array.from({length:calfCount},(_,index)=>{
+      for(const [name,relationCode] of [['profilePhoto','PROFILE'],['coverPhoto','COVER']] as const){
+        const file=data.get(`${name}:${index}`);if(file instanceof File&&file.size)photos.push({file,animalIndex:index,relationCode});
+      }
+      const weight=optional(data,`calfWeight:${index}`);const owner=optional(data,`calfOwner:${index}`);
+      return {name:String(data.get(`calfName:${index}`)),sex:String(data.get(`calfSex:${index}`)) as 'FEMALE'|'MALE',
+        ...(optional(data,`calfTag:${index}`)?{earTagCode:optional(data,`calfTag:${index}`)!}:{}),
+        description:optional(data,`calfDescription:${index}`),
+        birthCondition:String(data.get(`calfCondition:${index}`)) as 'ALIVE'|'WEAK'|'UNKNOWN',
+        ...(optional(data,`calfGroup:${index}`)?{groupId:optional(data,`calfGroup:${index}`)!}:{}),
+        ...(weight?{initialWeight:Number(weight),initialWeightUnitCode:'KILOGRAM'}:{}),
+        breedIds:optional(data,`calfBreed:${index}`)?[optional(data,`calfBreed:${index}`)!]:[],
+        colorIds:optional(data,`calfColor:${index}`)?[optional(data,`calfColor:${index}`)!]:[],
+        ...(owner?{owners:[{partyId:owner,percent:100,isPrimary:true}]}:{}),
+      };
+    });
+    if(photos.some(({file})=>!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10*1024*1024)){
+      setError('Elige fotografías JPG, PNG o WebP de hasta 10 MB.');return;
+    }
+    void run(async()=>{
+      const created=savedBirth.current??await recordBirth(accessToken,{
+        pregnancyId:String(data.get('pregnancyId')),occurredOn:String(data.get('occurredOn')),
+        kind:String(data.get('kind')) as ReproductionBirth['kind'],calves,
+        stillbornCount:Number(data.get('stillbornCount')),notes:optional(data,'notes')});
+      savedBirth.current=created;birthData.current=data;setBirthSaved(true);
+      for(const photo of photos){
+        if(photo.animalIndex===undefined)await uploadMedia(accessToken,{file:photo.file,
+          entityType:'REPRODUCTION_BIRTH',entityId:created.id,capturedOn:created.occurredOn});
+        else await uploadMedia(accessToken,{file:photo.file,animalIds:[created.calves[photo.animalIndex]!.id],
+          relationCode:photo.relationCode,capturedOn:created.occurredOn});
+        // Clear only confirmed or durably queued photos; retry keeps the saved birth.
+        const name=photo.animalIndex===undefined?'birthPhoto':`${photo.relationCode==='PROFILE'?'profilePhoto':'coverPhoto'}:${photo.animalIndex}`;
+        const field=form.elements.namedItem(name) as HTMLInputElement|null;
+        if(field&&field.files?.length===1)field.value='';data.delete(name);
+      }
+      savedBirth.current=null;birthData.current=null;setBirthSaved(false);
+    },form);
   }
 
   function loss(event: FormEvent<HTMLFormElement>) {
@@ -201,23 +262,23 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
 
   return <section className="module-no-header reproduction-panel">
     <div className="activity-type-strip"><button type="button" className={!selectedCategory?'selected':''}
-      onClick={()=>setSelectedCategory(null)}><span><Baby size={20}/></span><small>Todos</small></button>
+      onClick={()=>{setUpcoming(false);setSelectedCategory(null);}}><span><Baby size={20}/></span><small>Todos</small></button>
       {(Object.keys(categories) as ReproductionKind[]).map(kind=><button type="button" key={kind}
-        className={selectedCategory===kind?'selected':''} onClick={()=>setSelectedCategory(kind)}>
-        <span>{categories[kind].slice(0,1)}</span><small>{categories[kind]}</small></button>)}</div>
+        className={selectedCategory===kind?'selected':''} onClick={()=>{setUpcoming(false);setSelectedCategory(kind);}}>
+        <span>{kind==='HEAT'?<Heart size={20}/>:kind==='SERVICE'?<Syringe size={20}/>:kind==='PREGNANCY'?<Stethoscope size={20}/>:kind==='BIRTH'?<Baby size={20}/>:<TriangleAlert size={20}/>}</span><small>{categories[kind]}</small></button>)}<button type="button" className={upcoming?'selected':''} onClick={()=>{setUpcoming(true);setSelectedCategory('PREGNANCY');}}><span><CalendarClock size={20}/></span><small>Próximos partos</small></button></div>
     <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar animal o evento…"
       count={visible.length} actions={<><IconButton label={newest?'Más recientes':'Más antiguos'}
         onClick={()=>setNewest(value=>!value)}><ArrowUpDown size={18}/></IconButton>
-        {canManage&&<IconButton label="Reglas de reproducción" onClick={()=>setSettingsOpen(true)}>
+        {canManage&&settings?.canManageRules&&<IconButton label="Reglas de reproducción" onClick={()=>setSettingsOpen(true)}>
           <Settings2 size={18}/></IconButton>}</>}/>
     {error && <div role="alert" className="form-error admin-error">{error}</div>}
     {!records && !error && <LoadingState/>}
     {!records && error && <ErrorState message={error} onRetry={()=>setRevision(value=>value+1)}/>}
-    {canManage && settings && settingsOpen && <Modal title="Reglas de reproducción" wide
+    {canManage && settings?.canManageRules && settingsOpen && <Modal title="Reglas de reproducción" wide
       onClose={()=>setSettingsOpen(false)} footer={<Button variant="ghost"
         onClick={()=>setSettingsOpen(false)}>Cerrar</Button>}>
       <form className="group-new-form" onSubmit={saveSettings} key={revision}>
-        <p className="muted">Los cambios rigen los próximos registros; el historial conserva sus datos.</p>
+        <p className="muted">Estas reglas se aplican a todas las propiedades del dueño de esta cuenta. El historial conserva sus datos.</p>
         {([
           ['daysAfterBirthHeat', 'Días tras parto para celo', 365],
           ['daysAfterBirthPregnancy', 'Días tras parto para preñez', 365],
@@ -227,7 +288,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
           ['minimumBullMonths', 'Edad mínima del toro (meses)', 120],
           ['maxMilkingDays', 'Máximo de días de ordeño tras parto', 730],
         ] as const).map(([key, label, max]) => <label key={key}><span>{label}</span>
-          <input type="number" name={key} min="0" max={max} required defaultValue={settings[key]} />
+          <input type="number" name={key} min={key==='maxMilkingDays'?1:0} max={max} required defaultValue={settings[key]} />
         </label>)}
         {([
           ['allowSecondHeat', 'Permitir más de un celo en el ciclo'],
@@ -245,7 +306,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
       {([['HEAT','Celo'],['SERVICE','Servicio'],['PREGNANCY','Preñez'],
         ['BIRTH','Parto'],['LOSS','Pérdida']] as const).map(([id,label])=><button
           key={id} type="button" className={activeForm===id?'active':''}
-          aria-pressed={activeForm===id} onClick={()=>setActiveForm(id)}>
+          disabled={busy||birthSaved} aria-pressed={activeForm===id} onClick={()=>setActiveForm(id)}>
           {label}</button>)}
       </div>}
       <div className="reproduction-forms">
@@ -278,13 +339,13 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         <label><span>Celo relacionado</span><Select name="heatId" defaultValue="" key={cowId}>
           <option value="">Sin celo registrado</option>
           {records?.heats.filter((entry) => entry.cowId === cowId && !entry.cancelled && !entry.isFalse)
-            .map((entry) => <option key={entry.id} value={entry.id}>{entry.startsOn}</option>)}
+            .map((entry) => <option key={entry.id} value={entry.id}>{formatDate(entry.startsOn)}</option>)}
         </Select></label>
         <label><span>Servicio asistido relacionado</span><Select name="serviceId" defaultValue="" key={`service:${cowId}`}>
           <option value="">Sin servicio asistido</option>
           {records?.services.filter((entry) => entry.cowId === cowId && !entry.cancelled && !entry.hasPregnancy)
             .map((entry) => <option key={entry.id} value={entry.id}>
-              {entry.occurredOn} · {entry.kind === 'INSEMINATION' ? 'Inseminación' : 'Transferencia'}</option>)}
+              {formatDate(entry.occurredOn)} · {entry.kind === 'INSEMINATION' ? 'Inseminación' : 'Transferencia'}</option>)}
         </Select><small>Si eliges un servicio, se toman su celo y padre.</small></label>
         <label><span>Padre registrado</span><Select name="fatherId" defaultValue="">
           <option value="">No registrado</option>
@@ -347,7 +408,8 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         <button className="primary-button compact" disabled={busy || !females.length}>Guardar servicio</button>
       </form>
 
-      <form className="group-new-form" onSubmit={birth} hidden={activeForm!=='BIRTH'}>
+      <form className="group-new-form birth-registration-form" onSubmit={birth} hidden={activeForm!=='BIRTH'}>
+        <fieldset disabled={busy||birthSaved}>
         <h3>Registrar parto</h3>
         <label><span>Preñez confirmada *</span><Select name="pregnancyId" required
           defaultValue={confirmed.find(item=>item.cowId===initialAnimalId)?.id??''}>
@@ -358,8 +420,10 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         </Select></label>
         <label><span>Fecha de parto *</span><DateInput type="date" name="occurredOn"
           required defaultValue={localDate()} /></label>
+        <label><span>Tipo de parto</span><Select name="kind" defaultValue="NORMAL"><option value="NORMAL">Normal</option><option value="ASSISTED">Asistido</option><option value="CAESAREAN">Cesárea</option><option value="UNKNOWN">Sin determinar</option></Select></label>
+        {canUpload&&<label><span>Foto del parto</span><input type="file" name="birthPhoto" accept="image/jpeg,image/png,image/webp"/><small>Hasta 10 MB.</small></label>}
         <label><span>Crías vivas</span><input type="number" min="0" max="8" value={calfCount}
-          onChange={(event) => setCalfCount(Number(event.target.value))} /></label>
+          onChange={(event) => setCalfCount(Math.min(8,Math.max(0,Math.floor(Number(event.target.value)||0))))} /></label>
         {Array.from({ length: calfCount }, (_, index) => <div key={index} className="group-inline-form">
           <label><span>Nombre de la cría {index + 1} *</span>
             <input name={`calfName:${index}`} required maxLength={160} /></label>
@@ -367,12 +431,21 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
             <option value="FEMALE">Hembra</option><option value="MALE">Macho</option>
           </Select></label>
           <label><span>Arete individual</span><input name={`calfTag:${index}`} maxLength={80} /></label>
+          <label><span>Estado al nacer</span><Select name={`calfCondition:${index}`} defaultValue="ALIVE"><option value="ALIVE">Viva</option><option value="WEAK">Débil</option><option value="UNKNOWN">Sin determinar</option></Select></label>
+          <label><span>Peso al nacer (kg)</span><input name={`calfWeight:${index}`} type="number" min="0.001" max="999999999" step="0.001"/></label>
+          <label><span>Raza</span><Select name={`calfBreed:${index}`} defaultValue=""><option value="">Sin registrar</option>{birthOptions.breeds.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>
+          <label><span>Color</span><Select name={`calfColor:${index}`} defaultValue=""><option value="">Sin registrar</option>{birthOptions.colors.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>
+          <label><span>Grupo</span><Select name={`calfGroup:${index}`} defaultValue=""><option value="">Sin grupo</option>{birthOptions.groups.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>
+          <label><span>Propietario de la cría</span><Select name={`calfOwner:${index}`} defaultValue=""><option value="">Los mismos propietarios de la madre</option>{birthOptions.owners.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select><small>Si eliges uno, tendrá el 100 % de participación.</small></label>
+          <label><span>Información de la cría</span><textarea name={`calfDescription:${index}`} maxLength={5000}/></label>
+          {canUpload&&<><label><span>Foto de perfil de la cría {index+1}</span><input type="file" name={`profilePhoto:${index}`} accept="image/jpeg,image/png,image/webp"/></label>
+          <label><span>Foto de portada de la cría {index+1}</span><input type="file" name={`coverPhoto:${index}`} accept="image/jpeg,image/png,image/webp"/></label></>}
         </div>)}
         <label><span>Crías nacidas muertas</span><input type="number" name="stillbornCount"
           defaultValue="0" min="0" max="8" required /></label>
         <label><span>Observaciones</span><textarea name="notes" maxLength={5000} /></label>
-        <button className="primary-button compact" disabled={busy || !confirmed.length}>
-          Registrar parto y crías</button>
+        </fieldset><button className="primary-button compact" disabled={busy || !confirmed.length}>
+          {birthSaved?'Completar fotografías':'Registrar parto y crías'}</button>
       </form>
 
       <form className="group-new-form" onSubmit={loss} hidden={activeForm!=='LOSS'}>
@@ -422,8 +495,9 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         {viewing.kind==='BIRTH'&&records?.births.find(item=>item.id===viewing.id)?.calves.length
           ?<section><h3>Crías</h3><div className="detail-lines compact">{records.births.find(
             item=>item.id===viewing.id)?.calves.map(calf=><div key={calf.id}><span>
-              <strong>{calf.name}</strong><small>{calf.sex==='FEMALE'?'Hembra':'Macho'}</small>
+              <button type="button" className="text-button" onClick={()=>navigate(`/animales/${calf.id}`)}>{calf.name} · Ver animal</button><small>{calf.sex==='FEMALE'?'Hembra':'Macho'}</small>
             </span></div>)}</div></section>:null}
+        {viewing.kind==='BIRTH'&&multimediaEnabled&&hasPermission('MEDIA_VIEW')&&<section><h3>Fotografías del parto</h3><RecordMedia accessToken={accessToken} entityType="REPRODUCTION_BIRTH" entityId={viewing.id} canManage={canUpload} title="Fotografías del parto"/></section>}
         {viewing.notes&&<section><h3>Observaciones</h3><p>{viewing.notes}</p></section>}
       </div></Modal>}
     {canManage&&<FloatingActionDock><IconButton label="Nuevo evento reproductivo" onClick={()=>

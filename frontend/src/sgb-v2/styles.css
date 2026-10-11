@@ -468,3 +468,6 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .animal-photos img { width: 110px; height: 88px; object-fit: cover; border-radius: 8px; }
 .animal-media-header,.animal-media-upload { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .animal-edit-section { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+
+.birth-registration-form > fieldset { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.birth-registration-form .group-inline-form { padding-block: 12px; border-bottom: 1px solid var(--border); }

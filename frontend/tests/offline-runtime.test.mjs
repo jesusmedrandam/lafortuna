@@ -516,3 +516,37 @@ try{
  await assert.rejects(()=>change('/activities/old-server-draft/apply',{},'POST'),/24 horas/);
 }finally{Date.now=realNow;}
 console.log('PASS: draft expiry at 24 hours, dependent queue cleanup, unchanged creation deadline and applied-work preservation.');
+
+// A queued birth and all calf photos survive restart and bind to the server IDs.
+const birthScope={userId:'birth-offline',propertyId:'birth-property',roleId:'owner'};
+online=false;await runtime.configureOfflineRuntime(birthScope,'test-token');
+await runtime.putCache(birthScope,'/reproduction',{heats:[],services:[],births:[],losses:[],pregnancies:[{id:'pregnancy-a',cowId:'cow-a',cowName:'Madre',status:'CONFIRMED'}]});
+const queuedNewborn=await change('/reproduction/births',{pregnancyId:'pregnancy-a',occurredOn:'2026-10-10',kind:'NORMAL',stillbornCount:0,
+ calves:[{name:'Cría offline',sex:'FEMALE',initialWeight:31,initialWeightUnitCode:'KILOGRAM'}]},'POST');
+await assert.rejects(()=>change('/reproduction/births',{pregnancyId:'pregnancy-a',occurredOn:'2026-10-10',calves:[{name:'Repetida',sex:'FEMALE'}],stillbornCount:0},'POST'),/ya está guardado/);
+await runtime.uploadMedia('test-token',{file:new File([new Uint8Array([255,216,255,217])],'calf.jpg',{type:'image/jpeg'}),animalIds:[queuedNewborn.calves[0].id],relationCode:'PROFILE'});
+await runtime.uploadMedia('test-token',{file:new File([new Uint8Array([255,216,255,217])],'birth.jpg',{type:'image/jpeg'}),entityType:'REPRODUCTION_BIRTH',entityId:queuedNewborn.id});
+runtime=await load();await runtime.configureOfflineRuntime(birthScope,'test-token');
+const photoTargets=[];let birthWrites=0;
+runtime.installOfflineTransport(async(path,init)=>{
+ if(path==='/reproduction/births'){birthWrites++;return {data:{id:'birth-server',calves:[{id:'calf-server',name:'Cría offline',sex:'FEMALE'}]},etag:null,notModified:false};}
+ if(path.startsWith('/media?')&&init.method==='POST'){const q=new URLSearchParams(path.split('?')[1]);photoTargets.push(q.get('entityId'));
+  return {data:{id:'object-'+photoTargets.length,attachmentIds:['photo-'+photoTargets.length]},etag:null,notModified:false};}
+ if(path.startsWith('/media?')||path.startsWith('/media'))return {data:photoTargets.map((id,index)=>({id:'photo-'+(index+1),storage_object_id:'object-'+(index+1),entity_type:id==='calf-server'?'ANIMAL':'REPRODUCTION_BIRTH',entity_id:id,relation_code:id==='calf-server'?'PROFILE':'GENERAL',kind:'IMAGE',url:'https://example.test/photo.jpg',tags:[]})),etag:null,notModified:false};
+ return {data:{},etag:null,notModified:false};
+});
+online=true;await runtime.syncOfflineMutations();online=false;
+assert.equal(birthWrites,1);assert.deepEqual(photoTargets,['calf-server','birth-server']);
+assert.equal((await runtime.listOutbox(birthScope.userId)).length,0);
+assert.equal(runtime.reachedReproductionAge('2025-01-31','2025-02-27',1),false);
+assert.equal(runtime.reachedReproductionAge('2025-01-31','2025-02-28',1),true);
+assert.equal(runtime.reachedReproductionAge('2024-02-29','2025-02-28',12),true);
+console.log('PASS: birth/calf photo remapping after restart and calendar-month minimum ages.');
+
+await runtime.putCache(birthScope,'/reproduction/settings',{minimumBullMonths:12});
+online=true;
+const refreshedRules=await runtime.offlineRequest('/reproduction/settings',{headers},async()=>({data:{minimumBullMonths:24},etag:null,notModified:false}));
+assert.equal(refreshedRules.minimumBullMonths,24,'Read the current owner policy even when another property cached older rules');
+await assert.rejects(()=>runtime.offlineRequest('/reproduction/settings',{headers},async()=>{throw Object.assign(new Error('Sin permiso'),{status:403});}),/Sin permiso/);
+online=false;
+console.log('PASS: current owner rules replace stale online reads and permission failures never fall back to cached policies.');

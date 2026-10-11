@@ -318,6 +318,7 @@ async function optimisticRecord(entry:OutboxEntry){
       heatId:input.heatId??null,serviceId:input.serviceId??null,bullId:input.bullId??null,
       fatherId:input.fatherId??null,externalFather:input.externalFather??null,cancelled:false,hasPregnancy:false,
       status:'CONFIRMED',endsOn:input.endsOn??null,notes:input.notes??null,
+      liveCount:Array.isArray(input.calves)?input.calves.length:0,stillbornCount:Number(input.stillbornCount??0),
       calves:Array.isArray(input.calves)?input.calves.map((value,index)=>({...bodyRecord(value),id:`${id}-calf-${index}`})):[]};
   }
   return common;
@@ -815,6 +816,14 @@ async function sendEntry(entry:OutboxEntry){
     const current=await cachedRecord({...entry,path,temporaryId:null});
     await projectEntry({...entry,path},{...current,...actual,__syncState:null,__mutationId:null},Boolean(entry.temporaryId),actualId??undefined);
   }
+  if(entry.path==='/reproduction/births'&&entry.temporaryId&&Array.isArray(actual.calves)){
+    for(const [index,value] of actual.calves.entries()){
+      const calf=bodyRecord(value);if(typeof calf.id!=='string')continue;
+      const temporaryCalf=`${entry.temporaryId}-calf-${index}`;
+      await saveReplacement(entry.scope.userId,temporaryCalf,calf.id);
+      await remapCachedReferences(entry.scope,temporaryCalf,calf.id);
+    }
+  }
   if(entry.temporaryId&&actualId){
     await saveReplacement(entry.scope.userId,entry.temporaryId,actualId);
     await remapCachedReferences(entry.scope,entry.temporaryId,actualId);
@@ -1043,6 +1052,15 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
     const requestScope={...activeScope};const generation=cacheGeneration;
     const saveAutomatically=canAutomaticallyDownload()&&selectedData(path);
     const cached=await getCache<T>(activeScope,path);
+    if((path==='/reproduction/settings'||path==='/animals/classification')&&isRuntimeOnline()
+      &&!(await listOutbox(activeScope.userId)).some(entry=>entry.path===path)){
+      try{
+        const response=await send<T>(path,{...init,cache:'no-cache'});
+        if(saveAutomatically&&canAutomaticallyDownload()&&activeScope&&sameScope(requestScope,activeScope)
+          &&generation===cacheGeneration)await applyServerCache(requestScope,path,response.data,response.etag,generation);
+        return response.data;
+      }catch(error){if(errorInfo(error).status>0||!cached)throw error;}
+    }
     if(path.split('?')[0]==='/media'){
       const media=await derivedCache<T>(activeScope,path);
       if(media!==null){if(saveAutomatically)void backgroundRefresh<T>(activeScope,path,init);return hydrateLocalMedia(activeScope,media);}
@@ -1066,6 +1084,9 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
   await sweepDrafts();
   const body=await storedBody(init.body);
   const queued=await listOutbox(activeScope.userId);
+  if(path==='/reproduction/births'&&verb==='POST'&&queued.some(entry=>entry.path===path&&entry.method===verb
+    &&sameScope(entry.scope,activeScope!)&&bodyRecord(entry.jsonBody).pregnancyId===bodyRecord(body.jsonBody).pregnancyId))
+    throw new LocalValidationError('El parto de esta preñez ya está guardado y pendiente de sincronizar.');
   if(path==='/cleanings'&&verb==='POST'&&queued.some(entry=>entry.path===path&&entry.method===verb
     &&entry.state==='PENDING'&&sameScope(entry.scope,activeScope!)&&JSON.stringify(entry.jsonBody)===JSON.stringify(body.jsonBody)))
     throw new LocalValidationError('Este borrador ya está guardado y pendiente de sincronizar. Ábrelo desde el listado para editarlo.');

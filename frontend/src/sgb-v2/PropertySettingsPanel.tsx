@@ -2,7 +2,7 @@ import {type FormEvent,useEffect,useState} from 'react';
 import {Plus,SlidersHorizontal,Pencil} from 'lucide-react';
 import {useLocation,useNavigate,useSearchParams} from 'react-router-dom';
 import {Button,IconButton} from '../components/ui';
-import {createAccountProperty,getPropertySettings,updatePropertyInformation,updatePropertyModule,type PropertySettings} from './api';
+import {createOwnAccount,createAccountProperty,getPropertySettings,updatePropertyInformation,updatePropertyModule,type PropertySettings} from './api';
 import {PropertyInformationFields,propertyInformationFrom} from './PropertyInformationFields';
 import {useV2Session} from './V2Session';
 
@@ -16,7 +16,7 @@ export function PropertySettingsPanel({accessToken,onPropertyCreated,onSettingsC
  function open(value:string){const next=new URLSearchParams(params);next.set('accion',value);setParams(next,{state:{propertyOption:true}});}
  async function save(event:FormEvent<HTMLFormElement>){event.preventDefault();if(busy)return;
   const input=propertyInformationFrom(event.currentTarget);setBusy(true);setError('');
-  try{if(screen==='crear'){const result=await createAccountProperty(accessToken,input);await onPropertyCreated(result.propertyId,result.roleId);}
+  try{if(screen==='crear'){const result=await (overview.ownedAccount===null?createOwnAccount(accessToken,input):createAccountProperty(accessToken,input));await onPropertyCreated(result.propertyId,result.roleId);}
    else{await updatePropertyInformation(accessToken,input);setSettings(await getPropertySettings(accessToken));await onSettingsChanged();}
    if(location.state?.propertyOption)navigate(-1);else setParams({seccion:'propiedad'},{replace:true});
   }catch(reason){setError(message(reason));}finally{setBusy(false);}
@@ -24,6 +24,16 @@ export function PropertySettingsPanel({accessToken,onPropertyCreated,onSettingsC
  async function changeModule(code:string,enabled:boolean){setBusy(true);setError('');
   try{await updatePropertyModule(accessToken,code,enabled);setSettings(await getPropertySettings(accessToken));await onSettingsChanged();}
   catch(reason){setError(message(reason));}finally{setBusy(false);}
+ }
+ const own=overview.ownedAccount;
+ const canCreateOwn=own===null||own?own===null||own.status==='ACTIVE'&&own.usedProperties<own.maxProperties:settings?.canCreate;
+ async function startCreate(){
+  if(own&& !overview.properties.find(item=>item.id===selected)?.isOwner){
+   const property=overview.properties.find(item=>item.isOwner);const role=property?.roles.find(item=>item.code==='OWNER');
+   if(!property||!role){setError('Selecciona una propiedad tuya con el rol de propietario para crear otra.');return;}
+   setBusy(true);try{await selectContext(property.id,role.id);}catch(reason){setError(message(reason));return;}finally{setBusy(false);}
+  }
+  open('crear');
  }
  const groups=[{title:'Mis propiedades',items:overview.properties.filter(item=>item.isOwner)},
   {title:'Colaboro en',items:overview.properties.filter(item=>!item.isOwner)}];
@@ -43,12 +53,12 @@ export function PropertySettingsPanel({accessToken,onPropertyCreated,onSettingsC
     <div><dt>Extensión</dt><dd>{settings.property.areaValue==null?'Sin registrar':`${settings.property.areaValue.toLocaleString('es-EC')} ${settings.property.areaUnitCode==='HECTARE'?'ha':'m²'}`}</dd></div>
     <div><dt>Ubicación</dt><dd>{settings.property.address||'Sin registrar'}</dd></div><div><dt>Cuenta</dt><dd>{settings.account.name}</dd></div></dl>
    <div className="inline-actions">{settings.canViewModules&&<Button variant="secondary" onClick={()=>open('politicas')}><SlidersHorizontal size={18}/>Políticas de operación</Button>}
-    {settings.canCreate&&settings.account.usedProperties<settings.account.maxProperties&&<Button onClick={()=>open('crear')}><Plus size={18}/>Crear propiedad</Button>}</div>
+    {canCreateOwn&&<Button disabled={busy} onClick={()=>void startCreate()}><Plus size={18}/>{own===null?'Crear mi primera propiedad':'Crear propiedad'}</Button>}</div>
   </>}
   </>}
   {!settings&&!error&&<p role="status">Cargando propiedad…</p>}
-  {settings&&(screen==='crear'&&settings.canCreate||screen==='editar'&&settings.canManageModules)&&<form onSubmit={save}>
-   <h2>{screen==='crear'?'Crear propiedad':'Información de la propiedad'}</h2><fieldset disabled={busy}>
+  {settings&&(screen==='crear'&&canCreateOwn||screen==='editar'&&settings.canManageModules)&&<form onSubmit={save}>
+   <h2>{screen==='crear'?'Crear propiedad':'Información de la propiedad'}</h2>{screen==='crear'&&<p className="muted">La propiedad pertenecerá a tu cuenta.</p>}<fieldset disabled={busy}>
     <PropertyInformationFields key={`${screen}-${selected}`} value={screen==='editar'?settings.property:undefined} ownerName={overview.user.displayName}/>
     <Button type="submit" loading={busy}>{screen==='crear'?'Crear propiedad':'Guardar información'}</Button></fieldset></form>}
   {settings&&screen==='politicas'&&settings.canViewModules&&<><h2>Políticas de operación</h2><p className="muted">{settings.property.name}</p>
