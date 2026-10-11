@@ -1,4 +1,5 @@
 import {ImagePicker} from './ImagePicker';
+import {reachedReproductionAge} from './reproductionAge';
 import {DateInput} from '../components/ui';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import {
@@ -9,7 +10,7 @@ import {
   listGroups, type LivestockGroup,
   listLocations,type PhysicalLocation,type AnimalFilters,
   getMedia,uploadMedia,deleteMedia,type MediaItem,
-  getAnimalClassificationPolicy,type AnimalClassificationPolicy,
+  getAnimalParentRules,getAnimalClassificationPolicy,type AnimalClassificationPolicy,
   type Animal, type AnimalList, type CatalogItem, type LivestockBrand, type LivestockOwner, type ParentSelection,
 } from './api';
 import {formatDate} from '../utils';
@@ -232,8 +233,8 @@ function BrandFields({ brands, selected }: { brands: LivestockBrand[]; selected?
   </fieldset>;
 }
 
-function ParentField({ accessToken, child, role }: {
-  accessToken: string; child?: Animal; role: 'mother' | 'father';
+function ParentField({ accessToken, child, role,eventOn }: {
+  accessToken: string; child?: Animal; role: 'mother' | 'father';eventOn?:string;
 }) {
   const current = child?.[role];
   const [mode, setMode] = useState<'none' | 'animal' | 'reported'>(
@@ -242,6 +243,10 @@ function ParentField({ accessToken, child, role }: {
   const [search, setSearch] = useState('');
   const [candidates, setCandidates] = useState<Animal[]>([]);
   const [loadError, setLoadError] = useState(false);
+  const [rulesError,setRulesError]=useState(false);
+  const [rules,setRules]=useState<{minimumCowMonths:number;minimumBullMonths:number}|null>(null);
+  useEffect(()=>{let active=true;void getAnimalParentRules(accessToken).then(value=>{if(active)setRules(value);})
+    .catch(()=>{if(active)setRulesError(true);});return()=>{active=false;};},[accessToken]);
   useEffect(() => {
     if (mode !== 'animal') return;
     let active = true;
@@ -255,7 +260,9 @@ function ParentField({ accessToken, child, role }: {
   const label = role === 'mother' ? 'Madre' : 'Padre';
   const eligible = candidates.filter((entry) => entry.id !== child?.id
     && entry.sex === (role === 'mother' ? 'FEMALE' : 'MALE')
-    && (!child?.birthDate || !entry.birthDate || entry.birthDate < child.birthDate));
+    && (!(eventOn||child?.birthDate) || !entry.birthDate || entry.birthDate < (eventOn||child!.birthDate!))
+    && rules&&reachedReproductionAge(entry.birthDate,eventOn||child?.birthDate||new Date().toLocaleDateString('en-CA'),
+      role==='mother'?rules.minimumCowMonths:rules.minimumBullMonths));
   return <fieldset className="animal-parent-field"><legend>{label}</legend>
     <label><span>Tipo de registro</span><Select name={`${role}Mode`} value={mode}
       onChange={(event) => setMode(event.target.value as typeof mode)}>
@@ -274,7 +281,7 @@ function ParentField({ accessToken, child, role }: {
           {entry.name}{entry.earTagCode ? ` · ${entry.earTagCode}` : ''}
         </option>)}
       </Select></label>
-      {loadError && <small>No se pudieron cargar los animales; intenta buscar de nuevo.</small>}
+      {(loadError||rulesError) && <small role="alert">No se pudieron cargar los animales o sus reglas de edad. Vuelve a abrir el formulario.</small>}
     </>}
     {mode === 'reported' && <label><span>Nombre informado</span>
       <input name={`${role}ReportedName`} defaultValue={current?.animalId === null ? current.name : ''}
@@ -284,12 +291,13 @@ function ParentField({ accessToken, child, role }: {
 
 export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs, canManageBrands,
   canViewMedia,canManageMedia,initialClassification,canViewLocations,modules,onNavigate,
-  initialAnimalId,initialCreate,initialEdit,onBack }: {
+  initialAnimalId,initialCreate,initialEdit,onBack,onCreated }: {
   accessToken: string; canCreate: boolean; canUpdate: boolean;
   canViewCatalogs: boolean; canManageBrands: boolean;
   canViewMedia:boolean;canManageMedia:boolean;initialClassification?:string;
   canViewLocations:boolean;modules:string[];
   initialAnimalId?:string;initialCreate?:boolean;initialEdit?:boolean;onBack?:()=>void;
+  onCreated?:(id:string,notice?:string)=>void;
   onNavigate:(section:'movements'|'health'|'reproduction'|'production',animal:Animal)=>void;
 }) {
   const [result, setResult] = useState<AnimalList | null>(null);
@@ -301,6 +309,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState<Animal | null>(null);
   const [showCreate, setShowCreate] = useState(Boolean(initialCreate));
+  const [creationBirthDate,setCreationBirthDate]=useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [choices, setChoices] = useState<AnimalChoices | null>(null);
@@ -429,8 +438,9 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         ...(choices ? { breedIds, colorIds } : {}),
         brandIds, owners: animalOwners,
       });
-      setSelected(created); setShowCreate(false); setSearchInput(''); setSearch(''); setPage(1);
+      if(!onCreated)setSelected(created);setShowCreate(false);setSearchInput('');setSearch('');setPage(1);
       setRevision((value) => value + 1);
+      let notice:string|undefined;
       if(canManageMedia){
         const photo=data.get('profilePhoto');const cover=data.get('coverPhoto');
         try{
@@ -439,8 +449,9 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
           if(cover instanceof File&&cover.size)await uploadMedia(accessToken,{file:cover,
             animalIds:[created.id],relationCode:'COVER'});
           setMediaRevision(value=>value+1);
-        }catch(failure){setError(`El animal se registró, pero no se pudo subir una foto: ${message(failure)}`);}
+        }catch(failure){notice=`El animal se registró, pero no se pudo subir una foto: ${message(failure)}`;setError(notice);}
       }
+      onCreated?.(created.id,notice);
     } catch (failure) { setError(message(failure)); }
     finally { setBusy(false); }
   }
@@ -550,7 +561,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
             key={group.id} value={group.id}>{group.name}{group.location?` · ${group.location.name}`:''}</option>)}
         </Select><small>La ubicación se hereda del grupo.</small></label>
         <label><span>Arete individual</span><input name="earTagCode" maxLength={80} disabled={busy} /></label>
-        <label><span>Fecha de nacimiento</span><DateInput type="date" name="birthDate" disabled={busy} /></label>
+        <label><span>Fecha de nacimiento</span><DateInput type="date" name="birthDate" disabled={busy} onChange={event=>setCreationBirthDate(event.target.value)}/></label>
         <label><span>Fecha de ingreso</span><DateInput type="date" name="entryDate" disabled={busy} />
           <small>Vacía: se usa la fecha actual de la finca.</small></label>
         <label><span>Peso inicial</span><input type="number" name="initialWeight" min="0.001"
@@ -573,8 +584,8 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       </div></section>
       <section className="animal-form-section"><header><span>4</span><div><h4>Parentesco</h4>
         <p>Relaciona los padres registrados o escribe un nombre externo.</p></div></header>
-        <div className="animal-parent-grid"><ParentField accessToken={accessToken} role="mother"/>
-          <ParentField accessToken={accessToken} role="father"/></div></section>
+        <div className="animal-parent-grid"><ParentField accessToken={accessToken} role="mother" eventOn={creationBirthDate}/>
+          <ParentField accessToken={accessToken} role="father" eventOn={creationBirthDate}/></div></section>
       {canManageMedia&&<section className="animal-form-section"><header><span>5</span><div><h4>Fotografías</h4>
         <p>Puedes agregarlas ahora o posteriormente desde la ficha.</p></div></header><div className="animal-form-grid">
         <ImagePicker name="profilePhoto" label="Foto de perfil"/>

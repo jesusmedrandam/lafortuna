@@ -139,6 +139,8 @@ try{
   render(h(BrowserRouter,null,h(RolesPermissionsPage)));await until(()=>document.querySelector('.roles-permissions-page'));
   const selectors=document.querySelectorAll('.sgb-select-button');selectors[0].click();await tick();
   [...document.querySelectorAll('[role="option"]')].find(node=>node.textContent==='Segunda').click();await tick();
+  check(!document.querySelector('.role-permission-list'),'Role permissions stay collapsed until requested');
+  [...document.querySelectorAll('button')].find(node=>node.textContent==='Ver permisos del rol').click();await until(()=>document.querySelector('.role-permission-list'));
   check(document.querySelector('.role-permission-list').textContent.includes('Consultar multimedia'),'Selected role permissions');
   [...document.querySelectorAll('button')].find(node=>node.textContent==='Usar este rol').click();await until(()=>window.contextCalls.length===1);
   check(window.contextCalls[0].propertyId==='property-b'&&window.contextCalls[0].roleId==='role-b','Property and role configured together');

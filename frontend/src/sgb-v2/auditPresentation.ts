@@ -34,7 +34,7 @@ const actions:Record<string,string>={
   COMMERCE_CREATED:'Registró una compra o venta',COMMERCE_CANCELLED:'Anuló una compra o venta',
   FINANCE_ACCOUNT_CREATED:'Creó una cuenta de dinero',FINANCE_ACCOUNT_UPDATED:'Editó una cuenta de dinero',
   FINANCE_MOVEMENT_CREATED:'Registró un ingreso o egreso',FINANCE_MOVEMENT_CANCELLED:'Anuló un ingreso o egreso',
-  REPRODUCTION_HEAT_CREATED:'Registró un celo',REPRODUCTION_HEAT_CANCELLED:'Anuló un celo',REPRODUCTION_HEAT_FINISHED:'Finalizó un celo',
+  REPRODUCTION_HEAT_CREATED:'Registró un celo',REPRODUCTION_HEAT_CANCELLED:'Anuló un celo',REPRODUCTION_HEAT_FINISHED:'Finalizó un celo',REPRODUCTION_HEAT_MARKED_FALSE:'Marcó un celo como falso',
   REPRODUCTION_SERVICE_CREATED:'Registró un servicio reproductivo',REPRODUCTION_SERVICE_CANCELLED:'Anuló un servicio reproductivo',
   REPRODUCTION_PREGNANCY_CREATED:'Registró una preñez',REPRODUCTION_PREGNANCY_CANCELLED:'Anuló una preñez',
   REPRODUCTION_BIRTH_REGISTERED:'Registró un parto',REPRODUCTION_LOSS_REGISTERED:'Registró una pérdida gestacional',

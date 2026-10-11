@@ -228,7 +228,7 @@ export function V2AnimalDetail(){
     &&!reproduction.births.some(birth=>birth.pregnancyId===item.id)&&!reproduction.losses.some(loss=>loss.pregnancyId===item.id));
   const reproductiveActions:AnimalAction[]=reproductiveAge?(activePregnancy?[
     ...(reproductionSectionEnabled(reproductionSettings,'BIRTH')?[{label:'Registrar parto',run:()=>openAction('reproduction','PARTO')}]:[]),
-    ...(reproductionSectionEnabled(reproductionSettings,'LOSS')?[{label:'Registrar pérdida de preñez',run:()=>openAction('reproduction','PERDIDA')}]:[]),
+    ...(reproductionSectionEnabled(reproductionSettings,'LOSS')?[{label:'Registrar aborto',run:()=>openAction('reproduction','PERDIDA')}]:[]),
   ]:[
     ...(reproductionSectionEnabled(reproductionSettings,'HEAT')?[{label:'Registrar celo',run:()=>openAction('reproduction','CELO')}]:[]),
     ...(reproductionSectionEnabled(reproductionSettings,'INSEMINATION')?[{label:'Registrar inseminación',run:()=>openAction('reproduction','INSEMINACION')}]:[]),
@@ -259,6 +259,7 @@ export function V2AnimalDetail(){
   if(error&&!animal)return <ErrorState message={error} onRetry={()=>navigate('/animales')}/>;
   if(!animal)return <LoadingState text="Abriendo ficha…"/>;
   return <div className="animal-detail-page sgb-v2-animal-detail">
+    {location.state?.animalCreationNotice&&<p className="form-error" role="alert">{location.state.animalCreationNotice}</p>}
     <section className={`animal-social-cover ${cover?'has-cover':''}`}>
       {cover?<button type="button" className="animal-cover-media" onClick={()=>setViewer(cover)}>
         <img src={cover.url} alt={`Portada de ${animal.name}`}/></button>:<div className="animal-cover-placeholder"/>}

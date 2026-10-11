@@ -6,7 +6,7 @@ type Group=keyof typeof downloadGroups;
 interface DataChoice {id:string;label:string;group:Group;permission?:string;module?:string;personal?:boolean;paths:string[]}
 export const dataChoices:DataChoice[]=[
   {id:'animals',label:'Animales y clasificación',group:'animals',permission:'ANIMAL_VIEW',
-    paths:['/animals?page=1&search=','/animals/summary','/animals/classification','/animal-status','/animal-status/options']},
+    paths:['/animals?page=1&search=','/animals/summary','/animals/classification','/animals/parent-age-rules','/animal-status','/animal-status/options']},
   {id:'groups',label:'Grupos',group:'spaces',permission:'GROUP_VIEW',paths:['/groups']},
   {id:'locations',label:'Potreros y corrales',group:'spaces',permission:'LOCATION_VIEW',paths:['/locations']},
   {id:'catalogs',label:'Opciones, propietarios y marquillas',group:'catalogs',permission:'CATALOG_VIEW',
