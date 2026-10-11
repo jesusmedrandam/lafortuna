@@ -1,12 +1,12 @@
 export const mockApi=`
 export class ApiRequestError extends Error{}
-window.birthCalls=0;window.heatCalls=0;window.photoCalls=[];let coverFailed=false;
+window.birthCalls=0;window.heatCalls=0;window.finishedHeats=0;window.photoCalls=[];let coverFailed=false;
 const pregnancy={id:'pregnancy-a',cowId:'cow-a',cowName:'Lucera',status:'CONFIRMED',confirmedOn:'2026-01-01',expectedBirthOn:'2026-10-10'};
 const records={heats:[],services:[],births:[],losses:[],pregnancies:[pregnancy]};
-export const getReproduction=async()=>records;
+export const getReproduction=async()=>structuredClone(records);
 export const getReproductionCandidates=async()=>[{id:'cow-a',name:'Lucera',sex:'FEMALE',birthDate:'2018-01-01'},
  {id:'young-a',name:'Ternera pequeña',sex:'FEMALE',birthDate:'2026-01-01'}];
-export const getReproductionSettings=async()=>({canManageRules:!window.restrictedRules,minimumCowMonths:18,minimumBullMonths:24,
+export const getReproductionSettings=async()=>({enabledSections:window.enabledSections,canManageRules:!window.restrictedRules,minimumCowMonths:18,minimumBullMonths:24,
  daysAfterBirthHeat:30,daysAfterBirthPregnancy:45,daysAfterLossHeat:21,daysAfterLossPregnancy:30,
  allowSecondHeat:true,allowFalseHeatInPregnancy:true,useLastValidHeat:true,maxMilkingDays:305});
 export const recordBirth=async(_token,input)=>{window.birthCalls++;window.birthInput=input;return {id:'birth-a',occurredOn:input.occurredOn,calves:input.calves.map((calf,index)=>({...calf,id:'calf-'+index}))};};
@@ -16,7 +16,8 @@ export const listGroups=async()=>[{id:'group-a',name:'Crías',active:true}];
 export const listCatalogItems=async(_token,code)=>[{id:code+'-a',name:code==='BREEDS'?'Jersey':'Pinta',active:true}];
 export const listOwners=async()=>[{id:'owner-a',name:'Ana',active:true}];
 export const getMedia=async()=>[];export const deleteMediaObject=async()=>{};
-export const createHeat=async()=>{window.heatCalls++;};export const createService=async()=>{};
+export const createHeat=async(_token,input)=>{window.heatCalls++;records.heats.push({...input,id:'heat-new',cowName:'Lucera',endsOn:input.endsOn??null});};
+export const finishHeat=async(_token,id,endsOn)=>{window.finishedHeats++;records.heats.find(row=>row.id===id).endsOn=endsOn;};export const createService=async()=>{};
 export const createPregnancy=async()=>{};export const recordLoss=async()=>{};export const updateReproductionSettings=async()=>{};
 export const cancelHeat=async()=>{};export const cancelPregnancy=async()=>{};export const cancelService=async()=>{};
 `;
@@ -27,7 +28,7 @@ import {BrowserRouter} from 'react-router-dom';
 import {ThemeProvider} from './src/theme/ThemeContext';import {ReproductionPanel} from './src/sgb-v2/ReproductionPanel';
 const root=createRoot(document.getElementById('root'));let incarnation=0;
 const render=()=>root.render(h(BrowserRouter,{},h(ThemeProvider,{},h(ReproductionPanel,{key:incarnation++,accessToken:'test',canManage:true}))));
-const wait=async(test)=>{for(let n=0;n<400;n++){if(test())return;await new Promise(r=>setTimeout(r,25));}throw new Error('No apareció el resultado esperado.');};
+const wait=async(test)=>{for(let n=0;n<400;n++){if(test())return;await new Promise(r=>setTimeout(r,25));}throw new Error('No apareció el resultado esperado: '+test);};
 const assert=(value,message)=>{if(!value)throw new Error(message);};
 const click=label=>{const button=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===label||x.getAttribute('aria-label')===label);assert(button,'Botón '+label);button.click();};
 const set=async(form,name,value)=>{const field=form.elements.namedItem(name);assert(field,'Campo '+name);
@@ -42,7 +43,8 @@ const photo=(form,name,fileName)=>{const transfer=new DataTransfer();transfer.it
  click('Reglas de reproducción');await wait(()=>location.pathname==='/configuracion'&&new URLSearchParams(location.search).get('opcion')==='reproduccion');
  history.back();await wait(()=>location.pathname==='/');
  click('Próximos partos');await wait(()=>document.querySelector('.record-list-row'));assert(document.body.innerText.includes('Lucera'),'Se listan los próximos partos');
- click('Nuevo evento reproductivo');await wait(()=>document.querySelector('.reproduction-forms'));click('Parto');
+ click('Partos');await wait(()=>document.querySelector('.activity-type-strip .selected')?.textContent==='Partos');click('Nuevo evento reproductivo');await wait(()=>document.querySelector('.reproduction-forms'));
+ assert(!document.querySelector('.activity-type-strip'),'Las opciones de eventos se ocultan durante el registro');
  await wait(()=>document.querySelector('[name="calfGroup:0"] option[value="group-a"]'));const form=document.querySelector('.birth-registration-form');await set(form,'pregnancyId','pregnancy-a');await set(form,'calfName:0','Estrella');
  await set(form,'calfWeight:0','32.125');await set(form,'calfDescription:0','Mancha blanca');await set(form,'calfGroup:0','group-a');
  await set(form,'calfBreed:0','BREEDS-a');await set(form,'calfColor:0','COLORS-a');await set(form,'calfCondition:0','WEAK');
@@ -70,10 +72,20 @@ const photo=(form,name,fileName)=>{const transfer=new DataTransfer();transfer.it
  assert(window.photoCalls.find(x=>x.name==='brisa-profile.jpg').animalIds[0]==='calf-1','El perfil de la segunda cría corresponde a la segunda cría');
  assert(window.photoCalls.filter(x=>x.name==='brisa-cover.jpg').length===1,'La segunda portada se carga una vez');
  window.restrictedRules=true;render();await wait(()=>!document.querySelector('[aria-label="Reglas de reproducción"]'));
- assert(!document.querySelector('[aria-label="Reglas de reproducción"]'),'Un operador no administra reglas');click('Nuevo evento reproductivo');
+ assert(!document.querySelector('[aria-label="Reglas de reproducción"]'),'Un operador no administra reglas');click('Celos');await wait(()=>document.querySelector('.activity-type-strip .selected')?.textContent==='Celos');click('Nuevo evento reproductivo');
  await wait(()=>document.querySelector('.reproduction-forms'));
  const heatForm=[...document.querySelectorAll('.reproduction-forms form')].find(x=>!x.hidden);await set(heatForm,'cowId','young-a');await set(heatForm,'startsOn','2026-10-10');heatForm.requestSubmit();
  await wait(()=>document.body.innerText.includes('debe tener al menos 18 meses'));assert(window.heatCalls===0,'La edad se valida antes de enviar');
+ await set(heatForm,'cowId','cow-a');heatForm.requestSubmit();await wait(()=>window.heatCalls===1&&!document.querySelector('.reproduction-forms'));
+ assert(!document.querySelector('.form-error'),'El celo guarda sin fecha de fin');
+ document.querySelector('.record-list-row').click();await wait(()=>document.querySelector('.animal-rules-form [name="endsOn"]'));
+ const finish=document.querySelector('.animal-rules-form');await set(finish,'endsOn','2026-10-10');finish.requestSubmit();
+ await wait(()=>window.finishedHeats===1&&!document.querySelector('.modal'));document.querySelector('.record-list-row').click();
+ await wait(()=>document.querySelector('.modal'));assert(!document.querySelector('.animal-rules-form'),'No vuelve a finalizar un celo terminado');click('Cerrar');
+ window.enabledSections=['REPRODUCTION_HEATS'];render();await wait(()=>document.querySelector('.activity-type-strip')&&!document.body.innerText.includes('Inseminación'));
+ assert(!document.querySelector('.activity-type-strip').textContent.includes('Embriones'),'Transferencia se deshabilita por separado');
+ click('Nuevo evento reproductivo');await wait(()=>document.querySelector('.animal-rules-options'));
+ assert(!document.querySelector('.animal-rules-options').textContent.includes('Registrar parto'),'Las opciones respetan la política');
  document.getElementById('result').textContent='PASS: multiple calf cards, stable removal/photos, mobile layout, retry without duplicates, settings shortcut and minimum-age preflight.';
 })().catch(error=>document.getElementById('result').textContent='FAIL: '+error.message);
 `;

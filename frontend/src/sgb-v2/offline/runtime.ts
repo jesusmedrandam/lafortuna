@@ -1,5 +1,5 @@
 import {
-  getCache,getOfflineSize,getSetting,listCache,listOutbox,offlineScopeKey,putCache,putOutbox,
+  getCache,getOfflineSize,getSetting,listCache,listOutbox,getOutbox,offlineScopeKey,putCache,putOutbox,
   putSetting,removeOutbox,getLocalMedia,putMediaMutation,getLocalMediaInfo,listLocalMedia,removeLocalMedia,
   removeCachedPaths,listUserCache,type OfflineScope,type OutboxEntry,type StoredFormPart,
 } from './database';
@@ -260,7 +260,7 @@ async function optimisticRecord(entry:OutboxEntry){
     return animal;
   }
   if(entry.path.startsWith('/media?')&&entry.bodyType==='binary')return {
-    id:entry.temporaryId,attachmentIds:mediaAttachments(entry).map(row=>row.id),...pending};
+    id:entry.temporaryId,attachmentIds:(await mediaAttachments(entry)).map(row=>row.id),...pending};
   if(entry.path==='/groups')return {...common,active:true,animalCount:0,location:null};
   if(['/health-records/medicines','/health-records/medicines/structured','/health-records/medicines/classification','/catalogs/medicines','/catalogs/medicines/classification'].includes(entry.path))return {
     active:true,administrationRoutes:['ORAL','INTRAMUSCULAR','SUBCUTANEA','INTRAVENOSA','TOPICA','OTRA'],
@@ -344,12 +344,18 @@ async function cachedRecord(entry:OutboxEntry){
   return null;
 }
 
-function mediaAttachments(entry:OutboxEntry){
+async function mediaAttachments(entry:OutboxEntry){
   const query=new URLSearchParams(entry.path.split('?')[1]);
   const ids=(query.get('animalIds')||query.get('entityId')||'').split(',').filter(Boolean);
   const file=entry.formParts[0]?.value;
-  return ids.map((id,index)=>({id:index===0?entry.temporaryId:`${entry.temporaryId}-${index}`,
-    storage_object_id:`local-object-${entry.id}`,entity_type:query.get('entityType'),entity_id:id,
+  const targets=ids.map(id=>({id,type:query.get('entityType')??'ANIMAL'}));
+  if(query.get('entityType')==='REPRODUCTION_BIRTH'){
+    const birth=await cachedBirth(entry.scope,String(query.get('entityId')));
+    for(const id of [birth?.motherId,...(Array.isArray(birth?.calves)?birth.calves.map(value=>bodyRecord(value).id):[])])
+      if(typeof id==='string'&&!targets.some(target=>target.type==='ANIMAL'&&target.id===id))targets.push({id,type:'ANIMAL'});
+  }
+  return targets.map(({id,type},index)=>({id:index===0?entry.temporaryId:`${entry.temporaryId}-${index}`,
+    storage_object_id:`local-object-${entry.id}`,entity_type:type,entity_id:id,
     entity_name:null,relation_code:query.get('relationCode')??'GENERAL',description:query.get('description'),
     captured_on:query.get('capturedOn'),tags:[],kind:entry.requestHeaders?.['x-media-kind']??'IMAGE',
     byteSize:entry.binarySize??(file instanceof Blob?file.size:0),created_at:new Date(entry.createdAt).toISOString(),
@@ -390,7 +396,7 @@ async function projectMedia(entry:OutboxEntry,canonical?:Record<string,unknown>[
   const upload=entry.bodyType==='binary'&&entry.method==='POST';
   const editing=entry.method==='PATCH'&&entry.path.startsWith('/media/objects/');
   const objectId=entityId(entry.path,null);
-  let incoming=canonical??(upload?mediaAttachments(entry):[]);
+  let incoming=canonical??(upload?await mediaAttachments(entry):[]);
   if(editing&&!canonical){
     const input=bodyRecord(entry.jsonBody);
     const originals=[...new Map(caches.flatMap(cache=>Array.isArray(cache.payload)?cache.payload:[])
@@ -497,6 +503,7 @@ function entityId(path:string,temporary:string|null){
 }
 
 function actionPatch(path:string,body:Record<string,unknown>){
+  if(/^\/reproduction\/heats\/[^/]+\/finish$/.test(path))return {endsOn:body.endsOn};
   if(/^\/reproduction\/(heats|services)\/[^/]+\/cancel$/.test(path))return {cancelled:true};
   if(/^\/reproduction\/pregnancies\/[^/]+\/cancel$/.test(path))return {status:'CANCELLED'};
   if(path.startsWith('/activities/')&&path.endsWith('/apply'))return {status:'COMPLETADA',appliedAt:new Date().toISOString()};
@@ -657,6 +664,10 @@ async function projectEntry(entry:OutboxEntry,record:Record<string,unknown>,crea
     await putCache(entry.scope,cached.path,payload,cached.etag);
   }
   if(entry.path==='/animals'&&entry.temporaryId)await putCache(entry.scope,`/animals/${id}`,record);
+  if(entry.path==='/reproduction/births')await projectBirthAnimals(entry,record);
+  if(entry.path==='/reproduction/losses'&&typeof record.pregnancyId==='string')await projectEntry(
+    {...entry,path:`/reproduction/pregnancies/${record.pregnancyId}`,temporaryId:null},
+    {id:record.pregnancyId,status:'LOST'},false);
   if(entry.path.startsWith('/movements/'))await projectMovementAnimals(entry,replacementId??originalId);
   if(entry.path.startsWith('/health-records/campaigns/'))
     await projectTreatedConditions(entry,replacementId??originalId,record);
@@ -797,11 +808,17 @@ async function sendEntry(entry:OutboxEntry){
       catch{throw new OfflineUnavailableError('El archivo está enviado; se confirmará cuando el servidor vuelva a responder.');}
       rows.push(...response.data.map(bodyRecord).filter(row=>Array.isArray(actual.attachmentIds)&&actual.attachmentIds.includes(row.id)));
     }
-    if(rows.length!==ids.length)throw new OfflineUnavailableError('La foto está enviada; falta confirmar sus datos.');
+    if(Array.isArray(actual.relatedAttachments)&&rows[0])for(const value of actual.relatedAttachments){
+      const related=bodyRecord(value);if(rows.some(row=>row.id===related.id))continue;
+      rows.push({...rows[0],id:related.id,entity_type:related.entity_type,entity_id:related.entity_id,
+        relation_code:'GENERAL',entity_name:null});
+    }
+    if(rows.length!==(Array.isArray(actual.attachmentIds)?actual.attachmentIds.length:ids.length))throw new OfflineUnavailableError('La foto está enviada; falta confirmar sus datos.');
     await rewindPendingFrom(entry);
-    const originals=mediaAttachments({...entry,path});
+    const originals=await mediaAttachments({...entry,path});
     for(const [index,row] of rows.entries()){
-      const original=originals.find(item=>item.entity_id===row.entity_id)??originals[index]!;
+      const original=originals.find(item=>item.entity_id===row.entity_id&&item.entity_type===row.entity_type)??originals[index]!;
+      if(!original)continue;
       await saveReplacement(entry.scope.userId,String(original.id),String(row.id));
       await remapCachedReferences(entry.scope,String(original.id),String(row.id));
       await saveReplacement(entry.scope.userId,String(original.storage_object_id),String(row.storage_object_id));
@@ -863,7 +880,8 @@ async function syncQueue(){
   try{
     syncProgress={completed:0,total:entries.length,current:'Preparando cambios',loaded:0,bytes:0};await publishState();
     let serverScope={...original};
-    for(const entry of entries){
+    for(const queued of entries){
+      const entry=await getOutbox(queued.id);if(!entry)continue;
       if(!activeScope||!sameScope(activeScope,original))break;
       if(entry.state==='FAILED')break;
       try{
@@ -1476,4 +1494,35 @@ async function publishState(){
   }
   try{window.SGBAndroid?.setPendingMutations?.(state.pending+state.failed);}catch{/* Solo Android. */}
   emit('sgb-v2-offline-state',state);
+}
+
+
+async function cachedBirth(scope:OfflineScope,id:string){
+  const cached=await getCache(scope,'/reproduction');
+  return (bodyRecord(cached?.payload).births as unknown[]|undefined)?.map(bodyRecord).find(row=>row.id===id);
+}
+async function projectBirthAnimals(entry:OutboxEntry,birth:Record<string,unknown>){
+  const input=bodyRecord(entry.jsonBody);const cached=await getCache(entry.scope,'/reproduction');
+  const pregnancy=(bodyRecord(cached?.payload).pregnancies as unknown[]|undefined)?.map(bodyRecord)
+    .find(row=>row.id===(birth.pregnancyId??input.pregnancyId));
+  const motherId=birth.motherId??pregnancy?.cowId;
+  const mother=typeof motherId==='string'?await cachedRecord({...entry,path:`/animals/${motherId}`,temporaryId:null}):null;
+  const policy=bodyRecord((await getCache(entry.scope,'/animals/classification'))?.payload);
+  for(const [index,value] of (Array.isArray(birth.calves)?birth.calves:[]).entries()){
+    const calf=bodyRecord(value);if(typeof calf.id!=='string')continue;
+    const details={...bodyRecord((input.calves as unknown[]|undefined)?.[index]),...calf};
+    const father=typeof pregnancy?.fatherId==='string'?{animalId:pregnancy.fatherId,name:await findCachedName(entry.scope,pregnancy.fatherId)}:
+      pregnancy?.externalFather?{name:pregnancy.externalFather}:null;
+    const animalEntry={...entry,path:'/animals',temporaryId:calf.id,jsonBody:{...details,
+      speciesCode:'BOVINE',birthDate:birth.occurredOn??input.occurredOn,entryDate:birth.occurredOn??input.occurredOn}};
+    const animal=await optimisticRecord(animalEntry);const code=details.sex==='MALE'?'TERNERO':'TERNERA';
+    await projectEntry(animalEntry,{...animal,...details,id:calf.id,
+      classification:details.classification??{code,name:bodyRecord(policy.names)[code]??(code==='TERNERO'?'Ternero':'Ternera')},
+      owners:details.owners??mother?.owners??[],primaryOwnerName:details.primaryOwnerName??mother?.primaryOwnerName??null,
+      mother:details.mother??{animalId:motherId,name:birth.motherName??mother?.name??pregnancy?.cowName??'Madre'},
+      father:details.father??father,__syncState:birth.__syncState??null,__mutationId:birth.__mutationId??null},true);
+  }
+  const pregnancyId=birth.pregnancyId??input.pregnancyId;
+  if(typeof pregnancyId==='string')await projectEntry({...entry,path:`/reproduction/pregnancies/${pregnancyId}`,temporaryId:null},
+    {id:pregnancyId,status:'BORN',__syncState:birth.__syncState??null},false);
 }

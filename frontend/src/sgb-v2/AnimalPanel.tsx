@@ -1,3 +1,4 @@
+import {ImagePicker} from './ImagePicker';
 import {DateInput} from '../components/ui';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import {
@@ -576,10 +577,8 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
           <ParentField accessToken={accessToken} role="father"/></div></section>
       {canManageMedia&&<section className="animal-form-section"><header><span>5</span><div><h4>Fotografías</h4>
         <p>Puedes agregarlas ahora o posteriormente desde la ficha.</p></div></header><div className="animal-form-grid">
-        <label><span>Foto de perfil</span><input name="profilePhoto" type="file"
-          accept="image/jpeg,image/png,image/webp,image/heic"/></label>
-        <label><span>Foto de portada</span><input name="coverPhoto" type="file"
-          accept="image/jpeg,image/png,image/webp,image/heic"/></label></div></section>}
+        <ImagePicker name="profilePhoto" label="Foto de perfil"/>
+        <ImagePicker name="coverPhoto" label="Foto de portada"/></div></section>}
       <div className="animal-form-actions"><button className="primary-button compact" type="submit"
         disabled={busy||brands===null}>{busy?'Guardando…':'Registrar animal'}</button></div>
     </form>}
@@ -752,7 +751,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
             .finally(()=>setBusy(false));
         }}><Select name="role" aria-label="Uso de la foto"><option value="GENERAL">Galería</option>
           <option value="PROFILE">Perfil</option><option value="COVER">Portada</option></Select>
-          <input name="file" type="file" accept="image/jpeg,image/png,image/webp,image/heic" required/>
+          <ImagePicker name="file" label="Nueva foto del animal" required disabled={busy}/>
           <button className="secondary-button compact" disabled={busy}>Agregar foto</button></form>}
       </div>}
       {canUpdate&&<details id="animal-edit-panel" className="animal-edit-section"><summary>Editar ficha del animal</summary>

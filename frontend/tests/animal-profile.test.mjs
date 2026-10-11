@@ -35,10 +35,10 @@ export const getWeighings=async(_token,id)=>id==='animal-a'?Array.from({length:5
 export const getHealthMedicines=async()=>[];export const getHealthConditions=async()=>[];
 export const getHealthCampaigns=async()=>[];export const getCommerce=async()=>[];
 export const getProduction=async()=>({milk:[],cows:[],lactations:[]});
-export const getReproductionSettings=async()=>({minimumCowMonths:12});
-export const getReproduction=async()=>({services:[],pregnancies:[],losses:[],
+export const getReproductionSettings=async()=>({minimumCowMonths:12,enabledSections:window.profileSections});
+export const getReproduction=async()=>({services:[],pregnancies:window.profilePregnancy?[{id:'pregnancy-a',cowId:'animal-a',status:'CONFIRMED'}]:[],losses:[],
   heats:[{id:'heat-a',cowId:'animal-a',startsOn:'2026-08-01',isFalse:false}],
-  births:[{id:'birth-a',motherId:'animal-a',occurredOn:'2026-06-01',calves:[{id:'calf-a',name:'Luna'}]}]});
+  births:[{id:'birth-a',pregnancyId:window.profileBirthPregnancy?'pregnancy-a':'pregnancy-old',motherId:'animal-a',occurredOn:'2026-06-01',calves:[{id:'calf-a',name:'Luna'}]}]});
 `;
 const mockSession=`
 export function useV2Session(){return {session:{accessToken:window.token??'test',overview:{activeContext:{propertyId:'property-a',roleId:'role-a'},
@@ -53,7 +53,7 @@ const check=(condition,message)=>{if(!condition)throw new Error(message);};
 const tick=()=>new Promise(resolve=>setTimeout(resolve,20));
 async function until(condition){for(let n=0;n<120;n++){if(condition())return;await tick();}throw new Error('Timeout: '+condition);}
 const root=createRoot(document.getElementById('root'));
-const render=id=>{if(location.pathname!=='/animales/'+id)history.replaceState(null,'','/animales/'+id);root.render(h(BrowserRouter,{key:id+Boolean(window.readOnly)},
+const render=id=>{if(location.pathname!=='/animales/'+id)history.replaceState(null,'','/animales/'+id);root.render(h(BrowserRouter,{key:id+Boolean(window.readOnly)+(window.profileRevision??0)},
   h(Routes,null,h(Route,{path:'/animales/:id',element:h(V2AnimalDetail)}))));};
 const info=()=>document.querySelector('.animal-data-only-card');
 const cards=()=>[...document.querySelectorAll('.animal-history-preview')];
@@ -110,7 +110,21 @@ try{
   window.readOnly=true;render('animal-a');await until(()=>historyCard('Pesajes'));
   check(!document.querySelector('[aria-label="Editar animal"]')&&!document.querySelector('[aria-label="Registrar fallecimiento"]'),
     'Profile permissions preserved');
-  window.readOnly=false;render('animal-a');await until(()=>historyCard('Pesajes'));
+  window.readOnly=false;render('animal-a');await until(()=>historyCard('Pesajes')&&document.querySelector('[aria-label="Reproducción"]'));
+  document.querySelector('[aria-label="Reproducción"]').click();await until(()=>document.querySelector('.v2-animal-sheet'));
+  check(!document.querySelector('.v2-animal-sheet').textContent.includes('Registrar parto'),'No birth action without a confirmed pregnancy');
+  document.querySelector('.v2-animal-sheet [aria-label="Cerrar"]').click();
+  window.profilePregnancy=true;window.profileRevision=1;render('animal-a');await tick();await tick();await until(()=>historyCard('Preñeces')&&document.querySelector('[aria-label="Reproducción"]'));
+  document.querySelector('[aria-label="Reproducción"]').click();await until(()=>document.querySelector('.v2-animal-sheet'));
+  check(document.querySelector('.v2-animal-sheet').textContent.includes('Registrar parto'),'A confirmed pregnancy enables birth');
+  document.querySelector('.v2-animal-sheet [aria-label="Cerrar"]').click();
+  window.profileBirthPregnancy=true;window.profileRevision=2;render('animal-a');await tick();await tick();await until(()=>historyCard('Preñeces')&&document.querySelector('[aria-label="Reproducción"]'));
+  document.querySelector('[aria-label="Reproducción"]').click();await until(()=>document.querySelector('.v2-animal-sheet'));
+  check(!document.querySelector('.v2-animal-sheet').textContent.includes('Registrar parto'),'A saved birth closes the action even if the pregnancy cache is stale');
+  document.querySelector('.v2-animal-sheet [aria-label="Cerrar"]').click();
+  window.profileSections=[];window.profileRevision=3;render('animal-a');await tick();await tick();await until(()=>historyCard('Pesajes'));
+  check(!document.querySelector('[aria-label="Reproducción"]'),'No actions when all reproduction sections are disabled');
+  window.profileSections=undefined;window.profileRevision=4;render('animal-a');await tick();await tick();await until(()=>historyCard('Pesajes'));
   document.getElementById('result').textContent='PASS: reference profile icons/style, absent fields, split histories, expansion, child links and role permissions';
 }catch(error){document.getElementById('result').textContent='FAIL: '+error.stack;}
 `;

@@ -880,6 +880,7 @@ export interface ReproductionService {
 }
 export interface ReproductionCandidate { id: string; name: string; sex: Animal['sex'];birthDate?:string|null }
 export interface ReproductionSettings {
+  enabledSections?:string[];
   accountId?:string;canManageRules?:boolean;
   daysAfterBirthHeat: number; daysAfterBirthPregnancy: number;
   daysAfterLossHeat: number; daysAfterLossPregnancy: number;
@@ -1401,3 +1402,6 @@ export async function uploadMedia(accessToken:string,input:{file:File;animalIds?
 }
 
 export function updatePropertyInformation(token:string,input:PropertyInformation){return request<PropertyInformation>('/property-settings/information',{method:'PATCH',headers:bearer(token),body:JSON.stringify(input)});}
+
+export function finishHeat(token:string,id:string,endsOn:string){return request<{id:string;endsOn:string}>(
+  `/reproduction/heats/${encodeURIComponent(id)}/finish`,{method:'POST',headers:bearer(token),body:JSON.stringify({endsOn})});}

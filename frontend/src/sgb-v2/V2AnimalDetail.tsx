@@ -1,9 +1,12 @@
+import {reachedReproductionAge} from './reproductionAge';
+import {reproductionSectionEnabled} from './reproductionSections';
+import {ImagePicker} from './ImagePicker';
 import {AnimalIcon} from '../components/AnimalIcon';
 import {useEffect,useRef,useState,type ComponentType,type ReactNode} from 'react';
 import {Activity,ArrowRightLeft,Baby,CalendarDays,Camera,Edit3,HeartPulse,MapPin,Milk,Users,Weight,
   HeartCrack,HeartOff,LogOut,Search,ShoppingCart,ShoppingBag,Syringe,Tag,UserRound,X,ChevronRight,type LucideIcon} from 'lucide-react';
 import {useLocation,useNavigate,useParams} from 'react-router-dom';
-import {Badge,Card,IconButton,LoadingState,ErrorState} from '../components/ui';
+import {Badge,Button,Card,IconButton,LoadingState,ErrorState,Modal} from '../components/ui';
 import {ImageLightbox,type LightboxMedia} from '../components/ImageLightbox';
 import {formatAge,formatDate} from '../utils';
 import {getAnimal,getMedia,uploadMedia,getMovements,getMovementOptions,getWeighings,getHealthConditions,getHealthMedicines,
@@ -56,7 +59,7 @@ export function V2AnimalDetail(){
   const [healthConditions,setHealthConditions]=useState<HealthCondition[]>([]);
   const [reproduction,setReproduction]=useState<ReproductionRecords|null>(null);
   const [reproductionSettings,setReproductionSettings]=useState<ReproductionSettings|null>(null);
-  const fileRef=useRef<HTMLInputElement>(null);
+  const [photoOpen,setPhotoOpen]=useState(false);const [photoFile,setPhotoFile]=useState<File|null>(null);
   const token=session!.accessToken;
   const property=session!.overview.properties.find(value=>value.id===session!.overview.activeContext?.propertyId);
   const modules=property?.enabledModules??[];
@@ -158,7 +161,7 @@ export function V2AnimalDetail(){
   async function photo(file:File){
     if(!id)return;setBusy(true);setError('');
     try{await uploadMedia(token,{file,animalIds:[id],relationCode:purpose});
-      setMedia(await getMedia(token,'ANIMAL',id));}
+      setMedia(await getMedia(token,'ANIMAL',id));setPhotoOpen(false);setPhotoFile(null);}
     catch(reason){setError(reason instanceof Error?reason.message:'No se pudo guardar la foto.');}
     finally{setBusy(false);}
   }
@@ -178,8 +181,8 @@ export function V2AnimalDetail(){
   const choose=(title:string,actions:AnimalAction[])=>{
     if(actions.length===1)actions[0]!.run();else if(actions.length>1)setMenu({title,actions});};
   const photoAction=()=>choose('Fotos del animal',[
-    {label:'Cambiar foto de perfil',run:()=>{setMenu(null);setPurpose('PROFILE');fileRef.current?.click();}},
-    {label:'Cambiar portada',run:()=>{setMenu(null);setPurpose('COVER');fileRef.current?.click();}},
+    {label:'Cambiar foto de perfil',run:()=>{setMenu(null);setPurpose('PROFILE');setPhotoFile(null);setPhotoOpen(true);}},
+    {label:'Cambiar portada',run:()=>{setMenu(null);setPurpose('COVER');setPhotoFile(null);setPhotoOpen(true);}},
   ]);
   const groupId=animal?.group?.id;
   const ownGroup=movementOptions?.groups.find(item=>item.id===groupId);
@@ -220,19 +223,17 @@ export function V2AnimalDetail(){
   ];
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil',
     year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-  const birth=animal?.birthDate;
-  const minimumDate=birth&&reproductionSettings?new Date(`${birth}T12:00:00Z`):null;
-  if(minimumDate)minimumDate.setUTCMonth(minimumDate.getUTCMonth()+reproductionSettings!.minimumCowMonths);
-  const reproductiveAge=Boolean(reproductionSettings&&(!minimumDate||
-    minimumDate.toISOString().slice(0,10)<=today));
-  const activePregnancy=reproduction?.pregnancies.find(item=>item.cowId===id&&item.status==='CONFIRMED');
+  const reproductiveAge=Boolean(reproductionSettings&&reachedReproductionAge(animal?.birthDate,today,reproductionSettings.minimumCowMonths));
+  const activePregnancy=reproduction?.pregnancies.find(item=>item.cowId===id&&item.status==='CONFIRMED'
+    &&!reproduction.births.some(birth=>birth.pregnancyId===item.id)&&!reproduction.losses.some(loss=>loss.pregnancyId===item.id));
   const reproductiveActions:AnimalAction[]=reproductiveAge?(activePregnancy?[
-    {label:'Registrar parto',run:()=>openAction('reproduction','PARTO')},
-    {label:'Registrar pérdida de preñez',run:()=>openAction('reproduction','PERDIDA')},
+    ...(reproductionSectionEnabled(reproductionSettings,'BIRTH')?[{label:'Registrar parto',run:()=>openAction('reproduction','PARTO')}]:[]),
+    ...(reproductionSectionEnabled(reproductionSettings,'LOSS')?[{label:'Registrar pérdida de preñez',run:()=>openAction('reproduction','PERDIDA')}]:[]),
   ]:[
-    {label:'Registrar celo',run:()=>openAction('reproduction','CELO')},
-    {label:'Registrar inseminación o transferencia',run:()=>openAction('reproduction','SERVICIO')},
-    {label:'Confirmar preñez',run:()=>openAction('reproduction','PRENEZ')},
+    ...(reproductionSectionEnabled(reproductionSettings,'HEAT')?[{label:'Registrar celo',run:()=>openAction('reproduction','CELO')}]:[]),
+    ...(reproductionSectionEnabled(reproductionSettings,'INSEMINATION')?[{label:'Registrar inseminación',run:()=>openAction('reproduction','INSEMINACION')}]:[]),
+    ...(reproductionSectionEnabled(reproductionSettings,'EMBRYO_TRANSFER')?[{label:'Registrar transferencia de embriones',run:()=>openAction('reproduction','TRANSFERENCIA')}]:[]),
+    ...(reproductionSectionEnabled(reproductionSettings,'PREGNANCY')?[{label:'Confirmar preñez',run:()=>openAction('reproduction','PRENEZ')}]:[]),
   ]):[];
   const productionHistory=sections.find(section=>section.title==='Producción');
   const productionActions:AnimalAction[]=[
@@ -295,9 +296,11 @@ export function V2AnimalDetail(){
         <IconButton label="Registrar salida" onClick={()=>openAction('status','RECORD_EXIT')}><LogOut size={21}/></IconButton>
       </>}
     </div>
-    <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic" hidden
-      disabled={busy} onChange={event=>{const file=event.currentTarget.files?.[0];event.currentTarget.value='';
-        if(file)void photo(file);}}/>
+    {photoOpen&&<Modal title={purpose==='PROFILE'?'Foto de perfil':'Foto de portada'} onClose={()=>{if(!busy)setPhotoOpen(false);}}>
+      <ImagePicker label={purpose==='PROFILE'?'Foto de perfil':'Foto de portada'} file={photoFile} onChange={setPhotoFile} disabled={busy}/>
+      {error&&<p role="alert" className="form-error">{error}</p>}
+      <Button disabled={!photoFile||busy} loading={busy} onClick={()=>{if(photoFile)void photo(photoFile);}}>Guardar foto</Button>
+    </Modal>}
     {error&&<div className="form-alert form-alert-error" role="alert">{error}</div>}
     <Card className="animal-detail-summary-card animal-data-only-card">
       <div className="animal-summary-heading"><div><h2>Información</h2>

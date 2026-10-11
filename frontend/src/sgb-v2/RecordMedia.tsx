@@ -1,3 +1,4 @@
+import {ImagePicker} from './ImagePicker';
 import {useEffect,useState} from 'react';
 import {ApiRequestError,deleteMediaObject,getMedia,uploadMedia,type MediaItem} from './api';
 
@@ -28,8 +29,7 @@ export function RecordMedia({accessToken,entityType,entityId,canManage,title='Fo
           void execute(()=>deleteMediaObject(accessToken,photo.storage_object_id));}}>
         Eliminar</button>}</div>)}</div>}
     {canManage&&photos.length<limit&&<div className="record-photo-add">
-      <input type="file" accept="image/jpeg,image/png,image/webp,image/heic" aria-label={title}
-        onChange={event=>setFile(event.target.files?.[0]??null)}/>
+      <ImagePicker label="Nueva foto" file={file} onChange={setFile} disabled={busy}/>
       <button type="button" className="secondary-button compact" disabled={!file||busy}
         onClick={()=>{if(file)void execute(()=>uploadMedia(accessToken,{file,entityType,entityId}));}}>
         {busy?'Procesando…':'Agregar foto'}</button></div>}
