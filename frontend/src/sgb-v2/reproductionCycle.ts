@@ -6,5 +6,5 @@ export function cycleTrueHeats(records:ReproductionRecords,cowId:string,on:strin
   const previous=boundaries.filter(date=>date<=on).at(-1)??'';
   const next=boundaries.find(date=>date>on)??'9999-12-31';
   return records.heats.filter(heat=>heat.cowId===cowId&&!heat.cancelled&&!heat.isFalse
-    &&heat.startsOn>previous&&heat.startsOn<next).sort((a,b)=>b.startsOn.localeCompare(a.startsOn));
+    &&heat.startsOn>=previous&&heat.startsOn<next).sort((a,b)=>b.startsOn.localeCompare(a.startsOn));
 }

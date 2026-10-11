@@ -618,4 +618,6 @@ assert.deepEqual((await get('/reproduction')).heats.filter(heat=>!heat.isFalse).
 await runtime.putCache(heatScope,'/reproduction',{heats:[{id:'old-cycle',cowId:'cow-a',startsOn:'2026-08-01',isFalse:false}],services:[],pregnancies:[],births:[{id:'birth-a',motherId:'cow-a',occurredOn:'2026-09-01'}],losses:[]});
 await change('/reproduction/heats',{cowId:'cow-a',startsOn:'2026-10-01',isFalse:false},'POST');
 assert.equal((await get('/reproduction')).heats.filter(heat=>!heat.isFalse).length,2,'A new cycle preserves historical true heats');
+await runtime.putCache(heatScope,'/reproduction',{heats:[{id:'same-day-heat',cowId:'cow-b',startsOn:'2026-09-01',isFalse:false}],services:[],pregnancies:[],births:[{id:'birth-b',motherId:'cow-b',occurredOn:'2026-09-01'}],losses:[]});
+await assert.rejects(()=>change('/reproduction/heats',{cowId:'cow-b',startsOn:'2026-09-01',isFalse:false},'POST'),/Elige cuál conservar/);
 console.log('PASS: one true heat per cycle offline, explicit choice, restart, discard, sync and birth cycle reset.');

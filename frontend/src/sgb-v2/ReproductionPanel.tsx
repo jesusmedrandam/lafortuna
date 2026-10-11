@@ -344,7 +344,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         <label><span>Servicio asistido relacionado</span><Select name="serviceId" value={linkedServiceId} onChange={event=>setLinkedServiceId(event.target.value)}>
           <option value="">Sin servicio asistido</option>
           {records?.services.filter((entry) => entry.cowId === cowId && !entry.cancelled && !entry.hasPregnancy
-            &&entry.occurredOn>cycleStart&&entry.occurredOn<=eventOn&&(!entry.heatId||availableHeats.some(heat=>heat.id===entry.heatId))
+            &&entry.occurredOn>=cycleStart&&entry.occurredOn<=eventOn&&(!entry.heatId||availableHeats.some(heat=>heat.id===entry.heatId))
             &&reproductionSectionEnabled(settings,entry.kind))
             .map((entry) => <option key={entry.id} value={entry.id}>
               {formatDate(entry.occurredOn)} · {entry.kind === 'INSEMINATION' ? 'Inseminación' : 'Transferencia'}</option>)}
