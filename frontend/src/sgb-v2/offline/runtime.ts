@@ -156,7 +156,15 @@ async function sweepDrafts(){
  emit('sgb-v2-cache-updated');
 }
 export function expireLocalDrafts():Promise<void>{const operation=mutationChain.then(async()=>{await sweepDrafts();
- emit('sgb-v2-cache-updated');await publishState();});mutationChain=operation.catch(()=>{});return operation;}
+ if(!activeScope)return;let changed=false;
+ for(const entry of await listCache(activeScope)){
+  if(!draftRoots.includes(entry.path.split('?')[0]!)||!Array.isArray(entry.payload))continue;
+  const retained=entry.payload.filter(item=>!expiredDraft(item));
+  if(retained.length===entry.payload.length)continue;
+  await putCache(activeScope,entry.path,retained,entry.etag);changed=true;
+ }
+ if(changed){cacheGeneration++;emit('sgb-v2-cache-updated');}
+ await publishState();});mutationChain=operation.catch(()=>{});return operation;}
 
 function authenticated(init:RequestInit){return new Headers(init.headers).has('authorization');}
 function method(init:RequestInit){return String(init.method??'GET').toUpperCase();}
@@ -847,11 +855,12 @@ export function syncOfflineMutations():Promise<void>{
 }
 async function syncQueue(){
   if(syncing||!activeScope||!activeToken||!transport||!isRuntimeOnline())return;
-  await sweepDrafts();
-  syncing=true;await publishState();
   const original={...activeScope};
+  await sweepDrafts();
+  const entries=await listOutbox(original.userId);
+  if(!activeScope||!sameScope(activeScope,original)||!isRuntimeOnline()||!entries.length||entries[0]!.state==='FAILED')return;
+  syncing=true;await publishState();
   try{
-    const entries=await listOutbox(activeScope.userId);
     syncProgress={completed:0,total:entries.length,current:'Preparando cambios',loaded:0,bytes:0};await publishState();
     let serverScope={...original};
     for(const entry of entries){

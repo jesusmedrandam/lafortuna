@@ -1,6 +1,6 @@
 import {DateInput} from '../components/ui';
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import {ArrowUpDown,Baby,ChevronRight,Plus,Settings2,Heart,Stethoscope,CalendarClock,TriangleAlert,Syringe} from 'lucide-react';
+import {ArrowUpDown,Baby,ChevronRight,Plus,Settings2,Heart,Stethoscope,CalendarClock,TriangleAlert,Syringe,Camera,Trash2} from 'lucide-react';
 import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
   IconButton,LoadingState,Modal,Select} from '../components/ui';
 import {reachedReproductionAge} from './reproductionAge';
@@ -11,7 +11,7 @@ import {RecordMedia} from './RecordMedia';
 import {
   ApiRequestError, cancelHeat, cancelPregnancy, cancelService, createHeat, createPregnancy, createService,
   getReproduction, getReproductionCandidates, getReproductionSettings,
-  recordBirth, recordLoss, updateReproductionSettings,uploadMedia,listGroups,listCatalogItems,listOwners,
+  recordBirth, recordLoss,uploadMedia,listGroups,listCatalogItems,listOwners,
   type LivestockGroup,type CatalogItem,type LivestockOwner,type BirthCalfInput,type ReproductionBirth,
   type ReproductionCandidate, type ReproductionRecords, type ReproductionSettings,
 } from './api';
@@ -45,13 +45,13 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   const [candidates, setCandidates] = useState<ReproductionCandidate[]>([]);
   const [settings, setSettings] = useState<ReproductionSettings | null>(null);
   const [cowId, setCowId] = useState('');
-  const [calfCount, setCalfCount] = useState(1);
+  const nextCalfKey=useRef(1);
+  const [calfKeys,setCalfKeys]=useState([0]);
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeForm, setActiveForm] = useState<'HEAT'|'PREGNANCY'|'SERVICE'|'BIRTH'|'LOSS'|null>(null);
   const closeForm=()=>{if(saving.current)return;if(savedBirth.current){setError('El parto ya está registrado. Pulsa Completar fotografías para terminar.');return;}setActiveForm(null);if(initialAction)onCompleted?.();};
-  const [settingsOpen,setSettingsOpen]=useState(false);
   const [selectedCategory,setSelectedCategory]=useState<ReproductionKind|null>(null);
   const [upcoming,setUpcoming]=useState(false);
   const [selectedRecord,setSelectedRecord]=useState<string|null>(null);
@@ -126,7 +126,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   },[activeForm,accessToken,hasPermission]);
   async function run(operation: () => Promise<unknown>, form?: HTMLFormElement) {
     if(saving.current)return;saving.current=true;setBusy(true); setError(null);
-    try { await operation(); form?.reset();setActiveForm(null);setSettingsOpen(false);
+    try { await operation(); form?.reset();setActiveForm(null);
       setSelectedRecord(null);setRevision((value) => value + 1);if(initialAction)onCompleted?.(); }
     catch (failure) { setError(errorMessage(failure)); }
     finally { saving.current=false;setBusy(false); }
@@ -193,7 +193,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
     event.preventDefault();const form=event.currentTarget;const data=birthData.current??new FormData(form);
     const photos:Array<{file:File;animalIndex?:number;relationCode?:'PROFILE'|'COVER'}>=[];
     for(const file of data.getAll('birthPhoto'))if(file instanceof File&&file.size)photos.push({file});
-    const calves:BirthCalfInput[]=Array.from({length:calfCount},(_,index)=>{
+    const calves:BirthCalfInput[]=calfKeys.map((_,index)=>{
       for(const [name,relationCode] of [['profilePhoto','PROFILE'],['coverPhoto','COVER']] as const){
         const file=data.get(`${name}:${index}`);if(file instanceof File&&file.size)photos.push({file,animalIndex:index,relationCode});
       }
@@ -226,9 +226,9 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         // Clear only confirmed or durably queued photos; retry keeps the saved birth.
         const name=photo.animalIndex===undefined?'birthPhoto':`${photo.relationCode==='PROFILE'?'profilePhoto':'coverPhoto'}:${photo.animalIndex}`;
         const field=form.elements.namedItem(name) as HTMLInputElement|null;
-        if(field&&field.files?.length===1)field.value='';data.delete(name);
+        if(field&&field.files?.length===1){field.value='';field.dispatchEvent(new Event('change',{bubbles:true}));}data.delete(name);
       }
-      savedBirth.current=null;birthData.current=null;setBirthSaved(false);
+      savedBirth.current=null;birthData.current=null;setBirthSaved(false);setCalfKeys([nextCalfKey.current++]);
     },form);
   }
 
@@ -242,24 +242,6 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
     }), form);
   }
 
-  function saveSettings(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    const days = (key: string) => Number(data.get(key));
-    const checked = (key: string) => data.get(key) === 'on';
-    void run(() => updateReproductionSettings(accessToken, {
-      daysAfterBirthHeat: days('daysAfterBirthHeat'),
-      daysAfterBirthPregnancy: days('daysAfterBirthPregnancy'),
-      daysAfterLossHeat: days('daysAfterLossHeat'),
-      daysAfterLossPregnancy: days('daysAfterLossPregnancy'),
-      minimumCowMonths: days('minimumCowMonths'), minimumBullMonths: days('minimumBullMonths'),
-      allowSecondHeat: checked('allowSecondHeat'),
-      allowFalseHeatInPregnancy: checked('allowFalseHeatInPregnancy'),
-      useLastValidHeat: checked('useLastValidHeat'),
-      maxMilkingDays: days('maxMilkingDays'),
-    }));
-  }
-
   return <section className="module-no-header reproduction-panel">
     <div className="activity-type-strip"><button type="button" className={!selectedCategory?'selected':''}
       onClick={()=>{setUpcoming(false);setSelectedCategory(null);}}><span><Baby size={20}/></span><small>Todos</small></button>
@@ -269,40 +251,14 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
     <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar animal o evento…"
       count={visible.length} actions={<><IconButton label={newest?'Más recientes':'Más antiguos'}
         onClick={()=>setNewest(value=>!value)}><ArrowUpDown size={18}/></IconButton>
-        {canManage&&settings?.canManageRules&&<IconButton label="Reglas de reproducción" onClick={()=>setSettingsOpen(true)}>
+        {canManage&&settings?.canManageRules&&<IconButton label="Reglas de reproducción" onClick={()=>navigate('/configuracion?seccion=reglas&opcion=reproduccion')}>
           <Settings2 size={18}/></IconButton>}</>}/>
     {error && <div role="alert" className="form-error admin-error">{error}</div>}
     {!records && !error && <LoadingState/>}
     {!records && error && <ErrorState message={error} onRetry={()=>setRevision(value=>value+1)}/>}
-    {canManage && settings?.canManageRules && settingsOpen && <Modal title="Reglas de reproducción" wide
-      onClose={()=>setSettingsOpen(false)} footer={<Button variant="ghost"
-        onClick={()=>setSettingsOpen(false)}>Cerrar</Button>}>
-      <form className="group-new-form" onSubmit={saveSettings} key={revision}>
-        <p className="muted">Estas reglas se aplican a todas las propiedades del dueño de esta cuenta. El historial conserva sus datos.</p>
-        {([
-          ['daysAfterBirthHeat', 'Días tras parto para celo', 365],
-          ['daysAfterBirthPregnancy', 'Días tras parto para preñez', 365],
-          ['daysAfterLossHeat', 'Días tras pérdida para celo', 365],
-          ['daysAfterLossPregnancy', 'Días tras pérdida para preñez', 365],
-          ['minimumCowMonths', 'Edad mínima de la vaca (meses)', 120],
-          ['minimumBullMonths', 'Edad mínima del toro (meses)', 120],
-          ['maxMilkingDays', 'Máximo de días de ordeño tras parto', 730],
-        ] as const).map(([key, label, max]) => <label key={key}><span>{label}</span>
-          <input type="number" name={key} min={key==='maxMilkingDays'?1:0} max={max} required defaultValue={settings[key]} />
-        </label>)}
-        {([
-          ['allowSecondHeat', 'Permitir más de un celo en el ciclo'],
-          ['allowFalseHeatInPregnancy', 'Permitir celos falsos durante la preñez'],
-          ['useLastValidHeat', 'Usar el final del último celo válido para calcular el parto'],
-        ] as const).map(([key, label]) => <label key={key}><span>{label}</span>
-          <input type="checkbox" name={key} defaultChecked={settings[key]} />
-        </label>)}
-        <button className="primary-button compact" disabled={busy}>Guardar reglas</button>
-      </form>
-    </Modal>}
-    {canManage && activeForm && <Modal title="Registrar evento reproductivo" wide
+    {canManage && activeForm && <Modal title={activeForm==='BIRTH'?'Registrar parto':'Registrar evento reproductivo'} wide
       onClose={closeForm} footer={<Button variant="ghost" onClick={closeForm}>Cerrar</Button>}>
-      {!initialAction&&<div className="form-toolbar" aria-label="Tipo de evento">
+      {!initialAction&&activeForm!=='BIRTH'&&<div className="form-toolbar" aria-label="Tipo de evento">
       {([['HEAT','Celo'],['SERVICE','Servicio'],['PREGNANCY','Preñez'],
         ['BIRTH','Parto'],['LOSS','Pérdida']] as const).map(([id,label])=><button
           key={id} type="button" className={activeForm===id?'active':''}
@@ -410,7 +366,8 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
 
       <form className="group-new-form birth-registration-form" onSubmit={birth} hidden={activeForm!=='BIRTH'}>
         <fieldset disabled={busy||birthSaved}>
-        <h3>Registrar parto</h3>
+        <section className="birth-section"><h3>Preñez y parto</h3>
+        <div className="group-inline-form birth-fields">
         <label><span>Preñez confirmada *</span><Select name="pregnancyId" required
           defaultValue={confirmed.find(item=>item.cowId===initialAnimalId)?.id??''}>
           <option value="" disabled>Selecciona una preñez</option>
@@ -421,10 +378,17 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         <label><span>Fecha de parto *</span><DateInput type="date" name="occurredOn"
           required defaultValue={localDate()} /></label>
         <label><span>Tipo de parto</span><Select name="kind" defaultValue="NORMAL"><option value="NORMAL">Normal</option><option value="ASSISTED">Asistido</option><option value="CAESAREAN">Cesárea</option><option value="UNKNOWN">Sin determinar</option></Select></label>
-        {canUpload&&<label><span>Foto del parto</span><input type="file" name="birthPhoto" accept="image/jpeg,image/png,image/webp"/><small>Hasta 10 MB.</small></label>}
-        <label><span>Crías vivas</span><input type="number" min="0" max="8" value={calfCount}
-          onChange={(event) => setCalfCount(Math.min(8,Math.max(0,Math.floor(Number(event.target.value)||0))))} /></label>
-        {Array.from({ length: calfCount }, (_, index) => <div key={index} className="group-inline-form">
+        </div><label><span>Observaciones del parto</span><textarea name="notes" maxLength={5000}/></label>
+        {canUpload&&<BirthPhotoPicker name="birthPhoto" label="Foto del parto"/>}</section>
+        <section className="birth-section"><div className="section-heading-inline"><h3>Crías</h3>
+          <Button type="button" variant="secondary" disabled={calfKeys.length>=8} onClick={()=>{
+            const key=nextCalfKey.current++;setCalfKeys(previous=>[...previous,key]);}}><Plus size={18}/>Agregar cría</Button></div>
+        <p className="muted">Registra una ficha por cada cría viva. Puedes agregar hasta 8.</p>
+        <div className="nested-list">
+        {calfKeys.map((key,index)=><div key={key} className="nested-card birth-calf">
+          <div className="nested-card-header"><strong>Cría {index+1}</strong>
+            <IconButton type="button" label={`Quitar cría ${index+1}`} onClick={()=>setCalfKeys(previous=>previous.filter(value=>value!==key))}>
+              <Trash2 size={17}/></IconButton></div><div className="group-inline-form birth-fields">
           <label><span>Nombre de la cría {index + 1} *</span>
             <input name={`calfName:${index}`} required maxLength={160} /></label>
           <label><span>Sexo *</span><Select name={`calfSex:${index}`} defaultValue="FEMALE">
@@ -438,12 +402,13 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
           <label><span>Grupo</span><Select name={`calfGroup:${index}`} defaultValue=""><option value="">Sin grupo</option>{birthOptions.groups.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>
           <label><span>Propietario de la cría</span><Select name={`calfOwner:${index}`} defaultValue=""><option value="">Los mismos propietarios de la madre</option>{birthOptions.owners.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select><small>Si eliges uno, tendrá el 100 % de participación.</small></label>
           <label><span>Información de la cría</span><textarea name={`calfDescription:${index}`} maxLength={5000}/></label>
-          {canUpload&&<><label><span>Foto de perfil de la cría {index+1}</span><input type="file" name={`profilePhoto:${index}`} accept="image/jpeg,image/png,image/webp"/></label>
-          <label><span>Foto de portada de la cría {index+1}</span><input type="file" name={`coverPhoto:${index}`} accept="image/jpeg,image/png,image/webp"/></label></>}
+          </div>{canUpload&&<div className="birth-photo-fields">
+            <BirthPhotoPicker name={`profilePhoto:${index}`} label={`Foto de perfil de la cría ${index+1}`}/>
+            <BirthPhotoPicker name={`coverPhoto:${index}`} label={`Foto de portada de la cría ${index+1}`}/>
+          </div>}
         </div>)}
-        <label><span>Crías nacidas muertas</span><input type="number" name="stillbornCount"
-          defaultValue="0" min="0" max="8" required /></label>
-        <label><span>Observaciones</span><textarea name="notes" maxLength={5000} /></label>
+        </div><label><span>Crías nacidas muertas</span><input type="number" name="stillbornCount"
+          defaultValue="0" min="0" max="8" required /></label></section>
         </fieldset><button className="primary-button compact" disabled={busy || !confirmed.length}>
           {birthSaved?'Completar fotografías':'Registrar parto y crías'}</button>
       </form>
@@ -503,4 +468,20 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
     {canManage&&<FloatingActionDock><IconButton label="Nuevo evento reproductivo" onClick={()=>
       setActiveForm(selectedCategory??'HEAT')}><Plus size={22}/></IconButton></FloatingActionDock>}
   </section>;
+}
+
+
+function BirthPhotoPicker({name,label}:{name:string;label:string}){
+  const input=useRef<HTMLInputElement>(null);const [file,setFile]=useState<File|null>(null);
+  const [url,setUrl]=useState('');
+  useEffect(()=>{if(!file){setUrl('');return;}const next=URL.createObjectURL(file);setUrl(next);
+    return()=>URL.revokeObjectURL(next);},[file]);
+  return <div className="birth-profile-photo-picker"><strong>{label}</strong>
+    <input ref={input} type="file" name={name} aria-label={label} accept="image/jpeg,image/png,image/webp" hidden
+      onChange={event=>setFile(event.target.files?.[0]??null)}/>
+    <button type="button" className={`birth-profile-preview${url?' has-photo':''}`} aria-label={`Seleccionar ${label.toLowerCase()}`}
+      onClick={()=>input.current?.click()}>{url?<img src={url} alt={`Vista previa: ${label}`}/>:<span><Camera size={26}/><strong>Seleccionar foto</strong></span>}</button>
+    <small>JPG, PNG o WebP · Hasta 10 MB.</small>
+    {file&&<IconButton type="button" label={`Quitar ${label.toLowerCase()}`} onClick={()=>{if(input.current)input.current.value='';setFile(null);}}><Trash2 size={16}/></IconButton>}
+  </div>;
 }
