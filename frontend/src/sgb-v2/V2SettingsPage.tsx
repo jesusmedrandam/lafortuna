@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {ChevronRight,ClipboardList,CloudDownload,LayoutDashboard,LogOut,Moon,Palette,
+import {Baby,ChevronRight,ClipboardList,CloudDownload,LayoutDashboard,LogOut,Moon,Palette,
   SlidersHorizontal,Sun,UserCircle,Users,Warehouse} from 'lucide-react';
 import {Link,useNavigate,useSearchParams} from 'react-router-dom';
 import {Button,Card,PageHeader} from '../components/ui';
@@ -75,13 +75,16 @@ export function V2SettingsPage(){
       <ChevronRight size={18}/></button>)}</div>;
   const administration=[
     ...(canViewProperty?[{label:'Propiedades',description:'Tus propiedades, colaboraciones y políticas de operación.',icon:Warehouse,action:()=>open('propiedad')}]:[]),
-    ...(canManageRules?[{label:'Reglas de los animales',description:'Edad mínima para reproducción, clasificación y reglas de la cuenta.',icon:SlidersHorizontal,action:()=>open('reglas')}]:[]),
+    ...(canManageRules?[
+      {label:'Clasificación de animales',description:'Edades para vaconas y toretes; nombres de las clasificaciones.',icon:SlidersHorizontal,action:()=>setParams({seccion:'reglas',opcion:'clasificacion'})},
+      {label:'Reproducción',description:'Edades mínimas para padres, celos y preñeces; días de espera.',icon:Baby,action:()=>setParams({seccion:'reglas',opcion:'reproduccion'})},
+    ]:[]),
     {label:'Roles y permisos',description:'Elige tu propiedad y rol; administra los accesos permitidos.',icon:Users,action:()=>navigate('/roles-permisos')},
     ...(property&&hasPermission('CATALOG_VIEW')?[{label:'Catálogos',description:'Clasificaciones, etiquetas y opciones de los registros.',icon:SlidersHorizontal,action:()=>navigate('/catalogos')}]:[]),
     ...(property&&hasPermission('AUDIT_VIEW')?[{label:'Historial de cambios',description:'Consulta qué cambió, quién lo hizo y cuándo.',icon:ClipboardList,action:()=>navigate('/auditoria')}]:[]),
   ];
   return <div className="settings-page settings-content v2-settings-page">
-    {section&&<PageHeader title={section==='cuenta'?({perfil:'Editar perfil',clave:'Cambiar contraseña',correo:'Cambiar correo electrónico',sesiones:'Sesiones activas'}[params.get('opcion')??'']??sections[section]):sections[section]}/>}
+    {section&&<PageHeader title={section==='cuenta'?({perfil:'Editar perfil',clave:'Cambiar contraseña',correo:'Cambiar correo electrónico',sesiones:'Sesiones activas'}[params.get('opcion')??'']??sections[section]):section==='reglas'?({clasificacion:'Clasificación de animales',reproduccion:'Reproducción'}[params.get('opcion')??'']??sections[section]):sections[section]}/>}
     {!section&&<>
       <section className="settings-hub-section"><h2>Cuenta</h2>{cards([
         {label:'Mi cuenta',description:'Tu perfil, foto, contraseña y sesión actual.',icon:UserCircle,action:()=>open('cuenta')},

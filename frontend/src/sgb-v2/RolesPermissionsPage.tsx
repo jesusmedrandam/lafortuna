@@ -27,6 +27,7 @@ export function RolesPermissionsPage(){
     ?overview.activeContext!.roleId:property?.roles[0]?.id??'');
   const role=property?.roles.find(item=>item.id===roleId);
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+  const [showPermissions,setShowPermissions]=useState(false);
   async function apply(){if(!property||!role)return;setBusy(true);setError('');
     try{await selectContext(property.id,role.id);navigate('/');}
     catch(failure){setError(failure instanceof Error?failure.message:'No se pudo cambiar de rol.');}
@@ -36,15 +37,18 @@ export function RolesPermissionsPage(){
       <p className="muted">Selecciona la propiedad y el rol con el que deseas trabajar.</p></div></div>
       <div className="field-pair"><label><span>Propiedad</span><Select value={propertyId} disabled={busy}
         onChange={event=>{const next=properties.find(item=>item.id===event.target.value);
-          setPropertyId(event.target.value);setRoleId(next?.roles[0]?.id??'');}}>
+          setPropertyId(event.target.value);setRoleId(next?.roles[0]?.id??'');setShowPermissions(false);}}>
         {!property&&<option value="">Sin propiedades disponibles</option>}
         {properties.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
       </Select></label><label><span>Rol</span><Select value={roleId} disabled={busy||!property}
-        onChange={event=>setRoleId(event.target.value)}>
+        onChange={event=>{setRoleId(event.target.value);setShowPermissions(false);}}>
         {!role&&<option value="">Sin roles disponibles</option>}
         {property?.roles.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
       </Select></label></div>
-      {role&&<div className="role-permission-list"><h3>Permisos de {role.name}</h3>
+      {role&&<button type="button" className="secondary-button compact" aria-expanded={showPermissions}
+        aria-controls="role-permissions" onClick={()=>setShowPermissions(value=>!value)}>
+        {showPermissions?'Ocultar permisos del rol':'Ver permisos del rol'}</button>}
+      {role&&showPermissions&&<div id="role-permissions" className="role-permission-list"><h3>Permisos de {role.name}</h3>
         <ul>{role.permissions.map(permission=><li key={permission}>{permissionLabel(permission)}</li>)}</ul>
         {!role.permissions.length&&<p className="muted">Este rol no tiene permisos asignados.</p>}</div>}
       <button type="button" className="primary-button compact" disabled={busy||!role} onClick={()=>void apply()}>

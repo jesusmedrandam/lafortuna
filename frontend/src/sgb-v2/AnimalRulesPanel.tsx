@@ -71,15 +71,17 @@ export function AnimalRulesPanel({accessToken,propertyName}:{accessToken:string;
       <h3>{option==='reproduccion'?'Reglas de reproducción':'Reglas de clasificación'}</h3>
       <fieldset disabled={busy}>
         {reproduction&&<>
+          <p className="muted">Las edades mínimas se comprueban solo si el animal tiene fecha de nacimiento. Sin esa fecha, la regla de edad se ignora.</p>
           {days.map(([key,label,max])=><label key={key}><span>{label}</span>
             <input type="number" name={key} min={key==='maxMilkingDays'?1:0} max={max} required defaultValue={reproduction[key]}/></label>)}
           {checks.map(([key,label])=><label key={key} className="rule-checkbox">
             <input type="checkbox" name={key} defaultChecked={reproduction[key]}/><span>{label}</span></label>)}
         </>}
         {classification&&<>
-          <label><span>Hembras adultas desde (meses)</span><input name="femaleAdultMonths" type="number"
+          <p className="muted">Los animales comienzan como terneras o terneros. Al cumplir la edad indicada pasan a vaconas o toretes. Sin fecha de nacimiento se consideran vaconas o toretes. Una hembra con un parto registrado es vaca; un macho que figura como padre de una preñez es toro.</p>
+          <label><span>Edad mínima para ser vacona (meses)</span><input name="femaleAdultMonths" type="number"
             min="1" max="120" required defaultValue={classification.femaleAdultMonths}/></label>
-          <label><span>Machos adultos desde (meses)</span><input name="maleAdultMonths" type="number"
+          <label><span>Edad mínima para ser torete (meses)</span><input name="maleAdultMonths" type="number"
             min="1" max="120" required defaultValue={classification.maleAdultMonths}/></label>
           {classificationCodes.map(code=><label key={code}><span>{classification.names[code]}</span><input name={code}
             minLength={2} maxLength={80} required defaultValue={classification.names[code]}/></label>)}

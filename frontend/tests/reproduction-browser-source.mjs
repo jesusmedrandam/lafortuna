@@ -4,7 +4,7 @@ window.birthCalls=0;window.heatCalls=0;window.finishedHeats=0;window.photoCalls=
 const pregnancy={id:'pregnancy-a',cowId:'cow-a',cowName:'Lucera',status:'CONFIRMED',confirmedOn:'2026-01-01',expectedBirthOn:'2026-10-10'};
 const records={heats:[],services:[],births:[],losses:[],pregnancies:[pregnancy]};
 export const getReproduction=async()=>structuredClone(records);
-export const getReproductionCandidates=async()=>[{id:'cow-a',name:'Lucera',sex:'FEMALE',birthDate:'2018-01-01'},
+export const getReproductionCandidates=async()=>[{id:'cow-a',name:'Lucera',sex:'FEMALE',birthDate:null},
  {id:'young-a',name:'Ternera pequeña',sex:'FEMALE',birthDate:'2026-01-01'}];
 export const getReproductionSettings=async()=>({enabledSections:window.enabledSections,canManageRules:!window.restrictedRules,minimumCowMonths:18,minimumBullMonths:24,
  daysAfterBirthHeat:30,daysAfterBirthPregnancy:45,daysAfterLossHeat:21,daysAfterLossPregnancy:30,

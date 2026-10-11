@@ -48,12 +48,20 @@ const check=(value,message)=>{if(!value)throw new Error(message);};const tick=()
 async function until(condition){for(let n=0;n<150;n++){if(condition())return;await tick();}throw new Error('Timeout: '+condition.toString());}
 try{
   await until(()=>window.sessionHarness?.ready&&document.querySelector('.roles-permissions-page'));
+  check(!document.querySelector('.role-permission-list'),'Permissions are initially collapsed');
+  const permissionsButton=()=>document.querySelector('[aria-controls="role-permissions"]');
+  check(permissionsButton().getAttribute('aria-expanded')==='false','Permissions button announces collapsed state');
+  permissionsButton().click();await until(()=>document.querySelector('.role-permission-list'));
+  check(document.querySelector('.role-permission-list').textContent.includes('Editar animales'),'Selected role permissions remain available');
+  permissionsButton().click();await until(()=>!document.querySelector('.role-permission-list'));
+  permissionsButton().click();await until(()=>document.querySelector('.role-permission-list'));
   check(window.sessionHarness.session.overview.supportMode===false&&window.supportCalls.length===0,'Login never implicitly starts support');
   await window.sessionHarness.saveProfile({displayName:'Nombre nuevo',profilePhoto:'data:image/webp;base64,dGVzdA=='});await tick();
   check(window.sessionHarness.session.user.displayName==='Nombre nuevo'&&window.sessionHarness.session.overview.user.displayName==='Nombre nuevo','Profile updates both user representations');
   check((await getSessionSnapshot()).payload.overview.user.profilePhoto==='data:image/webp;base64,dGVzdA==','Saved profile photo persists in offline session snapshot');
   document.querySelectorAll('.sgb-select-button')[1].click();await tick();
   [...document.querySelectorAll('[role="option"]')].find(node=>node.textContent==='Consulta').click();await tick();
+  check(!document.querySelector('.role-permission-list'),'Changing the role collapses its permissions');
   [...document.querySelectorAll('button')].find(node=>node.textContent==='Usar este rol').click();
   await until(()=>window.sessionHarness.session.overview.activeContext.roleId==='viewer-role');
   check(window.supportCalls.length===0&&!window.sessionHarness.hasPermission('ANIMAL_UPDATE'),'Normal role stays read-only for superadministrator');
