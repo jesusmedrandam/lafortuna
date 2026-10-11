@@ -22,8 +22,10 @@ const classificationPolicy={canManageRules:true,femaleAdultMonths:18,maleAdultMo
 export const getAnimalClassificationPolicy=async()=>classificationPolicy;
 export const updateAnimalClassificationPolicy=async(_token,input)=>{window.classificationInput=input;return {...input,canManageRules:true};};
 export const getPropertySettings=async()=>{window.settingsRequests++;return {account:{name:'Cuenta de prueba',usedProperties:1,maxProperties:2},canCreate:Boolean(window.settingsManage),canManageModules:Boolean(window.settingsManage),canViewModules:true,property:{name:'Finca de prueba',ownerName:'Ana',areaValue:12.5,areaUnitCode:'HECTARE',address:'Los Montes'},
-  modules:[{code:'TASKS',name:'Actividades',enabled:true,isCore:false,accountEnabled:true}]};};
-export const createOwnAccount=async()=>({propertyId:'property-own',roleId:'role-owner'});export const updatePropertyInformation=async()=>{};export const createAccountProperty=async(_token,input)=>{window.createdProperty=input;return {propertyId:'property-a',roleId:'role-a'};};export const updatePropertyModule=async()=>{};
+  modules:[{code:'TASKS',name:'Actividades',enabled:true,isCore:false,accountEnabled:true},
+    ...[['REPRODUCTION','Reproducción'],['REPRODUCTION_HEATS','Celos'],['REPRODUCTION_INSEMINATION','Inseminación artificial'],['REPRODUCTION_EMBRYO_TRANSFER','Transferencia de embriones']]
+      .map(([code,name])=>({code,name,enabled:window.disabledModule!==code,isCore:false,accountEnabled:true}))]};};
+export const createOwnAccount=async()=>({propertyId:'property-own',roleId:'role-owner'});export const updatePropertyInformation=async()=>{};export const createAccountProperty=async(_token,input)=>{window.createdProperty=input;return {propertyId:'property-a',roleId:'role-a'};};export const updatePropertyModule=async(_token,code,enabled)=>{window.disabledModule=enabled?undefined:code;};
 window.passwordCalls=[];
 export const changeUserPassword=async(token,currentPassword,newPassword)=>{window.passwordCalls.push({token,currentPassword,newPassword});return {changed:true};};
 window.emailCalls=[];
@@ -183,7 +185,12 @@ try{
   change(document.querySelector('input[name="areaValue"]'),'18.5');change(document.querySelector('input[name="address"]'),'Sector Los Montes');
   button('Crear propiedad').click();await until(()=>window.createdProperty);
   check(window.createdProperty.areaValue===18.5&&window.createdProperty.areaUnitCode==='HECTARE'&&window.createdProperty.address==='Sector Los Montes','Creation submits the complete property information');
-  await until(()=>document.querySelector('.property-information'));back();await until(()=>document.querySelector('.settings-hub-section'));window.settingsManage=false;
+  await until(()=>document.querySelector('.property-information'));button('Políticas de operación').click();await until(()=>document.querySelector('.property-module-row'));
+  const insemination=document.querySelector('[aria-label="Inseminación artificial en esta propiedad"]');
+  check(!insemination.disabled,'An administrator can independently configure reproduction sections');insemination.click();
+  await until(()=>window.disabledModule==='REPRODUCTION_INSEMINATION'&&!document.querySelector('[aria-label="Inseminación artificial en esta propiedad"]').checked);
+  check(document.querySelector('[aria-label="Celos en esta propiedad"]').checked&&document.querySelector('[aria-label="Transferencia de embriones en esta propiedad"]').checked,'Disabling insemination preserves other sections');
+  back();await until(()=>document.querySelector('.property-information'));back();await until(()=>document.querySelector('.settings-hub-section'));window.settingsManage=false;
   window.settingsRules=true;renderApp();await until(()=>[...document.querySelectorAll('.settings-hub-card')].some(node=>node.textContent.startsWith('Reglas de los animales')));
   [...document.querySelectorAll('.settings-hub-card')].find(node=>node.textContent.startsWith('Reglas de los animales')).click();
   await until(()=>document.querySelector('.animal-rules-options'));check(!document.querySelector('.animal-rules-form'),'Rules open as options rather than simultaneous forms');

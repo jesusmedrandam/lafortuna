@@ -62,10 +62,13 @@ export function PropertySettingsPanel({accessToken,onPropertyCreated,onSettingsC
     <PropertyInformationFields key={`${screen}-${selected}`} value={screen==='editar'?settings.property:undefined} ownerName={overview.user.displayName}/>
     <Button type="submit" loading={busy}>{screen==='crear'?'Crear propiedad':'Guardar información'}</Button></fieldset></form>}
   {settings&&screen==='politicas'&&settings.canViewModules&&<><h2>Políticas de operación</h2><p className="muted">{settings.property.name}</p>
-   <div className="property-module-grid">{settings.modules.map(module=><div className="property-module-row" key={module.code}>
+   <div className="property-module-grid">{settings.modules.filter(module=>!module.code.startsWith('REPRODUCTION_')).flatMap(module=>
+    module.code==='REPRODUCTION'?[module,...settings.modules.filter(child=>child.code.startsWith('REPRODUCTION_'))]:[module])
+    .map(module=><div className="property-module-row" key={module.code} style={module.code.startsWith('REPRODUCTION_')?{paddingLeft:'1.5rem'}:undefined}>
     <div><strong>{module.name}</strong><small>{module.isCore?'Siempre activo':!module.accountEnabled?'Deshabilitado para la cuenta':module.enabled?'Activo':'Inactivo'}</small></div>
     <label className="property-module-toggle"><input type="checkbox" checked={module.enabled}
-     disabled={busy||!settings.canManageModules||module.isCore||!module.accountEnabled}
+     disabled={busy||!settings.canManageModules||module.isCore||!module.accountEnabled||
+       module.code.startsWith('REPRODUCTION_')&&!settings.modules.some(parent=>parent.code==='REPRODUCTION'&&parent.enabled)}
      onChange={event=>void changeModule(module.code,event.target.checked)} aria-label={`${module.name} en esta propiedad`}/></label>
    </div>)}</div></>}
  </section>;

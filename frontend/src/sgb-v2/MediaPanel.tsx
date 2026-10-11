@@ -50,6 +50,7 @@ export function MediaPanel({accessToken,permissions}:{accessToken:string;permiss
   const [chosen,setChosen]=useState<Array<{id:string;name:string}>>([]);
   const [selectedTags,setSelectedTags]=useState<string[]>([]);
   const [file,setFile]=useState<File|null>(null);
+  const uploadInput=useRef<HTMLInputElement>(null);
   const [previewUrl,setPreviewUrl]=useState<string|null>(null);
   const [uploadOpen,setUploadOpen]=useState(false);
   const [busy,setBusy]=useState(false);
@@ -88,7 +89,8 @@ export function MediaPanel({accessToken,permissions}:{accessToken:string;permiss
     const grouped=new Map<string,MediaItem[]>();
     for(const item of items){const row=grouped.get(item.storage_object_id)??[];
       row.push(item);grouped.set(item.storage_object_id,row);}
-    const matching=[...grouped.entries()].map(([id,attachments])=>({id,attachments,main:attachments[0]!}))
+    const matching=[...grouped.entries()].map(([id,attachments])=>({id,attachments,
+      main:attachments.find(item=>item.entity_type!=='ANIMAL')??attachments[0]!}))
       .filter(({main,attachments})=>{
         const content=[main.description,...attachments.map(item=>item.entity_name),
           ...attachments.flatMap(item=>item.tags.map(tag=>tag.name))].join(' ').toLocaleLowerCase();
@@ -276,8 +278,10 @@ export function MediaPanel({accessToken,permissions}:{accessToken:string;permiss
             <div className="media-upload-preview">
               {previewUrl?(file?.type.startsWith('video/')?<video src={previewUrl} controls/>:<img src={previewUrl} alt="Vista previa del archivo"/>):
                 <div className="media-file-empty">▧<span>Selecciona una foto o video</span></div>}
-              <input type="file" required accept="image/jpeg,image/png,image/webp,image/heic,video/*"
+              <input ref={uploadInput} type="file" hidden accept="image/jpeg,image/png,image/webp,image/heic,video/*"
                 aria-label="Elegir foto o video" onChange={event=>setFile(event.target.files?.[0]??null)}/>
+              <button type="button" className="secondary-button compact" disabled={busy} onClick={()=>uploadInput.current?.click()}>
+                {file?'Cambiar foto o video':'Seleccionar foto o video'}</button>
               {file&&<small>{file.name}</small>}
             </div>
             <div className="media-upload-fields">

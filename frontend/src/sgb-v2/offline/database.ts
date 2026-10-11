@@ -161,6 +161,10 @@ export async function putOutbox(entry: OutboxEntry) {
   await write(OUTBOX,store=>{store.put(entry);});
 }
 
+export async function getOutbox(id:string):Promise<OutboxEntry|null>{
+  return await result((await store(OUTBOX)).get(id)) as OutboxEntry|undefined??null;
+}
+
 export async function removeOutbox(id: string) {
   await write(OUTBOX,store=>{store.delete(id);});
 }

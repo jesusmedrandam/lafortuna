@@ -1,15 +1,17 @@
 import {DateInput} from '../components/ui';
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import {ArrowUpDown,Baby,ChevronRight,Plus,Settings2,Heart,Stethoscope,CalendarClock,TriangleAlert,Syringe,Camera,Trash2} from 'lucide-react';
+import {ArrowUpDown,Baby,ChevronRight,Plus,Settings2,Heart,Stethoscope,CalendarClock,TriangleAlert,Syringe,Trash2} from 'lucide-react';
 import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
   IconButton,LoadingState,Modal,Select} from '../components/ui';
 import {reachedReproductionAge} from './reproductionAge';
 import {formatDate} from '../utils';
 import {useNavigate} from 'react-router-dom';
 import {useV2Session} from './V2Session';
+import {ImagePicker} from './ImagePicker';
+import {reproductionSectionEnabled} from './reproductionSections';
 import {RecordMedia} from './RecordMedia';
 import {
-  ApiRequestError, cancelHeat, cancelPregnancy, cancelService, createHeat, createPregnancy, createService,
+  ApiRequestError, finishHeat, cancelHeat, cancelPregnancy, cancelService, createHeat, createPregnancy, createService,
   getReproduction, getReproductionCandidates, getReproductionSettings,
   recordBirth, recordLoss,uploadMedia,listGroups,listCatalogItems,listOwners,
   type LivestockGroup,type CatalogItem,type LivestockOwner,type BirthCalfInput,type ReproductionBirth,
@@ -44,6 +46,8 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   const [records, setRecords] = useState<ReproductionRecords | null>(null);
   const [candidates, setCandidates] = useState<ReproductionCandidate[]>([]);
   const [settings, setSettings] = useState<ReproductionSettings | null>(null);
+  const [choosing,setChoosing]=useState(false);
+  const [serviceKind,setServiceKind]=useState<'INSEMINATION'|'EMBRYO_TRANSFER'>('INSEMINATION');
   const [cowId, setCowId] = useState('');
   const nextCalfKey=useRef(1);
   const [calfKeys,setCalfKeys]=useState([0]);
@@ -60,19 +64,22 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   const females = candidates.filter((animal) => animal.sex === 'FEMALE');
   const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
   useEffect(()=>{const action=initialAction??new URLSearchParams(window.location.search).get('accion');
-    const form=({CELO:'HEAT',SERVICIO:'SERVICE',PRENEZ:'PREGNANCY',PARTO:'BIRTH',
-      PERDIDA:'LOSS'} as const)[action as 'CELO'];
+    const form=({CELO:'HEAT',SERVICIO:'SERVICE',INSEMINACION:'SERVICE',TRANSFERENCIA:'SERVICE',PRENEZ:'PREGNANCY',PARTO:'BIRTH',
+      PERDIDA:'LOSS'} as const)[action as 'CELO'|'SERVICIO'|'INSEMINACION'|'TRANSFERENCIA'|'PRENEZ'|'PARTO'|'PERDIDA'];
     if(!form||
     !initialAnimalId||initialAnimalId===prefilledAnimalId||!canManage||
     !candidates.some(animal=>animal.id===initialAnimalId&&animal.sex==='FEMALE'))return;
+    if(!reproductionSectionEnabled(settings,form==='SERVICE'?(action==='TRANSFERENCIA'?'EMBRYO_TRANSFER':'INSEMINATION'):form))return;
+    if(form==='BIRTH'&&!confirmed.some(item=>item.cowId===initialAnimalId))return;
+    if(form==='SERVICE')setServiceKind(action==='TRANSFERENCIA'?'EMBRYO_TRANSFER':'INSEMINATION');
     setCowId(initialAnimalId);setActiveForm(form);setPrefilledAnimalId(initialAnimalId);
-  },[initialAnimalId,prefilledAnimalId,candidates,canManage,initialAction]);
+  },[initialAnimalId,prefilledAnimalId,candidates,canManage,initialAction,settings,records]);
   const males = candidates.filter((animal) => animal.sex === 'MALE');
   const confirmed = records?.pregnancies.filter((pregnancy) => pregnancy.status === 'CONFIRMED'&&!records?.births.some(birth=>birth.pregnancyId===pregnancy.id)) ?? [];
   const rows=useMemo<ReproductionRow[]>(()=>records?[
     ...records.heats.map(item=>({id:item.id,kind:'HEAT' as const,name:item.cowName,
       date:item.startsOn,summary:`${item.isFalse?'Celo aparente':'Celo'}${item.endsOn?` · Fin ${formatDate(item.endsOn)}`:''}`,
-      notes:item.notes,status:item.cancelled?'Cancelado':'Registrado',canCancel:!item.cancelled})),
+      notes:item.notes,status:item.cancelled?'Cancelado':item.endsOn?'Finalizado':'En curso',canCancel:!item.cancelled})),
     ...records.services.map(item=>({id:item.id,kind:'SERVICE' as const,name:item.cowName,
       date:item.occurredOn,summary:item.kind==='INSEMINATION'?'Inseminación artificial':'Transferencia de embriones',
       notes:item.notes,status:item.cancelled?'Cancelado':item.hasPregnancy?'Con preñez':'Registrado',
@@ -99,11 +106,15 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
     ...records.losses.filter(item=>item.cowId===initialAnimalId).map(item=>item.id),
   ]:[]),[records,initialAnimalId]);
   const visible=useMemo(()=>rows.filter(item=>(!initialAnimalId||relatedIds.has(item.id))&&
-    (!selectedCategory||selectedCategory===item.kind)&&(!upcoming||item.kind==='PREGNANCY'&&item.status==='Confirmada')&&
+    (!selectedCategory||selectedCategory===item.kind)&&(selectedCategory!=='SERVICE'||records?.services.find(service=>service.id===item.id)?.kind===serviceKind)&&(!upcoming||item.kind==='PREGNANCY'&&item.status==='Confirmada')&&
     `${item.name} ${item.summary} ${item.notes??''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
     .sort((a,b)=>(newest?-1:1)*a.date.localeCompare(b.date)),
-    [rows,selectedCategory,search,newest,initialAnimalId,relatedIds,upcoming]);
+    [rows,selectedCategory,serviceKind,records,search,newest,initialAnimalId,relatedIds,upcoming]);
   const viewing=rows.find(item=>`${item.kind}:${item.id}`===selectedRecord);
+  const canCreateEvent=canManage&&(['HEAT','INSEMINATION','EMBRYO_TRANSFER','PREGNANCY','BIRTH','LOSS'] as const)
+    .some(kind=>reproductionSectionEnabled(settings,kind));
+  const viewingEnabled=viewing&&reproductionSectionEnabled(settings,viewing.kind==='SERVICE'
+    ?records?.services.find(service=>service.id===viewing.id)?.kind??'INSEMINATION':viewing.kind);
 
   useEffect(() => {
     let active = true;
@@ -243,28 +254,24 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   }
 
   return <section className="module-no-header reproduction-panel">
-    <div className="activity-type-strip"><button type="button" className={!selectedCategory?'selected':''}
+    {!activeForm&&<><div className="activity-type-strip"><button type="button" className={!selectedCategory?'selected':''}
       onClick={()=>{setUpcoming(false);setSelectedCategory(null);}}><span><Baby size={20}/></span><small>Todos</small></button>
-      {(Object.keys(categories) as ReproductionKind[]).map(kind=><button type="button" key={kind}
+      {(Object.keys(categories) as ReproductionKind[]).filter(kind=>kind!=='SERVICE'&&reproductionSectionEnabled(settings,kind as 'HEAT')).map(kind=><button type="button" key={kind}
         className={selectedCategory===kind?'selected':''} onClick={()=>{setUpcoming(false);setSelectedCategory(kind);}}>
-        <span>{kind==='HEAT'?<Heart size={20}/>:kind==='SERVICE'?<Syringe size={20}/>:kind==='PREGNANCY'?<Stethoscope size={20}/>:kind==='BIRTH'?<Baby size={20}/>:<TriangleAlert size={20}/>}</span><small>{categories[kind]}</small></button>)}<button type="button" className={upcoming?'selected':''} onClick={()=>{setUpcoming(true);setSelectedCategory('PREGNANCY');}}><span><CalendarClock size={20}/></span><small>Próximos partos</small></button></div>
+        <span>{kind==='HEAT'?<Heart size={20}/>:kind==='SERVICE'?<Syringe size={20}/>:kind==='PREGNANCY'?<Stethoscope size={20}/>:kind==='BIRTH'?<Baby size={20}/>:<TriangleAlert size={20}/>}</span><small>{categories[kind]}</small></button>)}{(['INSEMINATION','EMBRYO_TRANSFER'] as const).filter(kind=>reproductionSectionEnabled(settings,kind)).map(kind=><button type="button" key={kind}
+        className={selectedCategory==='SERVICE'&&serviceKind===kind?'selected':''} onClick={()=>{setUpcoming(false);setSelectedCategory('SERVICE');setServiceKind(kind);}}>
+        <span><Syringe size={20}/></span><small>{kind==='INSEMINATION'?'Inseminación':'Embriones'}</small></button>)}{reproductionSectionEnabled(settings,'PREGNANCY')&&<button type="button" className={upcoming?'selected':''} onClick={()=>{setUpcoming(true);setSelectedCategory('PREGNANCY');}}><span><CalendarClock size={20}/></span><small>Próximos partos</small></button>}</div>
     <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar animal o evento…"
       count={visible.length} actions={<><IconButton label={newest?'Más recientes':'Más antiguos'}
         onClick={()=>setNewest(value=>!value)}><ArrowUpDown size={18}/></IconButton>
         {canManage&&settings?.canManageRules&&<IconButton label="Reglas de reproducción" onClick={()=>navigate('/configuracion?seccion=reglas&opcion=reproduccion')}>
-          <Settings2 size={18}/></IconButton>}</>}/>
-    {error && <div role="alert" className="form-error admin-error">{error}</div>}
+          <Settings2 size={18}/></IconButton>}</>}/></>}
+    {error && !activeForm && <div role="alert" className="form-error admin-error">{error}</div>}
     {!records && !error && <LoadingState/>}
     {!records && error && <ErrorState message={error} onRetry={()=>setRevision(value=>value+1)}/>}
-    {canManage && activeForm && <Modal title={activeForm==='BIRTH'?'Registrar parto':'Registrar evento reproductivo'} wide
+    {canManage && activeForm && <Modal title={activeForm==='BIRTH'?'Registrar parto':activeForm==='HEAT'?'Registrar celo':activeForm==='SERVICE'?(serviceKind==='INSEMINATION'?'Registrar inseminación':'Registrar transferencia de embriones'):activeForm==='PREGNANCY'?'Confirmar preñez':'Registrar pérdida'} wide
       onClose={closeForm} footer={<Button variant="ghost" onClick={closeForm}>Cerrar</Button>}>
-      {!initialAction&&activeForm!=='BIRTH'&&<div className="form-toolbar" aria-label="Tipo de evento">
-      {([['HEAT','Celo'],['SERVICE','Servicio'],['PREGNANCY','Preñez'],
-        ['BIRTH','Parto'],['LOSS','Pérdida']] as const).map(([id,label])=><button
-          key={id} type="button" className={activeForm===id?'active':''}
-          disabled={busy||birthSaved} aria-pressed={activeForm===id} onClick={()=>setActiveForm(id)}>
-          {label}</button>)}
-      </div>}
+      {error&&<p className="form-error" role="alert">{error}</p>}
       <div className="reproduction-forms">
       <form className="group-new-form" onSubmit={heat} hidden={activeForm!=='HEAT'}>
         <h3>Registrar celo</h3>
@@ -299,7 +306,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         </Select></label>
         <label><span>Servicio asistido relacionado</span><Select name="serviceId" defaultValue="" key={`service:${cowId}`}>
           <option value="">Sin servicio asistido</option>
-          {records?.services.filter((entry) => entry.cowId === cowId && !entry.cancelled && !entry.hasPregnancy)
+          {records?.services.filter((entry) => entry.cowId === cowId && !entry.cancelled && !entry.hasPregnancy&&reproductionSectionEnabled(settings,entry.kind))
             .map((entry) => <option key={entry.id} value={entry.id}>
               {formatDate(entry.occurredOn)} · {entry.kind === 'INSEMINATION' ? 'Inseminación' : 'Transferencia'}</option>)}
         </Select><small>Si eliges un servicio, se toman su celo y padre.</small></label>
@@ -310,8 +317,8 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         <label><span>Padre externo</span><input name="externalFather" maxLength={240} /></label>
         <label><span>Método de embarazo</span><Select name="conceptionMethod" defaultValue="NATURAL">
           <option value="NATURAL">Monta natural</option>
-          <option value="INSEMINATION">Inseminación</option>
-          <option value="EMBRYO_TRANSFER">Transferencia de embriones</option>
+          {reproductionSectionEnabled(settings,'INSEMINATION')&&<option value="INSEMINATION">Inseminación</option>}
+          {reproductionSectionEnabled(settings,'EMBRYO_TRANSFER')&&<option value="EMBRYO_TRANSFER">Transferencia de embriones</option>}
           <option value="UNKNOWN">Desconocido</option>
         </Select></label>
         <label><span>Método de confirmación</span><Select name="confirmationMethod" defaultValue="PALPATION">
@@ -335,10 +342,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
           <option value="" disabled>Selecciona la vaca</option>
           {females.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
         </Select>{initialAction&&<input type="hidden" name="cowId" value={initialAnimalId}/>}</label>
-        <label><span>Tipo *</span><Select name="kind" defaultValue="INSEMINATION">
-          <option value="INSEMINATION">Inseminación artificial</option>
-          <option value="EMBRYO_TRANSFER">Transferencia de embriones</option>
-        </Select></label>
+        <input type="hidden" name="kind" value={serviceKind}/>
         <label><span>Fecha *</span><DateInput type="date" name="occurredOn" required defaultValue={localDate()} /></label>
         <label><span>Celo relacionado</span><Select name="heatId" defaultValue="">
           <option value="">Sin celo registrado</option>
@@ -351,11 +355,12 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
           {males.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
         </Select></label>
         <label><span>Padre externo</span><input name="externalFather" maxLength={240} /></label>
-        <label><span>Donante registrada (solo transferencia)</span><Select name="donorId" defaultValue="">
+        {serviceKind==='EMBRYO_TRANSFER'&&<>        <label><span>Donante registrada (solo transferencia)</span><Select name="donorId" defaultValue="">
           <option value="">Sin donante registrada</option>
           {females.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
         </Select></label>
         <label><span>Donante externa (solo transferencia)</span><input name="externalDonor" maxLength={240} /></label>
+</>}
         <label><span>Código de material</span><input name="materialCode" maxLength={160} /></label>
         <label><span>Calidad</span><input name="quality" maxLength={120} /></label>
         <label><span>Técnico</span><input name="technician" maxLength={160} /></label>
@@ -379,7 +384,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
           required defaultValue={localDate()} /></label>
         <label><span>Tipo de parto</span><Select name="kind" defaultValue="NORMAL"><option value="NORMAL">Normal</option><option value="ASSISTED">Asistido</option><option value="CAESAREAN">Cesárea</option><option value="UNKNOWN">Sin determinar</option></Select></label>
         </div><label><span>Observaciones del parto</span><textarea name="notes" maxLength={5000}/></label>
-        {canUpload&&<BirthPhotoPicker name="birthPhoto" label="Foto del parto"/>}</section>
+        {canUpload&&<ImagePicker accept="image/jpeg,image/png,image/webp" name="birthPhoto" label="Foto del parto"/>}</section>
         <section className="birth-section"><div className="section-heading-inline"><h3>Crías</h3>
           <Button type="button" variant="secondary" disabled={calfKeys.length>=8} onClick={()=>{
             const key=nextCalfKey.current++;setCalfKeys(previous=>[...previous,key]);}}><Plus size={18}/>Agregar cría</Button></div>
@@ -403,8 +408,8 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
           <label><span>Propietario de la cría</span><Select name={`calfOwner:${index}`} defaultValue=""><option value="">Los mismos propietarios de la madre</option>{birthOptions.owners.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select><small>Si eliges uno, tendrá el 100 % de participación.</small></label>
           <label><span>Información de la cría</span><textarea name={`calfDescription:${index}`} maxLength={5000}/></label>
           </div>{canUpload&&<div className="birth-photo-fields">
-            <BirthPhotoPicker name={`profilePhoto:${index}`} label={`Foto de perfil de la cría ${index+1}`}/>
-            <BirthPhotoPicker name={`coverPhoto:${index}`} label={`Foto de portada de la cría ${index+1}`}/>
+            <ImagePicker accept="image/jpeg,image/png,image/webp" name={`profilePhoto:${index}`} label={`Foto de perfil de la cría ${index+1}`}/>
+            <ImagePicker accept="image/jpeg,image/png,image/webp" name={`coverPhoto:${index}`} label={`Foto de portada de la cría ${index+1}`}/>
           </div>}
         </div>)}
         </div><label><span>Crías nacidas muertas</span><input type="number" name="stillbornCount"
@@ -430,7 +435,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
       </form>
     </div></Modal>}
 
-    {records && (visible.length?<Card className="record-list">
+    {!activeForm&&records && (visible.length?<Card className="record-list">
       <div className="record-list-head"><span>Animal</span><span>Fecha</span>
         <span>Evento</span><span>Estado</span><span/><span/></div>
       {visible.map(item=><button type="button" className="record-list-row" key={`${item.kind}:${item.id}`}
@@ -446,11 +451,12 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         'Registra celos, preñeces, servicios y partos de la propiedad.'}/>)}
     {viewing&&<Modal title="Detalle reproductivo" wide onClose={()=>setSelectedRecord(null)}
       footer={<><Button variant="ghost" onClick={()=>setSelectedRecord(null)}>Cerrar</Button>
-        {canManage&&viewing.canCancel&&<Button variant="secondary" disabled={busy}
+        {canManage&&viewingEnabled&&viewing.canCancel&&<Button variant="secondary" disabled={busy}
           onClick={()=>{if(!window.confirm('¿Cancelar este evento? Se conservará en el historial.'))return;
             void run(()=>viewing.kind==='HEAT'?cancelHeat(accessToken,viewing.id):
               viewing.kind==='SERVICE'?cancelService(accessToken,viewing.id):
                 cancelPregnancy(accessToken,viewing.id));}}>Cancelar evento</Button>}</>}>
+      {error&&<p role="alert" className="form-error">{error}</p>}
       <div className="record-detail"><div className="record-detail-heading"><div className="record-icon">
         <Baby size={22}/></div><div><h2>{viewing.name}</h2><p>{categories[viewing.kind]} · {formatDate(viewing.date)}</p></div>
         <Badge tone={viewing.status==='Cancelado'?'danger':'success'}>{viewing.status}</Badge></div>
@@ -463,25 +469,24 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
               <button type="button" className="text-button" onClick={()=>navigate(`/animales/${calf.id}`)}>{calf.name} · Ver animal</button><small>{calf.sex==='FEMALE'?'Hembra':'Macho'}</small>
             </span></div>)}</div></section>:null}
         {viewing.kind==='BIRTH'&&multimediaEnabled&&hasPermission('MEDIA_VIEW')&&<section><h3>Fotografías del parto</h3><RecordMedia accessToken={accessToken} entityType="REPRODUCTION_BIRTH" entityId={viewing.id} canManage={canUpload} title="Fotografías del parto"/></section>}
+        {viewing.kind==='HEAT'&&canManage&&reproductionSectionEnabled(settings,'HEAT')&&records?.heats.some(heat=>heat.id===viewing.id&&!heat.cancelled&&!heat.endsOn)&&
+          <form className="animal-rules-form" onSubmit={event=>{event.preventDefault();const data=new FormData(event.currentTarget);
+            void run(()=>finishHeat(accessToken,viewing.id,String(data.get('endsOn'))));}}>
+            <h3>Finalizar celo</h3><label><span>Fecha de fin *</span><DateInput name="endsOn" required defaultValue={localDate()}
+              min={viewing.date} max={localDate()} disabled={busy}/></label><Button type="submit" loading={busy}>Finalizar celo</Button>
+          </form>}
         {viewing.notes&&<section><h3>Observaciones</h3><p>{viewing.notes}</p></section>}
       </div></Modal>}
-    {canManage&&<FloatingActionDock><IconButton label="Nuevo evento reproductivo" onClick={()=>
-      setActiveForm(selectedCategory??'HEAT')}><Plus size={22}/></IconButton></FloatingActionDock>}
+    {canCreateEvent&&!activeForm&&<FloatingActionDock><IconButton label="Nuevo evento reproductivo" onClick={()=>{
+      if(selectedCategory)setActiveForm(selectedCategory);else setChoosing(true);}}><Plus size={22}/></IconButton></FloatingActionDock>}
+    {choosing&&<Modal title="Registrar reproducción" onClose={()=>setChoosing(false)}>
+      <div className="animal-rules-options">{([
+        ['HEAT','Registrar celo'],['INSEMINATION','Registrar inseminación'],['EMBRYO_TRANSFER','Registrar transferencia de embriones'],
+        ['PREGNANCY','Confirmar preñez'],['BIRTH','Registrar parto'],['LOSS','Registrar pérdida'],
+      ] as const).filter(([kind])=>reproductionSectionEnabled(settings,kind)).map(([kind,label])=><Button key={kind} type="button" variant="secondary"
+        disabled={(kind==='BIRTH'||kind==='LOSS')&&!confirmed.length} onClick={()=>{setChoosing(false);
+          if(kind==='INSEMINATION'||kind==='EMBRYO_TRANSFER'){setServiceKind(kind);setActiveForm('SERVICE');}else setActiveForm(kind);}}>{label}</Button>)}</div>
+    </Modal>}
   </section>;
 }
 
-
-function BirthPhotoPicker({name,label}:{name:string;label:string}){
-  const input=useRef<HTMLInputElement>(null);const [file,setFile]=useState<File|null>(null);
-  const [url,setUrl]=useState('');
-  useEffect(()=>{if(!file){setUrl('');return;}const next=URL.createObjectURL(file);setUrl(next);
-    return()=>URL.revokeObjectURL(next);},[file]);
-  return <div className="birth-profile-photo-picker"><strong>{label}</strong>
-    <input ref={input} type="file" name={name} aria-label={label} accept="image/jpeg,image/png,image/webp" hidden
-      onChange={event=>setFile(event.target.files?.[0]??null)}/>
-    <button type="button" className={`birth-profile-preview${url?' has-photo':''}`} aria-label={`Seleccionar ${label.toLowerCase()}`}
-      onClick={()=>input.current?.click()}>{url?<img src={url} alt={`Vista previa: ${label}`}/>:<span><Camera size={26}/><strong>Seleccionar foto</strong></span>}</button>
-    <small>JPG, PNG o WebP · Hasta 10 MB.</small>
-    {file&&<IconButton type="button" label={`Quitar ${label.toLowerCase()}`} onClick={()=>{if(input.current)input.current.value='';setFile(null);}}><Trash2 size={16}/></IconButton>}
-  </div>;
-}

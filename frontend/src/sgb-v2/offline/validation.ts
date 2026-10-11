@@ -18,6 +18,21 @@ export function validateLocalMutation(entry:OutboxEntry,current:Record<string,un
     else if(value&&typeof value==='object')Object.values(value).forEach(validateNumbers);
   };
   validateNumbers(input);
+  if(entry.path==='/reproduction/births'){
+    const calves=input.calves;const stillborn=Number(input.stillbornCount);
+    requireValue(Array.isArray(calves)&&Number.isInteger(stillborn)&&stillborn>=0&&calves.length+stillborn>=1&&calves.length+stillborn<=8,
+      'Registra entre una y ocho crías en total, incluyendo las nacidas muertas.');
+    requireValue(calves.every(calf=>typeof calf.name==='string'&&calf.name.trim().length>=2&&calf.name.trim().length<=160
+      &&['FEMALE','MALE'].includes(calf.sex)),'Completa el nombre y el sexo de cada cría.');
+  }
+  if(/^\/reproduction\/heats\/[^/]+\/finish$/.test(entry.path)){
+    const endsOn=String(input.endsOn??'');const today=new Date().toLocaleDateString('en-CA',{timeZone:'America/Guayaquil'});
+    const date=new Date(`${endsOn}T12:00:00Z`);
+    requireValue(/^\d{4}-\d{2}-\d{2}$/.test(endsOn)&&Number.isFinite(date.getTime())&&date.toISOString().slice(0,10)===endsOn
+      &&endsOn<=today&&(!current?.startsOn||endsOn>=String(current.startsOn)),
+      'La fecha de fin debe estar entre el inicio del celo y hoy.');
+    requireValue(!current?.cancelled&&!current?.endsOn,'Este celo ya fue finalizado o cancelado.');
+  }
   if(editingMedicine||['/health-records/medicines','/health-records/medicines/structured','/health-records/medicines/classification','/catalogs/medicines','/catalogs/medicines/classification'].includes(entry.path)){
     requireValue(typeof input.name==='string'&&input.name.trim().length>=2&&input.name.trim().length<=160,
       'El nombre del medicamento debe tener entre 2 y 160 caracteres.');
