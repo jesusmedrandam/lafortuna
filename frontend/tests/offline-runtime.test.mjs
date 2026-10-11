@@ -205,7 +205,17 @@ assert(!(await get(mediaPath)).some(photo=>photo.id==='doomed-real'));
 await change('/groups/group-a',{name:'Primero'});await change('/groups/group-a',{name:'Segundo'});
 let attempts=0;
 runtime.installOfflineTransport(async()=>{attempts++;throw Object.assign(new Error('Conflicto'),{status:409,code:'CONFLICT'});});
-online=true;await runtime.syncOfflineMutations();await runtime.syncOfflineMutations();online=false;
+online=true;await runtime.syncOfflineMutations();
+const blockedStates=[];let blockedRefreshes=0;
+const captureBlocked=event=>blockedStates.push(event.detail.syncing);
+const captureRefresh=()=>blockedRefreshes++;
+window.addEventListener('sgb-v2-offline-state',captureBlocked);
+window.addEventListener('sgb-v2-cache-updated',captureRefresh);
+for(let i=0;i<3;i++){await runtime.syncOfflineMutations();await runtime.expireLocalDrafts();}
+window.removeEventListener('sgb-v2-offline-state',captureBlocked);
+window.removeEventListener('sgb-v2-cache-updated',captureRefresh);online=false;
+assert.ok(blockedStates.every(value=>!value),'Blocked queues never flash syncing progress');
+assert.equal(blockedRefreshes,0,'Unchanged draft checks never reload screens');
 assert.equal(attempts,1);assert.equal((await get('/groups'))[0].name,'Segundo');
 assert.equal(state.outbox.size,2);
 
@@ -514,6 +524,11 @@ try{
   {id:'applied-server',status:'COMPLETADA',createdAt:new Date(draftClock-48*60*60*1000).toISOString()}]);
  assert.deepEqual((await get('/activities')).map(row=>row.id),['applied-server'],'Cached server drafts expire offline too');
  await assert.rejects(()=>change('/activities/old-server-draft/apply',{},'POST'),/24 horas/);
+ let expiredRefreshes=0;const captureExpiry=()=>expiredRefreshes++;
+ window.addEventListener('sgb-v2-cache-updated',captureExpiry);
+ await runtime.expireLocalDrafts();assert.equal(expiredRefreshes,1,'An expired cached draft refreshes the screen once');
+ await runtime.expireLocalDrafts();assert.equal(expiredRefreshes,1,'A repeated check causes no extra reload');
+ window.removeEventListener('sgb-v2-cache-updated',captureExpiry);
 }finally{Date.now=realNow;}
 console.log('PASS: draft expiry at 24 hours, dependent queue cleanup, unchanged creation deadline and applied-work preservation.');
 

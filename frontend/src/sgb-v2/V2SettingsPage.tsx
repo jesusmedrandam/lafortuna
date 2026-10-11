@@ -7,9 +7,10 @@ import {useTheme,type AppearanceSettings} from '../theme/ThemeContext';
 import {DashboardPreferencesEditor} from './DashboardPreferences';
 import {PropertySettingsPanel} from './PropertySettingsPanel';
 import {useV2Session} from './V2Session';
+import {AnimalRulesPanel} from './AnimalRulesPanel';
 import {UserProfileEditor} from './UserProfileEditor';
 
-const sections={cuenta:'Mi cuenta',apariencia:'Apariencia',panel:'Mi panel',propiedad:'Propiedades'};
+const sections={cuenta:'Mi cuenta',apariencia:'Apariencia',panel:'Mi panel',propiedad:'Propiedades',reglas:'Reglas de los animales'};
 type SettingsSection=keyof typeof sections;
 
 function ColorSetting({title,description,value,onChange,presets=[]}:{title:string;description:string;
@@ -63,8 +64,10 @@ export function V2SettingsPage(){
   const overview=session!.overview;const property=overview.properties.find(item=>item.id===overview.activeContext?.propertyId);
   const role=property?.roles.find(item=>item.id===overview.activeContext?.roleId);
   const canViewProperty=Boolean(property);
+  const canManageRules=Boolean(property&&(overview.supportMode||['OWNER','ADMINISTRATOR'].includes(role?.code??''))
+    &&(hasPermission('REPRODUCTION_MANAGE')||hasPermission('CATALOG_MANAGE')));
   const requested=params.get('seccion');
-  const section=requested&&Object.hasOwn(sections,requested)&&(requested!=='propiedad'||canViewProperty)?requested as SettingsSection:null;
+  const section=requested&&Object.hasOwn(sections,requested)&&(requested!=='propiedad'||canViewProperty)&&(requested!=='reglas'||canManageRules)?requested as SettingsSection:null;
   const open=(next:SettingsSection)=>{setError('');setParams({seccion:next});};
   const cards=(items:{label:string;description:string;icon:typeof UserCircle;action:()=>void}[])=><div className="settings-hub-grid">
     {items.map(({label,description,icon:Icon,action})=><button type="button" className="card settings-hub-card" key={label} onClick={action}>
@@ -72,6 +75,7 @@ export function V2SettingsPage(){
       <ChevronRight size={18}/></button>)}</div>;
   const administration=[
     ...(canViewProperty?[{label:'Propiedades',description:'Tus propiedades, colaboraciones y políticas de operación.',icon:Warehouse,action:()=>open('propiedad')}]:[]),
+    ...(canManageRules?[{label:'Reglas de los animales',description:'Edad mínima para reproducción, clasificación y reglas de la cuenta.',icon:SlidersHorizontal,action:()=>open('reglas')}]:[]),
     {label:'Roles y permisos',description:'Elige tu propiedad y rol; administra los accesos permitidos.',icon:Users,action:()=>navigate('/roles-permisos')},
     ...(property&&hasPermission('CATALOG_VIEW')?[{label:'Catálogos',description:'Clasificaciones, etiquetas y opciones de los registros.',icon:SlidersHorizontal,action:()=>navigate('/catalogos')}]:[]),
     ...(property&&hasPermission('AUDIT_VIEW')?[{label:'Historial de cambios',description:'Consulta qué cambió, quién lo hizo y cuándo.',icon:ClipboardList,action:()=>navigate('/auditoria')}]:[]),
@@ -98,6 +102,7 @@ export function V2SettingsPage(){
         <Button variant="secondary" loading={signingOut} onClick={()=>{setSigningOut(true);setError('');void signOut()
           .catch(reason=>setError(reason instanceof Error?reason.message:'No se pudo cerrar la sesión.')).finally(()=>setSigningOut(false));}}>
           <LogOut size={17}/>Cerrar sesión</Button></div></>}/></div>}
+    {section==='reglas'&&<AnimalRulesPanel accessToken={session!.accessToken} propertyName={property!.name}/> }
     {section==='apariencia'&&<AppearanceSection/>}
     {section==='panel'&&<DashboardPreferencesEditor userId={overview.user.id}/>}
     {section==='propiedad'&&<PropertySettingsPanel accessToken={session!.accessToken} onSettingsChanged={reloadOverview}

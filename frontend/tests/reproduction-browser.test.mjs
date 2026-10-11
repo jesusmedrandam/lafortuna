@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtemp,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -53,9 +53,12 @@ try{
   const command=(method,params={})=>new Promise((resolve,reject)=>{const id=++sequence;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
   await command('Emulation.setDeviceMetricsOverride',{width:412,height:915,deviceScaleFactor:1,mobile:true});
   await command('Emulation.setTouchEmulationEnabled',{enabled:true});
+  if(process.env.BIRTH_SCREENSHOT){await command('Page.enable');await command('Page.addScriptToEvaluateOnNewDocument',{source:'window.pauseBirthPreview=true;'});}
   await command('Page.navigate',{url:'http://127.0.0.1:'+server.address().port});
   let outcome='PENDING';
   for(let attempt=0;attempt<300;attempt++){
+    if(process.env.BIRTH_SCREENSHOT){const ready=await command('Runtime.evaluate',{expression:'window.birthPreviewReady&&window.pauseBirthPreview',returnByValue:true});
+      if(ready.result?.value){const shot=await command('Page.captureScreenshot',{format:'png'});await writeFile(process.env.BIRTH_SCREENSHOT,Buffer.from(shot.data,'base64'));await command('Runtime.evaluate',{expression:'window.pauseBirthPreview=false'});}}
     const response=await command('Runtime.evaluate',{expression:'document.getElementById("result")?.textContent',returnByValue:true});
     outcome=response.result?.value??'PENDING';if(outcome.startsWith('PASS:')||outcome.startsWith('FAIL:'))break;await pause(50);
   }

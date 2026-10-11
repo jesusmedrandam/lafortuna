@@ -2,7 +2,7 @@ import {type FormEvent,useEffect,useMemo,useState} from 'react';
 import {
   ApiRequestError,createBrand,createCatalogItem,createOwner,getAnimalClassificationPolicy,
   getCatalogReference,listAccountUsers,listBrands,listCatalogItems,listOwners,setBrandActive,
-  updateCatalogItem,updateAnimalClassificationPolicy,updateBrandOwners,
+  updateCatalogItem,updateBrandOwners,
   type AnimalClassificationPolicy,type CatalogItem,type CatalogReference,type EditableCatalogCode,
   type LivestockBrand,type LivestockOwner,
 } from './api';
@@ -64,17 +64,6 @@ export function CatalogPanel({accessToken,canManage,canEditMedicines=false,comme
       .catch(failure=>{if(active)setError(message(failure));});
     return()=>{active=false;};
   },[accessToken,availableCatalogs,canManage]);
-
-  async function saveClassification(event:FormEvent<HTMLFormElement>){
-    event.preventDefault();const data=new FormData(event.currentTarget);
-    const names=Object.fromEntries(classificationCodes.map(code=>[code,String(data.get(code)).trim()])) as
-      AnimalClassificationPolicy['names'];
-    const input:AnimalClassificationPolicy={femaleAdultMonths:Number(data.get('femaleAdultMonths')),
-      maleAdultMonths:Number(data.get('maleAdultMonths')),names};
-    setBusy(true);setError(null);
-    try{setClassification(await updateAnimalClassificationPolicy(accessToken,input));}
-    catch(failure){setError(message(failure));}finally{setBusy(false);}
-  }
 
   async function createItem(event:FormEvent<HTMLFormElement>,code:EditableCatalogCode){
     event.preventDefault();const form=event.currentTarget;
@@ -187,17 +176,9 @@ export function CatalogPanel({accessToken,canManage,canEditMedicines=false,comme
             <div><dt>Machos adultos desde</dt><dd>{classification.maleAdultMonths} meses</dd></div>
             {classificationCodes.map(code=><div key={code}><dt>{classification.names[code]}</dt><dd>{code==='VACA'?'Hembra con crías registradas':code==='TORO'?'Macho con descendencia':
               `${['VACONA','TERNERA'].includes(code)?'Hembra':'Macho'} ${['TERNERA','TERNERO'].includes(code)?'joven':'adulto'}`}</dd></div>)}</dl>
-          {canManage&&classification.canManageRules&&<details className="catalog-add"><summary>Editar clasificación</summary>
-          <form className="classification-form" key={JSON.stringify(classification)} onSubmit={saveClassification}>
-            <label><span>Hembras adultas desde (meses)</span><input name="femaleAdultMonths" type="number"
-              min="1" max="120" required defaultValue={classification.femaleAdultMonths} disabled={!canManage||busy}/></label>
-            <label><span>Machos adultos desde (meses)</span><input name="maleAdultMonths" type="number"
-              min="1" max="120" required defaultValue={classification.maleAdultMonths} disabled={!canManage||busy}/></label>
-            {classificationCodes.map(code=><label key={code}><span>{classification.names[code]}</span><input name={code}
-              minLength={2} maxLength={80} required defaultValue={classification.names[code]}
-              disabled={!canManage||busy}/></label>)}
-            {canManage&&<button className="primary-button compact" disabled={busy}>Guardar cambios</button>}
-          </form></details>}</>}
+          {canManage&&classification.canManageRules&&<button type="button" className="secondary-button compact"
+            onClick={()=>navigate('/configuracion?seccion=reglas&opcion=clasificacion')}>Editar reglas de clasificación</button>}</>}
+
 
         {tab==='OWNERS'&&<><header><div><h3>Propietarios</h3>
           <p>Personas, organizaciones y usuarios que pueden tener participación en los animales.</p></div></header>
