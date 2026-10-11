@@ -11,7 +11,16 @@ const root=fileURLToPath(new URL('../',import.meta.url));
 const deadline=setTimeout(()=>{console.error('Browser test timed out');process.exit(1);},90000);
 const mockApi=`
 export class ApiRequestError extends Error{}
-window.settingsRequests=0;
+window.settingsRequests=0;window.ruleCalls=[];
+const reproductionPolicy={canManageRules:true,minimumBullMonths:24,minimumCowMonths:18,daysAfterBirthHeat:30,
+ daysAfterBirthPregnancy:45,daysAfterLossHeat:21,daysAfterLossPregnancy:30,maxMilkingDays:305,
+ allowSecondHeat:true,allowFalseHeatInPregnancy:true,useLastValidHeat:true};
+export const getReproductionSettings=async()=>({...reproductionPolicy,canManageRules:!window.settingsRuleDenied});
+export const updateReproductionSettings=async(_token,input)=>{window.ruleCalls.push(input);return input;};
+const classificationPolicy={canManageRules:true,femaleAdultMonths:18,maleAdultMonths:24,
+ names:{VACA:'Vaca',VACONA:'Vacona',TERNERA:'Ternera',TORO:'Toro',TORETE:'Torete',TERNERO:'Ternero'}};
+export const getAnimalClassificationPolicy=async()=>classificationPolicy;
+export const updateAnimalClassificationPolicy=async(_token,input)=>{window.classificationInput=input;return {...input,canManageRules:true};};
 export const getPropertySettings=async()=>{window.settingsRequests++;return {account:{name:'Cuenta de prueba',usedProperties:1,maxProperties:2},canCreate:Boolean(window.settingsManage),canManageModules:Boolean(window.settingsManage),canViewModules:true,property:{name:'Finca de prueba',ownerName:'Ana',areaValue:12.5,areaUnitCode:'HECTARE',address:'Los Montes'},
   modules:[{code:'TASKS',name:'Actividades',enabled:true,isCore:false,accountEnabled:true}]};};
 export const createOwnAccount=async()=>({propertyId:'property-own',roleId:'role-owner'});export const updatePropertyInformation=async()=>{};export const createAccountProperty=async(_token,input)=>{window.createdProperty=input;return {propertyId:'property-a',roleId:'role-a'};};export const updatePropertyModule=async()=>{};
@@ -43,8 +52,8 @@ const mockSession=`
 import {useState} from 'react';
 export const useV2Session=()=>{const [,refresh]=useState(0);return ({session:{accessToken:'test',overview:{user:{id:window.settingsUser??'user-a',displayName:'Ana',email:'ana@example.test',
   ...window.settingsProfile,isSuperadmin:Boolean(window.settingsAdmin)},
-  activeContext:{propertyId:'property-a',roleId:'role-a'},properties:[{id:'property-own',name:'Finca propia',isOwner:true,roles:[{id:'role-owner',name:'Propietario'}]},{id:'property-a',isOwner:false,name:'Finca de prueba',roles:[{id:'role-a',name:'Colaborador'}]}]}},
-  hasPermission:permission=>window.settingsRestricted?false:['MODULE_VIEW','CATALOG_VIEW','AUDIT_VIEW'].includes(permission),
+  activeContext:{propertyId:'property-a',roleId:'role-a'},properties:[{id:'property-own',name:'Finca propia',isOwner:true,roles:[{id:'role-owner',name:'Propietario'}]},{id:'property-a',isOwner:false,name:'Finca de prueba',roles:[{id:'role-a',name:'Colaborador',code:window.settingsRules?'ADMINISTRATOR':'COLLABORATOR'}]}]}},
+  hasPermission:permission=>window.settingsRestricted?false:window.settingsRules?true:['MODULE_VIEW','CATALOG_VIEW','AUDIT_VIEW'].includes(permission),
   reloadOverview:async()=>{},selectContext:async()=>{},signOut:async()=>{window.settingsSignedOut=true;},
   saveProfile:async input=>{window.settingsProfile={...window.settingsProfile,...input};refresh(value=>value+1);}});};
 `;
@@ -175,6 +184,26 @@ try{
   button('Crear propiedad').click();await until(()=>window.createdProperty);
   check(window.createdProperty.areaValue===18.5&&window.createdProperty.areaUnitCode==='HECTARE'&&window.createdProperty.address==='Sector Los Montes','Creation submits the complete property information');
   await until(()=>document.querySelector('.property-information'));back();await until(()=>document.querySelector('.settings-hub-section'));window.settingsManage=false;
+  window.settingsRules=true;renderApp();await until(()=>[...document.querySelectorAll('.settings-hub-card')].some(node=>node.textContent.startsWith('Reglas de los animales')));
+  [...document.querySelectorAll('.settings-hub-card')].find(node=>node.textContent.startsWith('Reglas de los animales')).click();
+  await until(()=>document.querySelector('.animal-rules-options'));check(!document.querySelector('.animal-rules-form'),'Rules open as options rather than simultaneous forms');
+  [...document.querySelectorAll('.animal-rules-options button')].find(node=>node.textContent.includes('Reproducción')).click();
+  await until(()=>document.querySelector('input[name="minimumBullMonths"]'));
+  check(document.querySelector('.animal-rules-panel').textContent.includes('todas las propiedades del dueño'),'Rules explain the account scope');
+  check(document.querySelector('input[name="minimumBullMonths"]').value==='24','Minimum father age is discoverable in Settings');
+  change(document.querySelector('input[name="minimumBullMonths"]'),'30');button('Guardar reglas').click();
+  await until(()=>window.ruleCalls.length===1);check(window.ruleCalls[0].minimumBullMonths===30,'Father age saves from Settings');
+  back();await until(()=>document.querySelector('.animal-rules-options'));
+  [...document.querySelectorAll('.animal-rules-options button')].find(node=>node.textContent.includes('Clasificación')).click();
+  await until(()=>document.querySelector('input[name="femaleAdultMonths"]'));
+  change(document.querySelector('input[name="femaleAdultMonths"]'),'20');button('Guardar reglas').click();
+  await until(()=>window.classificationInput);check(window.classificationInput.femaleAdultMonths===20,'Classification saves from the same Settings section');
+  back();await until(()=>document.querySelector('.animal-rules-options'));
+  window.settingsRuleDenied=true;
+  [...document.querySelectorAll('.animal-rules-options button')].find(node=>node.textContent.includes('Reproducción')).click();
+  await until(()=>document.body.textContent.includes('Solo los administradores'));check(!document.querySelector('.animal-rules-form'),'Server permission denial prevents editing');
+  back();await until(()=>document.querySelector('.animal-rules-options'));back();await until(()=>document.querySelector('.settings-hub-section'));
+  window.settingsRuleDenied=false;window.settingsRules=false;
   window.settingsRestricted=true;renderApp();await until(()=>document.querySelectorAll('button.settings-hub-card').length===6);
   check(!document.querySelector('.property-settings-panel'),'Restricted section cannot be forced with query URL');
   check(document.querySelectorAll('button.settings-hub-card').length===6,'Restricted users see only allowed cards');
