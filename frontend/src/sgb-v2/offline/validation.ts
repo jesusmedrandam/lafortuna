@@ -1,6 +1,6 @@
 import type {OutboxEntry} from './database';
 import type {ReproductionRecords,ReproductionSettings,ReproductionCandidate} from '../api';
-import {reachedReproductionAge} from '../reproductionAge';
+import {reachedReproductionAge,reproductionToday} from '../reproductionAge';
 import {cycleTrueHeats} from '../reproductionCycle';
 import {reproductionSectionEnabled} from '../reproductionSections';
 
@@ -24,7 +24,8 @@ export function validateReproductionMutation(entry:OutboxEntry,context:{records:
   const on=String(input[kind==='heats'?'startsOn':kind==='pregnancies'?'confirmedOn':'occurredOn']??'');
   requireValue(/^\d{4}-\d{2}-\d{2}$/.test(on)&&on<=today,'Indica una fecha válida que no sea futura.');
   if(input.endsOn)requireValue(String(input.endsOn)>=on&&String(input.endsOn)<=today,'El fin del celo debe estar entre su inicio y hoy.');
-  if(input.notes!=null)requireValue(typeof input.notes==='string'&&input.notes.trim().length<=(kind==='losses'?5000:500),'Las observaciones son demasiado largas.');
+  const noteLimit=kind==='births'||kind==='losses'?5000:kind==='services'?2000:500;
+  if(input.notes!=null)requireValue(typeof input.notes==='string'&&input.notes.trim().length<=noteLimit,`Las observaciones admiten hasta ${noteLimit} caracteres.`);
   const pregnancy=records.pregnancies.find(row=>row.id===input.pregnancyId);
   const unresolved=(id:string)=>!records.births.some(row=>row.pregnancyId===id)&&!records.losses.some(row=>row.pregnancyId===id);
   if(kind==='births'||kind==='losses'){
@@ -62,6 +63,13 @@ export function validateReproductionMutation(entry:OutboxEntry,context:{records:
     return;
   }
   if(input.fatherId&&input.externalFather)requireValue(false,'Selecciona un padre registrado o uno externo, no ambos.');
+  for(const [key,max] of [['externalFather',240],['externalDonor',240],['materialCode',160],['quality',120],['technician',160],['supplier',160]] as const)
+    if(input[key]!=null)requireValue(typeof input[key]==='string'&&String(input[key]).trim().length<=max
+      &&(!key.startsWith('external')||String(input[key]).trim().length>0),`Revisa los datos del servicio: cada campo debe respetar su longitud máxima (${max} caracteres).`);
+  if(kind==='services'){
+    requireValue(!(input.donorId&&input.externalDonor),'Selecciona una donante registrada o una externa, no ambas.');
+    requireValue(input.kind!=='INSEMINATION'||!input.donorId&&!input.externalDonor,'La donante requiere transferencia de embriones.');
+  }
   let conceptionOn=on;let fatherId=input.fatherId;
   let heatId=input.heatId;
   if(kind==='pregnancies'){
@@ -92,7 +100,7 @@ export function validateReproductionMutation(entry:OutboxEntry,context:{records:
   if(fatherId)age(fatherId,'MALE',conceptionOn);
   if(input.donorId)age(input.donorId,'FEMALE',on);
 }
-export function validateLocalMutation(entry:OutboxEntry,current:Record<string,unknown>|null){
+export function validateLocalMutation(entry:OutboxEntry,current:Record<string,unknown>|null,birthCalf=false){
   const original=(entry.jsonBody??{}) as Record<string,unknown>;
   const editingMedicine=entry.method==='PATCH'&&/^\/catalogs\/medicines\/[^/]+$/.test(entry.path);
   const input=editingMedicine?{...(original.medicine as Record<string,unknown>),expectedVersion:original.expectedVersion}:original;
@@ -107,16 +115,19 @@ export function validateLocalMutation(entry:OutboxEntry,current:Record<string,un
     const calves=input.calves;const stillborn=Number(input.stillbornCount);
     requireValue(Array.isArray(calves)&&Number.isInteger(stillborn)&&stillborn>=0&&calves.length+stillborn>=1&&calves.length+stillborn<=8,
       'Registra entre una y ocho crías en total, incluyendo las nacidas muertas.');
-    requireValue(calves.every(calf=>typeof calf.name==='string'&&calf.name.trim().length>=2&&calf.name.trim().length<=160
-      &&['FEMALE','MALE'].includes(calf.sex)),'Completa el nombre y el sexo de cada cría.');
+    requireValue(input.kind===undefined||['NORMAL','ASSISTED','CAESAREAN','UNKNOWN'].includes(String(input.kind)),'Selecciona un tipo de parto válido.');
+    for(const calf of calves){
+      requireValue(calf&&typeof calf==='object'&&!Array.isArray(calf),'Completa la ficha de cada cría.');
+      requireValue(calf.birthCondition===undefined||['ALIVE','WEAK','UNKNOWN'].includes(calf.birthCondition),'Selecciona el estado al nacer de cada cría.');
+      validateLocalMutation({...entry,path:'/animals',jsonBody:{...calf,speciesCode:'BOVINE'}},null,true);
+    }
   }
   if(/^\/reproduction\/heats\/[^/]+\/finish$/.test(entry.path)){
-    const endsOn=String(input.endsOn??'');const today=new Date().toLocaleDateString('en-CA',{timeZone:'America/Guayaquil'});
+    const endsOn=String(input.endsOn??'');const today=reproductionToday();
     const date=new Date(`${endsOn}T12:00:00Z`);
     requireValue(/^\d{4}-\d{2}-\d{2}$/.test(endsOn)&&Number.isFinite(date.getTime())&&date.toISOString().slice(0,10)===endsOn
       &&endsOn<=today&&(!current?.startsOn||endsOn>=String(current.startsOn)),
       'La fecha de fin debe estar entre el inicio del celo y hoy.');
-    requireValue(!current?.cancelled&&!current?.endsOn,'Este celo ya fue finalizado o cancelado.');
   }
   if(editingMedicine||['/health-records/medicines','/health-records/medicines/structured','/health-records/medicines/classification','/catalogs/medicines','/catalogs/medicines/classification'].includes(entry.path)){
     requireValue(typeof input.name==='string'&&input.name.trim().length>=2&&input.name.trim().length<=160,
@@ -206,7 +217,7 @@ export function validateLocalMutation(entry:OutboxEntry,current:Record<string,un
     if(entry.path==='/animals'){
       requireValue(typeof input.name==='string'&&input.name.trim().length>0&&input.name.trim().length<=160,
         'El nombre debe tener entre 1 y 160 caracteres.');
-      requireValue(input.groupId,'Selecciona un grupo para el animal.');
+      if(!birthCalf)requireValue(input.groupId,'Selecciona un grupo para el animal.');
       requireValue(['FEMALE','MALE'].includes(String(input.sex))&&input.speciesCode==='BOVINE',
         'Selecciona el sexo y la especie del animal.');
       requireValue((input.initialWeight===undefined)===(input.initialWeightUnitCode===undefined),

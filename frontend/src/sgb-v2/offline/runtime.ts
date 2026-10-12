@@ -7,6 +7,7 @@ import {LocalValidationError,validateLocalMutation,validateReproductionMutation}
 import {cycleTrueHeats} from '../reproductionCycle';
 import type {ReproductionRecords,ReproductionSettings,ReproductionCandidate} from '../api';
 import {reachedReproductionAge,reproductionToday} from '../reproductionAge';
+import {reproductionSectionEnabled} from '../reproductionSections';
 import {mediaThumbnailUrl,optimizedCloudinaryMediaUrl} from '../../media';
 import {dataCategoryForPath,defaultDownloadPreferences,downloadCategoryLabel,normalizeDownloadPreferences,
   photoCategoryForPath,photoCategoryForType,type DownloadPreferences} from './preferences';
@@ -1127,6 +1128,15 @@ async function validateBeforeQueue(entry:OutboxEntry,init:RequestInit,send:Trans
     }
     throw new LocalValidationError('Faltan datos para validar este registro. Abre reproducción con conexión y descarga sus datos antes de guardar sin conexión.');
   };
+  if(entry.method==='POST'&&/^\/reproduction\/heats\/[^/]+\/finish$/.test(entry.path)){
+    const [settings,records]=await Promise.all([read('/reproduction/settings'),read('/reproduction')]);
+    if(!reproductionSectionEnabled(settings as ReproductionSettings,'HEAT'))throw new LocalValidationError('Los celos están desactivados en las políticas de operación.');
+    const heats=bodyRecord(records).heats;
+    const heat=Array.isArray(heats)?heats.find(row=>bodyRecord(row).id===entry.path.split('/')[3]):null;
+    if(!heat||typeof bodyRecord(heat).startsOn!=='string')throw new LocalValidationError('El celo no está disponible. Actualiza reproducción antes de finalizarlo.');
+    if(bodyRecord(heat).cancelled||bodyRecord(heat).endsOn)throw new LocalValidationError('Este celo ya fue finalizado o cancelado.');
+    validateLocalMutation(entry,bodyRecord(heat));
+  }
   if(entry.method==='POST'&&/^\/reproduction\/(heats|services|pregnancies|births|losses)$/.test(entry.path)){
     const [settings,data,records]=await Promise.all([read('/reproduction/settings'),read('/reproduction/candidates'),read('/reproduction')]);
     const policy=bodyRecord(settings),history=bodyRecord(records);
@@ -1252,7 +1262,7 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
     }catch(error){
       const info=errorInfo(error);entry.attempts=1;entry.lastError=info.message;entry.errorCode=info.code;
       if(info.status>0&&info.status<500&&info.status!==429&&info.code!=='IDEMPOTENCY_IN_PROGRESS'){
-        if(entry.method==='POST'&&/^\/reproduction\/(heats|services|pregnancies|births|losses)$/.test(entry.path)){
+        if(entry.method==='POST'&&/^\/reproduction\/(?:(heats|services|pregnancies|births|losses)|heats\/[^/]+\/finish)$/.test(entry.path)){
           await rewindPendingFrom(entry);await removeOutbox(entry.id);await reprojectQueued(entry.scope,true);
           try{window.SGBAndroid?.removeMirroredMutation?.(entry.id);}catch{/* Solo Android. */}
           emit('sgb-v2-cache-updated');await publishState();throw error;

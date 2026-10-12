@@ -726,3 +726,62 @@ const unavailableServerCandidates=await runtime.offlineRequest('/reproduction/ca
 assert.ok(unavailableServerCandidates.some(row=>row.id==='vacona'),'A server timeout uses the known animal roster, not a stale Chola-only snapshot');
 online=false;
 console.log('PASS: failed dependencies blocked, animal parent ages checked and online races leave no invalid pending records.');
+
+const calfScope={userId:'calf-preflight',propertyId:'calf-property',roleId:'owner'};
+await runtime.configureOfflineRuntime(calfScope,'test-token');await seedReproductionRules(calfScope);
+await runtime.putCache(calfScope,'/reproduction',{...emptyReproduction,pregnancies:[{id:'pregnancy-calf',cowId:'cow-a',status:'CONFIRMED',confirmedOn:'2026-01-01'}]});
+await runtime.putCache(calfScope,'/animals/cow-a',{id:'cow-a',name:'Madre',owners:[{partyId:'owner-a',percent:100,isPrimary:true}]});
+const calfInput={pregnancyId:'pregnancy-calf',occurredOn:'2026-10-10',kind:'NORMAL',stillbornCount:0,calves:[{name:'Luna',sex:'FEMALE'}]};
+for(const invalid of [{initialWeight:0,initialWeightUnitCode:'KILOGRAM'},
+ {initialWeight:12.3456,initialWeightUnitCode:'KILOGRAM'},{initialWeight:12},
+ {owners:[{partyId:'owner-a',percent:90,isPrimary:true}]},{breedIds:['breed-a','breed-a']},
+ {birthCondition:'INVALID'},{description:'x'.repeat(5001)}]){
+ await assert.rejects(()=>change('/reproduction/births',{...calfInput,calves:[{...calfInput.calves[0],...invalid}]},'POST'));
+ assert.equal((await runtime.listOutbox(calfScope.userId)).length,0,'Invalid calf data never enters either the queue or history');
+ assert.equal((await get('/reproduction')).births.length,0);
+}
+await change('/reproduction/births',{...calfInput,notes:'x'.repeat(5000),calves:[{name:'A',sex:'FEMALE',initialWeight:12.345,initialWeightUnitCode:'KILOGRAM'}]},'POST');
+assert.equal((await get('/reproduction')).births.length,1,'A valid calf may have a one-character name and the birth accepts 5000 note characters');
+validate('/reproduction/services',{cowId:'cow-a',kind:'INSEMINATION',occurredOn:'2026-10-10',notes:'x'.repeat(2000)});
+assert.throws(()=>validate('/reproduction/services',{cowId:'cow-a',kind:'INSEMINATION',occurredOn:'2026-10-10',donorId:'cow-b'}),/donante.*transferencia/i);
+assert.throws(()=>validate('/reproduction/services',{cowId:'cow-a',kind:'EMBRYO_TRANSFER',occurredOn:'2026-10-10',donorId:'cow-b',externalDonor:'Otra'}),/donante registrada.*externa/i);
+console.log('PASS: calf fields use shared animal validation and reproductive notes match server limits.');
+
+const finishScope={userId:'finish-preflight',propertyId:'finish-property',roleId:'owner'};
+await runtime.configureOfflineRuntime(finishScope,'test-token');await seedReproductionRules(finishScope);
+await runtime.putCache(finishScope,'/reproduction',{...emptyReproduction,heats:[{id:'heat-finish',cowId:'cow-a',startsOn:'2026-10-10',endsOn:null,cancelled:false}]});
+await assert.rejects(()=>change('/reproduction/heats/heat-missing/finish',{endsOn:'2026-10-10'},'POST'),/celo.*disponible/i);
+assert.equal((await runtime.listOutbox(finishScope.userId)).length,0);
+const originalLocaleDate=Date.prototype.toLocaleDateString;
+try{
+ Date.prototype.toLocaleDateString=function(){return '12/10/2026';};
+ await change('/reproduction/heats/heat-finish/finish',{endsOn:'2026-10-10'},'POST');
+}finally{Date.prototype.toLocaleDateString=originalLocaleDate;}
+assert.equal((await get('/reproduction')).heats[0].endsOn,'2026-10-10','Finishing a heat does not depend on locale date ordering');
+const pendingFinish=(await runtime.listOutbox(finishScope.userId))[0];
+await runtime.editPendingMutation(pendingFinish.id,{endsOn:'2026-10-11'});
+assert.equal((await get('/reproduction')).heats[0].endsOn,'2026-10-11','A pending completion is checked against its original open heat when edited');
+await assert.rejects(()=>change('/reproduction/heats/heat-finish/finish',{endsOn:'2026-10-10'},'POST'),/finalizado/);
+const finishFresh={...finishScope,userId:'finish-fresh'};
+await runtime.configureOfflineRuntime(finishFresh,'test-token');await seedReproductionRules(finishFresh);
+await runtime.putCache(finishFresh,'/reproduction',{...emptyReproduction,heats:[{id:'heat-finish',cowId:'cow-a',startsOn:'2026-10-10',endsOn:null,cancelled:false}]});
+online=true;let finishWrites=0;
+await assert.rejects(()=>runtime.offlineRequest('/reproduction/heats/heat-finish/finish',{method:'POST',headers,body:JSON.stringify({endsOn:'2026-10-10'})},async(path,init)=>{
+ if(init.method==='POST'){finishWrites++;throw new Error('A finished heat must not be submitted');}
+ return {data:path==='/reproduction/settings'?reproductionPolicy:{...emptyReproduction,heats:[{id:'heat-finish',startsOn:'2026-10-10',endsOn:'2026-10-10'}]},etag:null,notModified:false};
+}),/finalizado/);
+assert.equal(finishWrites,0);assert.equal((await runtime.listOutbox(finishFresh.userId)).length,0);
+const finishRace={...finishScope,userId:'finish-race'};
+await runtime.configureOfflineRuntime(finishRace,'test-token');await seedReproductionRules(finishRace);
+const openHeat={...emptyReproduction,heats:[{id:'heat-finish',cowId:'cow-a',startsOn:'2026-10-10',endsOn:null,cancelled:false}]};
+await runtime.putCache(finishRace,'/reproduction',openHeat);
+const finishMirrors=new Set(mirrored.keys());
+await assert.rejects(()=>runtime.offlineRequest('/reproduction/heats/heat-finish/finish',{method:'POST',headers,body:JSON.stringify({endsOn:'2026-10-10'})},async(path,init)=>{
+ if(init.method==='POST')throw Object.assign(new Error('Otro usuario finalizó el celo'),{status:409,code:'HEAT_FINISHED'});
+ return {data:path==='/reproduction/settings'?reproductionPolicy:openHeat,etag:null,notModified:false};
+}),/finalizó/);
+assert.equal((await runtime.listOutbox(finishRace.userId)).length,0);
+assert.equal((await get('/reproduction')).heats[0].endsOn,null,'A concurrent rejection restores the prior history');
+assert.deepEqual(new Set(mirrored.keys()),finishMirrors,'Android must not retain a rejected completion');
+online=false;
+console.log('PASS: heat completion verifies current status before queueing and uses stable calendar dates.');
