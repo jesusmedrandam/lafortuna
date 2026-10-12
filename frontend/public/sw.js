@@ -1,4 +1,4 @@
-const SHELL_CACHE='sgb-v2-shell-2026-10-11-alpha20';
+const SHELL_CACHE='sgb-v2-shell-2026-10-12-alpha21';
 const SHELL=['/','/index.html','/manifest.webmanifest','/favicon.png','/branding/logo-sgb-icon.png'];
 
 self.addEventListener('install',event=>{

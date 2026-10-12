@@ -900,8 +900,10 @@ export function updateReproductionSettings(accessToken: string, input: Reproduct
     method: 'PUT', headers: bearer(accessToken), body: JSON.stringify(input),
   });
 }
-export function getReproduction(accessToken: string) {
-  return request<ReproductionRecords>('/reproduction', { headers: bearer(accessToken) });
+export async function getReproduction(accessToken: string):Promise<ReproductionRecords> {
+  const records=await request<Partial<ReproductionRecords>>('/reproduction', { headers: bearer(accessToken) });
+  return {heats:records.heats??[],services:records.services??[],pregnancies:records.pregnancies??[],
+    births:records.births??[],losses:records.losses??[]};
 }
 export function getReproductionCandidates(accessToken: string) {
   return request<ReproductionCandidate[]>('/reproduction/candidates', { headers: bearer(accessToken) });

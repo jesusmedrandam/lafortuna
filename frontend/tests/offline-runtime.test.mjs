@@ -621,3 +621,17 @@ assert.equal((await get('/reproduction')).heats.filter(heat=>!heat.isFalse).leng
 await runtime.putCache(heatScope,'/reproduction',{heats:[{id:'same-day-heat',cowId:'cow-b',startsOn:'2026-09-01',isFalse:false}],services:[],pregnancies:[],births:[{id:'birth-b',motherId:'cow-b',occurredOn:'2026-09-01'}],losses:[]});
 await assert.rejects(()=>change('/reproduction/heats',{cowId:'cow-b',startsOn:'2026-09-01',isFalse:false},'POST'),/Elige cuál conservar/);
 console.log('PASS: one true heat per cycle offline, explicit choice, restart, discard, sync and birth cycle reset.');
+
+const partialScope={userId:'partial-reproduction',propertyId:'partial-property',roleId:'owner'};
+await runtime.configureOfflineRuntime(partialScope,'test-token');
+await runtime.putCache(partialScope,'/reproduction',{heats:[{id:'legacy-heat',cowId:'cow-a',startsOn:'2026-08-01',isFalse:false}]});
+const legacyReproduction=await runtime.getReproduction('test-token');
+assert.equal(legacyReproduction.heats.length,1);assert.deepEqual(legacyReproduction.births,[],'Legacy partial caches expose empty collections instead of breaking the form');
+await assert.rejects(()=>change('/reproduction/heats',heatInput,'POST'),/Elige cuál conservar/);
+await change('/reproduction/heats',{...heatInput,trueHeatId:'NEW'},'POST');
+await runtime.configureOfflineRuntime({...partialScope,propertyId:'first-heat-property'},'test-token');
+await change('/reproduction/heats',heatInput,'POST');
+const firstReproduction=await runtime.getReproduction('test-token');
+for(const kind of ['heats','services','pregnancies','births','losses'])assert.ok(Array.isArray(firstReproduction[kind]),kind+' exists after the first offline event');
+await assert.rejects(()=>change('/reproduction/heats',{...heatInput,startsOn:'2026-10-01'},'POST'),/Elige cuál conservar/);
+console.log('PASS: legacy partial reproduction caches and the first offline event retain complete collections.');
