@@ -721,4 +721,8 @@ online=false;
 assert.equal((await runtime.listOutbox(raceScope.userId)).length,0,'An online server rejection keeps the form draft instead of an invalid queue entry');
 assert.deepEqual((await get('/reproduction')).heats,[]);
 assert.deepEqual(new Set(mirrored.keys()),mirroredBefore,'Android must not retain the rejected event');
+await runtime.configureOfflineRuntime(staleScope,'test-token');online=true;
+const unavailableServerCandidates=await runtime.offlineRequest('/reproduction/candidates',{headers},async()=>{throw new Error('El servidor todavía está arrancando');});
+assert.ok(unavailableServerCandidates.some(row=>row.id==='vacona'),'A server timeout uses the known animal roster, not a stale Chola-only snapshot');
+online=false;
 console.log('PASS: failed dependencies blocked, animal parent ages checked and online races leave no invalid pending records.');

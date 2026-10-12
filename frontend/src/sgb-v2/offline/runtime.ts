@@ -1087,7 +1087,7 @@ function preserveLocalMedia(previous:unknown,next:unknown):unknown{
     return local?.local_media_id?{...row,local_media_id:local.local_media_id}:value;});
 }
 
-async function reproductionCandidates(scope:OfflineScope,payload:unknown){
+async function reproductionCandidates(scope:OfflineScope,payload:unknown,offlineFallback=false){
   const candidates=new Map((Array.isArray(payload)?payload:[]).map(value=>{const row=bodyRecord(value);return [row.id,row];}));
   const known=new Map<unknown,Record<string,unknown>>();
   for(const cache of (await listCache(scope)).filter(row=>row.path.startsWith('/animals?')||row.path.startsWith('/animals/')).sort((a,b)=>a.savedAt-b.savedAt)){
@@ -1097,7 +1097,7 @@ async function reproductionCandidates(scope:OfflineScope,payload:unknown){
   for(const animal of known.values()){
     const existing=candidates.get(animal.id);
     if(existing&&existing.birthDate===undefined&&animal.birthDate!==undefined)candidates.set(animal.id,{...existing,birthDate:animal.birthDate});
-    if((!isRuntimeOnline()||animal.__syncState==='PENDING')&&animal.speciesCode==='BOVINE'){
+    if((offlineFallback||!isRuntimeOnline()||animal.__syncState==='PENDING')&&animal.speciesCode==='BOVINE'){
       if(animal.availabilityStatusCode==='ACTIVE')candidates.set(animal.id,{...existing,...animal});
       else candidates.delete(animal.id);
     }
@@ -1182,14 +1182,20 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
         if(saveAutomatically&&canAutomaticallyDownload()&&activeScope&&sameScope(requestScope,activeScope)
           &&generation===cacheGeneration)await applyServerCache(requestScope,path,response.data,response.etag,generation);
         return path==='/reproduction/candidates'?await reproductionCandidates(requestScope,response.data) as T:response.data;
-      }catch(error){if(errorInfo(error).status>0||!cached)throw error;}
+      }catch(error){
+        if(errorInfo(error).status>0)throw error;
+        if(path==='/reproduction/candidates'){
+          const known=await reproductionCandidates(requestScope,cached?.payload,true);if(known.length)return known as T;
+        }
+        if(!cached)throw error;
+      }
     }
     if(path.split('?')[0]==='/media'){
       const media=await derivedCache<T>(activeScope,path);
       if(media!==null){if(saveAutomatically)void backgroundRefresh<T>(activeScope,path,init);return hydrateLocalMedia(activeScope,media);}
     }
     if(cached){if(saveAutomatically)void backgroundRefresh<T>(activeScope,path,init);
-      return hydrateLocalMedia(activeScope,path==='/reproduction/candidates'?await reproductionCandidates(requestScope,cached.payload) as T:cached.payload as T,path);}
+      return hydrateLocalMedia(activeScope,path==='/reproduction/candidates'?await reproductionCandidates(requestScope,cached.payload,true) as T:cached.payload as T,path);}
     const derived=await derivedCache<T>(activeScope,path);
     if(derived!==null){if(saveAutomatically)void backgroundRefresh<T>(activeScope,path,init);return hydrateLocalMedia(activeScope,derived,path);}
     if(!isRuntimeOnline())throw new OfflineUnavailableError('Este contenido todavía no se descargó para usarlo sin conexión.');
