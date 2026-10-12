@@ -650,7 +650,8 @@ async function projectEntry(entry:OutboxEntry,record:Record<string,unknown>,crea
     await putCache(entry.scope,entry.path,record);return;
   }
   if(create&&!entries.some(cache=>cache.path===target.root||cache.path.startsWith(`${target.root}?`))){
-    const payload=target.field?{[target.field]:[record]}:target.root==='/animals'
+    const payload=target.root==='/reproduction'?{heats:[],services:[],pregnancies:[],births:[],losses:[],[target.field!]:[record]}
+      :target.field?{[target.field]:[record]}:target.root==='/animals'
       ?{items:[record],page:1,hasMore:false,total:1}:[record];
     await putCache(entry.scope,target.root==='/animals'?'/animals?page=1':target.root,payload);
   }

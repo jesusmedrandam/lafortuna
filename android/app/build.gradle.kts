@@ -34,8 +34,8 @@ android {
         applicationId = "com.jdmedranda.sgb"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20
-        versionName = "2.0.0-alpha.20"
+        versionCode = 21
+        versionName = "2.0.0-alpha.21"
         buildConfigField("String", "WEB_APP_URL", "\"${configuredWebUrl.get()}\"")
         manifestPlaceholders["webAppHost"] = configuredWebHost.get()
     }
