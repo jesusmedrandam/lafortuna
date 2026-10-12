@@ -10,6 +10,7 @@ import {build} from 'vite';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const deadline=setTimeout(()=>{console.error('Browser test timed out');process.exit(1);},45000);
 const mockApi=`
+import {getReproductionCandidates as realCandidates} from 'real-profile-candidates';
 const animal={id:'animal-a',name:'Lucera',description:'Vaca de la finca',version:1,speciesCode:'BOVINE',sex:'FEMALE',
   availabilityStatusCode:'ACTIVE',classification:{code:'VACA',name:'Vaca'},earTagCode:'A1',
   birthDate:'2024-01-01',entryDate:'2024-03-01',initialWeight:0,initialWeightUnitCode:'KILOGRAM',
@@ -17,7 +18,7 @@ const animal={id:'animal-a',name:'Lucera',description:'Vaca de la finca',version
   owners:[{id:'owner-a',name:'Ana',percent:100,isPrimary:true}],breeds:[{id:'breed-a',name:'Jersey'}],
   colors:[{id:'color-a',name:'Café'}],brands:[{id:'brand-a',name:'Finca A'}],
   mother:{name:'Margarita',animalId:'mother-a'},father:{name:'Toro A',animalId:null}};
-export const getAnimal=async(_token,id)=>id==='animal-a'?structuredClone(animal):{
+export const getAnimal=async(_token,id)=>id==='offline-old-id'?getAnimal(_token,'animal-b'):id==='animal-a'?structuredClone(animal):{
   ...animal,id,name:'Bruno',description:' ',earTagCode:' ',birthDate:null,entryDate:'',initialWeight:undefined,
   classification:null,group:{name:' '},location:null,owners:[],breeds:[],colors:[],brands:[],mother:{name:' '},father:null};
 export const getMedia=async(_token,_type,id)=>{if(id!=='animal-a')throw new Error('No local photos for this animal');
@@ -25,7 +26,14 @@ export const getMedia=async(_token,_type,id)=>{if(id!=='animal-a')throw new Erro
     url:'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="40" height="40"/%3E',created_at:'2026-10-01T12:00:00Z'}];};
 export class ApiRequestError extends Error{}
 export const uploadMedia=async()=>{};export const deleteMediaObject=async()=>{};
-export const getReproductionCandidates=async()=>{if(window.profileReproFail)throw new Error('No fue posible cargar los animales. Reintenta.');return [{id:'animal-a',name:'Lucera',sex:'FEMALE',birthDate:'2024-01-01'},{id:'animal-b',name:'Bruno',sex:'FEMALE',birthDate:null}];};
+window.profileCandidateLookups=[];
+window.fetch=async(url)=>{
+ const path=new URL(String(url),location.origin).pathname;window.profileCandidateLookups.push(path);
+ if(window.profileReproFail)return new Response(JSON.stringify({ok:false,error:{message:'No fue posible cargar los animales. Reintenta.',code:'LOAD_FAILED'}}),{status:500});
+ const data=path.endsWith('/reproduction/candidates')?[{id:'chola',name:'Chola Negra',sex:'FEMALE',birthDate:null}]:await getAnimal('test',path.split('/').at(-1));
+ return new Response(JSON.stringify({ok:true,data}),{status:200,headers:{'content-type':'application/json'}});
+};
+export const getReproductionCandidates=realCandidates;
 export const listGroups=async()=>[];export const listCatalogItems=async()=>[];export const listOwners=async()=>[];
 export const createHeat=async(_token,input)=>{window.profileHeat=input;};export const createService=async()=>{};
 export const createPregnancy=async()=>{};export const recordBirth=async()=>{};export const recordLoss=async()=>{};
@@ -147,17 +155,25 @@ try{
   window.profileHeat=null;document.querySelector('.reproduction-forms form:not([hidden])').requestSubmit();
   await until(()=>window.profileHeat&&!document.querySelector('.v2-animal-action-host'));
   check(window.profileHeat.cowId==='animal-b','An animal without birth date can save heat from the profile');
+  check(window.profileCandidateLookups.some(path=>path.endsWith('/animals/animal-b')),'The real API checks the profile animal missing from a Chola-only snapshot');
   window.profileReproFail=true;document.querySelector('[aria-label="Reproducción"]').click();await until(()=>document.querySelector('.v2-animal-sheet'));
   [...document.querySelectorAll('.v2-animal-sheet button')].find(node=>node.textContent==='Registrar celo').click();
   await until(()=>document.querySelector('.v2-animal-action-host .modal')?.textContent.includes('No fue posible cargar'));
   const close=[...document.querySelectorAll('.v2-animal-action-host .modal button')].find(node=>node.textContent==='Cerrar');
   check(close,'An error shows a visible form message and close action');close.click();await until(()=>!document.querySelector('.v2-animal-action-host'));
+  window.profileReproFail=false;render('offline-old-id');await until(()=>location.pathname==='/animales/animal-b'&&document.querySelector('h1')?.textContent==='Bruno');
+  document.querySelector('[aria-label="Reproducción"]').click();await until(()=>document.querySelector('.v2-animal-sheet'));
+  [...document.querySelectorAll('.v2-animal-sheet button')].find(node=>node.textContent==='Registrar celo').click();
+  await until(()=>document.querySelector('.reproduction-forms form:not([hidden])'));window.profileHeat=null;
+  document.querySelector('.reproduction-forms form:not([hidden])').requestSubmit();await until(()=>window.profileHeat&&!document.querySelector('.v2-animal-action-host'));
+  check(window.profileHeat.cowId==='animal-b','A synchronized animal profile replaces the temporary ID before registering heat');
   document.getElementById('result').textContent='PASS: reference profile icons/style, absent fields, split histories, expansion, child links and role permissions';
 }catch(error){document.getElementById('result').textContent='FAIL: '+error.stack;}
 `;
 const panels=['AnimalPanel','MovementPanel','HealthPanel','ProductionPanel','V2WeighingsPage','V2CommercePage'];
 const result=await build({root,configFile:false,logLevel:'error',define:{'process.env.NODE_ENV':'"production"'},plugins:[{
   name:'animal-profile-test',enforce:'pre',resolveId(id,importer){
+    if(id==='real-profile-candidates')return root+'src/sgb-v2/api.ts';
     importer=importer?.replaceAll('\\','/');
     if(id==='animal-profile-test'||id===root+'animal-profile-test')return '\0profile-test';
     if(importer?.endsWith('/V2AnimalStatusPage.tsx')||importer?.endsWith('/ReproductionPanel.tsx')||importer?.endsWith('/RecordMedia.tsx')){

@@ -54,6 +54,17 @@ const headers={authorization:'Bearer test-token'};
 const noNetwork=async()=>{throw new Error('Unexpected network access while offline');};
 const get=path=>runtime.offlineRequest(path,{headers},noNetwork);
 const change=(path,body,method='PATCH')=>runtime.offlineRequest(path,{method,headers,body:JSON.stringify(body)},noNetwork);
+const reproductionPolicy={minimumCowMonths:18,minimumBullMonths:24,daysAfterBirthHeat:30,daysAfterBirthPregnancy:45,
+ daysAfterLossHeat:21,daysAfterLossPregnancy:30,allowSecondHeat:true,allowFalseHeatInPregnancy:true,useLastValidHeat:true};
+const reproductiveCandidates=[{id:'cow-a',name:'Vacona adulta sin fecha',sex:'FEMALE',birthDate:null},
+ {id:'cow-b',name:'Otra vacona adulta',sex:'FEMALE',birthDate:null},
+ {id:'young-father',name:'Padre joven',sex:'MALE',birthDate:'2026-01-01'},
+ {id:'adult-father',name:'Padre adulto',sex:'MALE',birthDate:'2020-01-01'}];
+async function seedReproductionRules(scope){
+ await runtime.putCache(scope,'/reproduction/settings',reproductionPolicy);
+ await runtime.putCache(scope,'/reproduction/candidates',reproductiveCandidates);
+ await runtime.putCache(scope,'/animals/parent-age-rules',reproductionPolicy);
+}
 const animal={id:'animal-a',name:'Lucera',description:'Antes',version:1,sex:'FEMALE',speciesCode:'BOVINE',
   breeds:[{id:'breed-old',name:'Holstein'}],colors:[],brands:[{id:'brand-old',name:'Marca vieja'}],
   owners:[{id:'owner-old',name:'Dueño anterior',percent:100,isPrimary:true}],mother:null,father:null,
@@ -536,7 +547,8 @@ console.log('PASS: draft expiry at 24 hours, dependent queue cleanup, unchanged 
 // A queued birth and all calf photos survive restart and bind to the server IDs.
 const birthScope={userId:'birth-offline',propertyId:'birth-property',roleId:'owner'};
 online=false;await runtime.configureOfflineRuntime(birthScope,'test-token');
-await runtime.putCache(birthScope,'/reproduction',{heats:[],services:[],births:[],losses:[],pregnancies:[{id:'pregnancy-a',cowId:'cow-a',cowName:'Madre',status:'CONFIRMED'}]});
+await seedReproductionRules(birthScope);
+await runtime.putCache(birthScope,'/reproduction',{heats:[],services:[],births:[],losses:[],pregnancies:[{id:'pregnancy-a',cowId:'cow-a',cowName:'Madre',status:'CONFIRMED',confirmedOn:'2026-01-01'}]});
 await runtime.putCache(birthScope,'/animals?page=1',{items:[{id:'cow-a',name:'Madre',sex:'FEMALE',speciesCode:'BOVINE',owners:[{id:'owner-a',name:'Ana',percent:100,isPrimary:true}]}],page:1,total:1,hasMore:false});
 await runtime.putCache(birthScope,'/owners',[{id:'owner-b',name:'Luis'}]);
 const queuedNewborn=await change('/reproduction/births',{pregnancyId:'pregnancy-a',occurredOn:'2026-10-10',kind:'NORMAL',stillbornCount:0,
@@ -589,6 +601,7 @@ console.log('PASS: current owner rules replace stale online reads and permission
 
 const heatScope={userId:'heat-cycle-offline',propertyId:'heat-property',roleId:'owner'};
 await runtime.configureOfflineRuntime(heatScope,'test-token');
+await seedReproductionRules(heatScope);
 await runtime.putCache(heatScope,'/reproduction',{heats:[{id:'heat-original',cowId:'cow-a',startsOn:'2026-08-01',isFalse:false}],services:[],pregnancies:[],births:[],losses:[]});
 const heatInput={cowId:'cow-a',startsOn:'2026-09-01',isFalse:false};
 await assert.rejects(()=>change('/reproduction/heats',heatInput,'POST'),/Elige cuál conservar/);
@@ -619,19 +632,93 @@ await runtime.putCache(heatScope,'/reproduction',{heats:[{id:'old-cycle',cowId:'
 await change('/reproduction/heats',{cowId:'cow-a',startsOn:'2026-10-01',isFalse:false},'POST');
 assert.equal((await get('/reproduction')).heats.filter(heat=>!heat.isFalse).length,2,'A new cycle preserves historical true heats');
 await runtime.putCache(heatScope,'/reproduction',{heats:[{id:'same-day-heat',cowId:'cow-b',startsOn:'2026-09-01',isFalse:false}],services:[],pregnancies:[],births:[{id:'birth-b',motherId:'cow-b',occurredOn:'2026-09-01'}],losses:[]});
+await runtime.putCache(heatScope,'/reproduction/settings',{...reproductionPolicy,daysAfterBirthHeat:0});
 await assert.rejects(()=>change('/reproduction/heats',{cowId:'cow-b',startsOn:'2026-09-01',isFalse:false},'POST'),/Elige cuál conservar/);
 console.log('PASS: one true heat per cycle offline, explicit choice, restart, discard, sync and birth cycle reset.');
 
 const partialScope={userId:'partial-reproduction',propertyId:'partial-property',roleId:'owner'};
 await runtime.configureOfflineRuntime(partialScope,'test-token');
+await seedReproductionRules(partialScope);
 await runtime.putCache(partialScope,'/reproduction',{heats:[{id:'legacy-heat',cowId:'cow-a',startsOn:'2026-08-01',isFalse:false}]});
 const legacyReproduction=await runtime.getReproduction('test-token');
 assert.equal(legacyReproduction.heats.length,1);assert.deepEqual(legacyReproduction.births,[],'Legacy partial caches expose empty collections instead of breaking the form');
-await assert.rejects(()=>change('/reproduction/heats',heatInput,'POST'),/Elige cuál conservar/);
+await assert.rejects(()=>change('/reproduction/heats',heatInput,'POST'),/descarga de reproducción está incompleta/);
+assert.equal((await runtime.listOutbox(partialScope.userId)).length,0,'Incomplete data cannot create an unvalidated dependent record');
+await runtime.putCache(partialScope,'/reproduction',{...legacyReproduction});
 await change('/reproduction/heats',{...heatInput,trueHeatId:'NEW'},'POST');
 await runtime.configureOfflineRuntime({...partialScope,propertyId:'first-heat-property'},'test-token');
+await seedReproductionRules({...partialScope,propertyId:'first-heat-property'});
+await assert.rejects(()=>change('/reproduction/heats',heatInput,'POST'),/Faltan datos para validar/);
+await runtime.putCache({...partialScope,propertyId:'first-heat-property'},'/reproduction',{heats:[],services:[],pregnancies:[],births:[],losses:[]});
 await change('/reproduction/heats',heatInput,'POST');
 const firstReproduction=await runtime.getReproduction('test-token');
 for(const kind of ['heats','services','pregnancies','births','losses'])assert.ok(Array.isArray(firstReproduction[kind]),kind+' exists after the first offline event');
 await assert.rejects(()=>change('/reproduction/heats',{...heatInput,startsOn:'2026-10-01'},'POST'),/Elige cuál conservar/);
 console.log('PASS: legacy partial reproduction caches and the first offline event retain complete collections.');
+
+const staleScope={userId:'stale-reproduction',propertyId:'stale-property',roleId:'owner'};
+await runtime.configureOfflineRuntime(staleScope,'test-token');
+await runtime.putCache(staleScope,'/reproduction/candidates',[{id:'chola',name:'Chola Negra',sex:'FEMALE'}]);
+online=true;wifi=false;let candidateReads=0;
+const currentCandidates=await runtime.offlineRequest('/reproduction/candidates',{headers},async()=>{
+ candidateReads++;return {data:[{id:'chola',name:'Chola Negra',sex:'FEMALE',birthDate:null},
+ {id:'vacona',name:'Vacona adulta',sex:'FEMALE',birthDate:null},{id:'young-father',name:'Padre joven',sex:'MALE',birthDate:'2026-01-01'}],etag:null,notModified:false};
+});
+assert.equal(candidateReads,1,'Candidate eligibility reads current data even outside automatic Wi-Fi downloads');
+assert.equal(currentCandidates.length,3,'A stale one-animal cache cannot hide other adult heifers');
+assert.equal(runtime.reachedReproductionAge(undefined,'2026-10-12',24),false,'An absent birth-date field is unverified, unlike explicit null');
+assert.equal(runtime.reachedReproductionAge(null,'2026-10-12',24),true,'An explicitly unknown birth date stays exempt');
+online=false;
+console.log('PASS: fresh reproduction candidates, adult heifers and verified missing birth dates.');
+
+await runtime.putCache(staleScope,'/animals/vacona',{id:'vacona',name:'Vacona adulta',sex:'FEMALE',speciesCode:'BOVINE',availabilityStatusCode:'ACTIVE',birthDate:null});
+const offlineCandidates=await runtime.getReproductionCandidates('test-token','vacona');
+assert.ok(offlineCandidates.some(row=>row.id==='vacona'),'The profile can register an adult heifer absent from an old candidate snapshot');
+const validationScope={userId:'reproduction-before-save',propertyId:'validation-property',roleId:'owner'};
+await runtime.configureOfflineRuntime(validationScope,'test-token');await seedReproductionRules(validationScope);
+const emptyReproduction={heats:[],services:[],pregnancies:[],births:[],losses:[]};
+await runtime.putCache(validationScope,'/reproduction',emptyReproduction);
+await assert.rejects(()=>change('/reproduction/heats',{...heatInput,bullId:'young-father'},'POST'),/24 meses/);
+await assert.rejects(()=>change('/reproduction/heats',{...heatInput,startsOn:'2099-01-01'},'POST'),/no sea futura/);
+await assert.rejects(()=>change('/reproduction/heats',{...heatInput,endsOn:'2026-08-01'},'POST'),/entre su inicio y hoy/);
+assert.equal((await runtime.listOutbox(validationScope.userId)).length,0,'Invalid reproductive events are rejected before the queue');
+assert.deepEqual((await get('/reproduction')).heats,[],'Invalid events do not alter the cached history');
+const validHeat=await change('/reproduction/heats',{...heatInput,bullId:'adult-father'},'POST');
+assert.ok(validHeat.id,'A valid adult heifer with no birth date still registers heat');
+const context={records:emptyReproduction,settings:reproductionPolicy,candidates:reproductiveCandidates,today:'2026-10-12'};
+const validate=(path,jsonBody,overrides={})=>runtime.validateReproductionMutation({path,method:'POST',jsonBody},{...context,...overrides});
+const pregnancyInput={cowId:'cow-a',confirmedOn:'2026-10-01',conceptionMethod:'NATURAL',confirmationMethod:'PALPATION'};
+assert.throws(()=>validate('/reproduction/pregnancies',{...pregnancyInput,fatherId:'young-father'}),/24 meses/);
+assert.throws(()=>validate('/reproduction/heats',heatInput,{records:{...emptyReproduction,pregnancies:[{id:'pregnancy-a',cowId:'cow-a',status:'CONFIRMED'}]}}),/preñez confirmada/);
+assert.throws(()=>validate('/reproduction/heats',heatInput,{records:{...emptyReproduction,births:[{motherId:'cow-a',occurredOn:'2026-08-15'}]}}),/30 días/);
+assert.throws(()=>validate('/reproduction/services',{cowId:'cow-a',occurredOn:'2026-10-01',kind:'INSEMINATION',heatId:'false-heat'},
+ {records:{...emptyReproduction,heats:[{id:'false-heat',cowId:'cow-a',startsOn:'2026-09-01',isFalse:true}]}}),/celo verdadero/);
+assert.throws(()=>validate('/reproduction/pregnancies',{...pregnancyInput,serviceId:'service-a',conceptionMethod:'INSEMINATION'},
+ {records:{...emptyReproduction,services:[{id:'service-a',cowId:'cow-a',occurredOn:'2026-09-01',kind:'INSEMINATION',fatherId:'young-father'}]}}),/24 meses/);
+assert.throws(()=>validate('/reproduction/losses',{pregnancyId:'pregnancy-a',occurredOn:'2026-01-01',notes:'Aborto'},
+ {records:{...emptyReproduction,pregnancies:[{id:'pregnancy-a',cowId:'cow-a',status:'CONFIRMED',confirmedOn:'2026-02-01'}]}}),/anterior a la confirmación/);
+assert.throws(()=>validate('/reproduction/births',{pregnancyId:'pregnancy-a',occurredOn:'2026-10-01'},
+ {records:{...emptyReproduction,pregnancies:[{id:'pregnancy-a',cowId:'cow-a',status:'BORN',confirmedOn:'2026-01-01'}]}}),/todavía no tenga parto/);
+console.log('PASS: reproductive ages, dates, waiting periods, pregnancy/cycle links and unknown birthdays validated before saving.');
+
+const failedParent=await change('/animals',{name:'Padre pendiente',sex:'MALE',speciesCode:'BOVINE',groupId:'group-a',owners:[{partyId:'owner-a',percent:100,isPrimary:true}]},'POST');
+const failedEntry=(await runtime.listOutbox(validationScope.userId)).find(row=>row.temporaryId===failedParent.id);
+state.outbox.set(failedEntry.id,{...failedEntry,state:'FAILED'});
+const beforeLinked=(await runtime.listOutbox(validationScope.userId)).length;
+await assert.rejects(()=>change('/reproduction/heats',{...heatInput,bullId:failedParent.id,trueHeatId:'NEW'},'POST'),/requiere revisión/);
+assert.equal((await runtime.listOutbox(validationScope.userId)).length,beforeLinked,'A failed parent cannot gain a dependent event');
+await runtime.putCache(validationScope,'/animals/young-father',{id:'young-father',name:'Padre joven',sex:'MALE',birthDate:'2026-01-01'});
+await assert.rejects(()=>change('/animals',{name:'Cría',sex:'FEMALE',speciesCode:'BOVINE',groupId:'group-a',birthDate:'2026-10-01',owners:[{partyId:'owner-a',percent:100,isPrimary:true}],father:{animalId:'young-father'}},'POST'),/24 meses/);
+const raceScope={userId:'reproductive-race',propertyId:'race-property',roleId:'owner'};
+await runtime.configureOfflineRuntime(raceScope,'test-token');await seedReproductionRules(raceScope);
+await runtime.putCache(raceScope,'/reproduction',emptyReproduction);
+online=true;const mirroredBefore=new Set(mirrored.keys());
+await assert.rejects(()=>runtime.offlineRequest('/reproduction/heats',{method:'POST',headers,body:JSON.stringify(heatInput)},async(path,init)=>{
+ if(init.method==='POST')throw Object.assign(new Error('La hembra cambió en el servidor'),{status:409,code:'REPRODUCTION_ANIMAL_UNAVAILABLE'});
+ return {data:path==='/reproduction/settings'?reproductionPolicy:path==='/reproduction/candidates'?reproductiveCandidates:emptyReproduction,etag:null,notModified:false};
+}),/cambió en el servidor/);
+online=false;
+assert.equal((await runtime.listOutbox(raceScope.userId)).length,0,'An online server rejection keeps the form draft instead of an invalid queue entry');
+assert.deepEqual((await get('/reproduction')).heats,[]);
+assert.deepEqual(new Set(mirrored.keys()),mirroredBefore,'Android must not retain the rejected event');
+console.log('PASS: failed dependencies blocked, animal parent ages checked and online races leave no invalid pending records.');

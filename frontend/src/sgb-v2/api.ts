@@ -905,8 +905,13 @@ export async function getReproduction(accessToken: string):Promise<ReproductionR
   return {heats:records.heats??[],services:records.services??[],pregnancies:records.pregnancies??[],
     births:records.births??[],losses:records.losses??[]};
 }
-export function getReproductionCandidates(accessToken: string) {
-  return request<ReproductionCandidate[]>('/reproduction/candidates', { headers: bearer(accessToken) });
+export async function getReproductionCandidates(accessToken: string,requiredAnimalId?:string) {
+  const candidates=await request<ReproductionCandidate[]>('/reproduction/candidates', { headers: bearer(accessToken) });
+  if(requiredAnimalId&&!candidates.some(row=>row.id===requiredAnimalId)){
+    const animal=await getAnimal(accessToken,requiredAnimalId);
+    if(animal.speciesCode==='BOVINE'&&animal.availabilityStatusCode==='ACTIVE')return [...candidates,animal];
+  }
+  return candidates;
 }
 export function createHeat(accessToken: string, input: {
   cowId: string; bullId?: string | null; startsOn: string; endsOn?: string | null;

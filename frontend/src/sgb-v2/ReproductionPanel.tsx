@@ -3,7 +3,7 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {ArrowUpDown,Baby,ChevronRight,Plus,Settings2,Heart,Stethoscope,CalendarClock,TriangleAlert,Syringe,Trash2} from 'lucide-react';
 import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
   IconButton,LoadingState,Modal,Select} from '../components/ui';
-import {reachedReproductionAge} from './reproductionAge';
+import {reachedReproductionAge,reproductionToday} from './reproductionAge';
 import {cycleTrueHeats} from './reproductionCycle';
 import {formatDate} from '../utils';
 import {useNavigate} from 'react-router-dom';
@@ -20,8 +20,7 @@ import {
 } from './api';
 
 function localDate() {
-  const today = new Date();
-  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  return reproductionToday();
 }
 const errorMessage = (error: unknown) => error instanceof ApiRequestError
   ? error.message : error instanceof Error ? error.message : 'No fue posible guardar el evento.';
@@ -86,7 +85,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   const selectedHeat=records?.heats.find(heat=>heat.id===heatId);
   const selectedService=records?.services.find(service=>service.id===linkedServiceId);
   const estimatedConception=new Date(`${eventOn||localDate()}T00:00:00Z`);
-  estimatedConception.setUTCDate(estimatedConception.getUTCDate()-(Number(gestationDays)||0));
+  estimatedConception.setUTCDate(estimatedConception.getUTCDate()-Math.min(400,Math.max(0,Number(gestationDays)||0)));
   const parentOn=activeForm==='PREGNANCY'?(selectedService?.occurredOn
     ??(selectedHeat?(settings?.useLastValidHeat?selectedHeat.endsOn??selectedHeat.startsOn:selectedHeat.startsOn):estimatedConception.toISOString().slice(0,10))):eventOn;
   const females = candidates.filter(animal=>animal.sex==='FEMALE'&&settings&&reachedReproductionAge(animal.birthDate,parentOn,settings.minimumCowMonths));
@@ -136,14 +135,14 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
 
   useEffect(() => {
     let active = true;
-    void Promise.all([getReproduction(accessToken), getReproductionCandidates(accessToken),
+    void Promise.all([getReproduction(accessToken), getReproductionCandidates(accessToken,initialAnimalId),
       getReproductionSettings(accessToken)])
       .then(([next, animals, config]) => {
         if (active) { setRecords(next); setCandidates(animals); setSettings(config); }
       })
       .catch((failure) => { if (active) setError(errorMessage(failure)); });
     return () => { active = false; };
-  }, [accessToken, revision]);
+  }, [accessToken, revision,initialAnimalId]);
 
   useEffect(()=>{if(activeForm!=='BIRTH')return;let active=true;
     void Promise.all([hasPermission('GROUP_VIEW')?listGroups(accessToken):Promise.resolve([]),

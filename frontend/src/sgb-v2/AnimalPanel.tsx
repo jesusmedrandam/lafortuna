@@ -1,5 +1,5 @@
 import {ImagePicker} from './ImagePicker';
-import {reachedReproductionAge} from './reproductionAge';
+import {reachedReproductionAge,reproductionToday} from './reproductionAge';
 import {DateInput} from '../components/ui';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import {
@@ -261,7 +261,7 @@ function ParentField({ accessToken, child, role,eventOn }: {
   const eligible = candidates.filter((entry) => entry.id !== child?.id
     && entry.sex === (role === 'mother' ? 'FEMALE' : 'MALE')
     && (!(eventOn||child?.birthDate) || !entry.birthDate || entry.birthDate < (eventOn||child!.birthDate!))
-    && rules&&reachedReproductionAge(entry.birthDate,eventOn||child?.birthDate||new Date().toLocaleDateString('en-CA'),
+    && rules&&reachedReproductionAge(entry.birthDate,eventOn||child?.birthDate||reproductionToday(),
       role==='mother'?rules.minimumCowMonths:rules.minimumBullMonths));
   return <fieldset className="animal-parent-field"><legend>{label}</legend>
     <label><span>Tipo de registro</span><Select name={`${role}Mode`} value={mode}

@@ -1,4 +1,8 @@
 import type {OutboxEntry} from './database';
+import type {ReproductionRecords,ReproductionSettings,ReproductionCandidate} from '../api';
+import {reachedReproductionAge} from '../reproductionAge';
+import {cycleTrueHeats} from '../reproductionCycle';
+import {reproductionSectionEnabled} from '../reproductionSections';
 
 export class LocalValidationError extends Error {
   readonly status=400;
@@ -6,6 +10,87 @@ export class LocalValidationError extends Error {
 }
 function requireValue(valid:unknown,message:string):asserts valid{
   if(!valid)throw new LocalValidationError(message);
+}
+export function validateReproductionMutation(entry:OutboxEntry,context:{records:ReproductionRecords;
+  settings:ReproductionSettings;candidates:ReproductionCandidate[];today:string}){
+  const {records,settings,candidates,today}=context;const input=(entry.jsonBody??{}) as Record<string,unknown>;
+  const kind=entry.path.split('/').at(-1);
+  const section=kind==='heats'?'HEAT':kind==='services'?input.kind==='EMBRYO_TRANSFER'?'EMBRYO_TRANSFER':'INSEMINATION'
+    :kind==='pregnancies'?'PREGNANCY':kind==='births'?'BIRTH':'LOSS';
+  requireValue(reproductionSectionEnabled(settings,section),'Este registro está desactivado en las políticas de operación.');
+  if(kind==='pregnancies'&&['INSEMINATION','EMBRYO_TRANSFER'].includes(String(input.conceptionMethod)))
+    requireValue(reproductionSectionEnabled(settings,input.conceptionMethod as 'INSEMINATION'|'EMBRYO_TRANSFER'),
+      'Ese método de reproducción está desactivado en las políticas de operación.');
+  const on=String(input[kind==='heats'?'startsOn':kind==='pregnancies'?'confirmedOn':'occurredOn']??'');
+  requireValue(/^\d{4}-\d{2}-\d{2}$/.test(on)&&on<=today,'Indica una fecha válida que no sea futura.');
+  if(input.endsOn)requireValue(String(input.endsOn)>=on&&String(input.endsOn)<=today,'El fin del celo debe estar entre su inicio y hoy.');
+  if(input.notes!=null)requireValue(typeof input.notes==='string'&&input.notes.trim().length<=(kind==='losses'?5000:500),'Las observaciones son demasiado largas.');
+  const pregnancy=records.pregnancies.find(row=>row.id===input.pregnancyId);
+  const unresolved=(id:string)=>!records.births.some(row=>row.pregnancyId===id)&&!records.losses.some(row=>row.pregnancyId===id);
+  if(kind==='births'||kind==='losses'){
+    requireValue(pregnancy?.status==='CONFIRMED'&&unresolved(pregnancy.id),'Selecciona una preñez confirmada que todavía no tenga parto ni aborto.');
+    requireValue(on>=pregnancy.confirmedOn,'El parto o aborto no puede ser anterior a la confirmación de preñez.');
+    if(kind==='losses')requireValue(typeof input.notes==='string'&&input.notes.trim().length>0,'Describe el aborto o pérdida de preñez.');
+    return;
+  }
+  const cowId=String(input.cowId??'');
+  const age=(id:unknown,sex:'FEMALE'|'MALE',date:string)=>{
+    const animal=candidates.find(row=>row.id===id);requireValue(animal&&animal.sex===sex,'Selecciona un animal disponible del sexo correspondiente.');
+    const months=sex==='FEMALE'?settings.minimumCowMonths:settings.minimumBullMonths;
+    requireValue(months===0||animal.birthDate!==undefined,`Falta verificar la fecha de nacimiento de ${animal.name}. Abre su ficha con conexión antes de usarlo.`);
+    requireValue(reachedReproductionAge(animal.birthDate,date,months),`${animal.name} debe tener al menos ${months} meses en la fecha del evento.`);
+  };
+  age(cowId,'FEMALE',on);
+  const active=records.pregnancies.some(row=>row.cowId===cowId&&row.status==='CONFIRMED'&&unresolved(row.id));
+  requireValue(!active||(kind==='heats'&&input.isFalse===true),kind==='heats'?'La hembra tiene una preñez confirmada. Solo puede registrarse un celo aparente o falso.':'La hembra ya tiene una preñez confirmada.');
+  if(active&&input.isFalse)requireValue(settings.allowFalseHeatInPregnancy,'Las políticas de operación no permiten celos falsos durante la preñez.');
+  const shift=(date:string,days:number)=>{const value=new Date(date+'T12:00:00Z');value.setUTCDate(value.getUTCDate()+days);return value.toISOString().slice(0,10);};
+  const birth=records.births.filter(row=>row.motherId===cowId&&row.occurredOn<=on).map(row=>row.occurredOn).sort().at(-1);
+  const loss=records.losses.filter(row=>row.cowId===cowId&&row.occurredOn<=on).map(row=>row.occurredOn).sort().at(-1);
+  for(const [previous,days,label] of [[birth,kind==='heats'?settings.daysAfterBirthHeat:settings.daysAfterBirthPregnancy,'parto'],
+    [loss,kind==='heats'?settings.daysAfterLossHeat:settings.daysAfterLossPregnancy,'aborto o pérdida']] as const)
+    if(previous)requireValue(on>=shift(previous,days),`Deben transcurrir ${days} días después del ${label}.`);
+  const boundary=[birth,loss].filter(Boolean).sort().at(-1)??'';
+  if(kind==='heats'&&!settings.allowSecondHeat)requireValue(!records.heats.some(row=>row.cowId===cowId&&!row.cancelled&&row.startsOn>=boundary&&row.startsOn<=on),
+    'Las políticas de operación no permiten otro celo en este ciclo.');
+  const trueHeats=cycleTrueHeats(records,cowId,on);
+  if(kind==='heats'){
+    if(input.bullId)age(input.bullId,'MALE',on);
+    if(!input.isFalse&&trueHeats.length)requireValue(input.trueHeatId==='NEW'||trueHeats.some(row=>row.id===input.trueHeatId),'Ya hay un celo verdadero en este ciclo. Elige cuál conservar como verdadero.');
+    if(input.trueHeatId)requireValue(!input.isFalse&&trueHeats.length>0&&(input.trueHeatId==='NEW'||trueHeats.some(row=>row.id===input.trueHeatId)),
+      'El celo verdadero cambió. Vuelve a abrir el registro y elige otra vez.');
+    return;
+  }
+  if(input.fatherId&&input.externalFather)requireValue(false,'Selecciona un padre registrado o uno externo, no ambos.');
+  let conceptionOn=on;let fatherId=input.fatherId;
+  let heatId=input.heatId;
+  if(kind==='pregnancies'){
+    requireValue(['NATURAL','INSEMINATION','EMBRYO_TRANSFER','UNKNOWN'].includes(String(input.conceptionMethod)),'Selecciona el método de reproducción.');
+    requireValue(['PALPATION','ULTRASOUND','BLOOD_TEST','OBSERVATION','OTHER'].includes(String(input.confirmationMethod)),'Selecciona el método de confirmación.');
+    if(input.gestationDays!=null)requireValue(Number.isInteger(input.gestationDays)&&Number(input.gestationDays)>=0&&Number(input.gestationDays)<=400,'Los días de gestación deben ser enteros entre 0 y 400.');
+    if(input.serviceId){
+      const service=records.services.find(row=>row.id===input.serviceId);
+      requireValue(service&&service.cowId===cowId&&!service.cancelled&&!service.hasPregnancy&&service.kind===input.conceptionMethod
+        &&service.occurredOn>=boundary&&service.occurredOn<=on,'Selecciona un servicio disponible del ciclo actual para esta hembra.');
+      heatId=service.heatId;fatherId=service.fatherId;conceptionOn=service.occurredOn;
+    }else{
+      if(!heatId&&settings.useLastValidHeat)heatId=trueHeats.find(row=>row.startsOn<=on)?.id;
+      if(input.gestationDays!=null&&!heatId)conceptionOn=shift(on,-Number(input.gestationDays));
+    }
+  }else requireValue(['INSEMINATION','EMBRYO_TRANSFER'].includes(String(input.kind)),'Selecciona inseminación o transferencia de embriones.');
+  if(heatId){
+    const heat=trueHeats.find(row=>row.id===heatId&&row.startsOn<=on);
+    requireValue(heat,'Selecciona un celo verdadero del ciclo actual para esta hembra.');
+    if(!fatherId&&!input.externalFather)fatherId=heat.bullId;
+    if(kind==='pregnancies'&&!input.serviceId)conceptionOn=settings.useLastValidHeat?heat.endsOn??heat.startsOn:heat.startsOn;
+  }
+  requireValue(conceptionOn<=on,'La confirmación no puede ser anterior al celo o servicio seleccionado.');
+  if(kind==='pregnancies'){
+    requireValue((Date.parse(on)-Date.parse(conceptionOn))/86400000<=400,'La confirmación supera los 400 días desde el celo o servicio.');
+    age(cowId,'FEMALE',conceptionOn);
+  }
+  if(fatherId)age(fatherId,'MALE',conceptionOn);
+  if(input.donorId)age(input.donorId,'FEMALE',on);
 }
 export function validateLocalMutation(entry:OutboxEntry,current:Record<string,unknown>|null){
   const original=(entry.jsonBody??{}) as Record<string,unknown>;
