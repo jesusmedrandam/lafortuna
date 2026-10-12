@@ -1,4 +1,4 @@
-import {reachedReproductionAge} from './reproductionAge';
+import {reachedReproductionAge,reproductionToday} from './reproductionAge';
 import {reproductionSectionEnabled} from './reproductionSections';
 import {ImagePicker} from './ImagePicker';
 import {AnimalIcon} from '../components/AnimalIcon';
@@ -76,7 +76,11 @@ export function V2AnimalDetail(){
     [id,context?.propertyId,context?.roleId,session!.overview.supportMode]);
   useEffect(()=>{
     if(!id)return;let active=true;setError('');if(!canViewMedia)setMedia([]);
-    void getAnimal(token,id).then(value=>{if(active)setAnimal(value);})
+    void getAnimal(token,id).then(value=>{if(active){
+      if(value.id!==id)navigate(`/animales/${encodeURIComponent(value.id)}`,{replace:true,state:{...location.state,
+        ...(location.state?.animalAction?{animalAction:{...location.state.animalAction,animalId:value.id}}:{})}});
+      setAnimal(value);
+    }})
       .catch(reason=>{if(active)setError(reason instanceof Error?reason.message:'No se pudo abrir el animal.');});
     if(canViewMedia)void getMedia(token,'ANIMAL',id).then(value=>{if(active)setMedia(value);})
       .catch(()=>{});
@@ -221,8 +225,7 @@ export function V2AnimalDetail(){
     })):[]),
     ...(hasHealthHistory?[{label:'Ver historial de sanidad',run:()=>go('/sanidad')}]:[]),
   ];
-  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil',
-    year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  const today=reproductionToday();
   const reproductiveAge=Boolean(reproductionSettings&&reachedReproductionAge(animal?.birthDate,today,reproductionSettings.minimumCowMonths));
   const activePregnancy=reproduction?.pregnancies.find(item=>item.cowId===id&&item.status==='CONFIRMED'
     &&!reproduction.births.some(birth=>birth.pregnancyId===item.id)&&!reproduction.losses.some(loss=>loss.pregnancyId===item.id));

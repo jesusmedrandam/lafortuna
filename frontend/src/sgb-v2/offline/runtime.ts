@@ -3,9 +3,10 @@ import {
   putSetting,removeOutbox,getLocalMedia,putMediaMutation,getLocalMediaInfo,listLocalMedia,removeLocalMedia,
   removeCachedPaths,listUserCache,type OfflineScope,type OutboxEntry,type StoredFormPart,
 } from './database';
-import {LocalValidationError,validateLocalMutation} from './validation';
+import {LocalValidationError,validateLocalMutation,validateReproductionMutation} from './validation';
 import {cycleTrueHeats} from '../reproductionCycle';
-import type {ReproductionRecords} from '../api';
+import type {ReproductionRecords,ReproductionSettings,ReproductionCandidate} from '../api';
+import {reachedReproductionAge,reproductionToday} from '../reproductionAge';
 import {mediaThumbnailUrl,optimizedCloudinaryMediaUrl} from '../../media';
 import {dataCategoryForPath,defaultDownloadPreferences,downloadCategoryLabel,normalizeDownloadPreferences,
   photoCategoryForPath,photoCategoryForType,type DownloadPreferences} from './preferences';
@@ -977,6 +978,9 @@ async function backgroundRefresh<T>(scope:OfflineScope,path:string,init:RequestI
 }
 
 async function derivedCache<T>(scope:OfflineScope,path:string):Promise<T|null>{
+  if(path==='/reproduction/candidates'){
+    const candidates=await reproductionCandidates(scope,[]);return candidates.length?candidates as T:null;
+  }
   if(path==='/cleanings/products'||path==='/catalogs/products'){
     const cached=await getCache<T>(scope,path==='/cleanings/products'?'/catalogs/products':'/cleanings/products');if(cached)return cached.payload;
   }
@@ -1083,6 +1087,85 @@ function preserveLocalMedia(previous:unknown,next:unknown):unknown{
     return local?.local_media_id?{...row,local_media_id:local.local_media_id}:value;});
 }
 
+async function reproductionCandidates(scope:OfflineScope,payload:unknown,offlineFallback=false){
+  const candidates=new Map((Array.isArray(payload)?payload:[]).map(value=>{const row=bodyRecord(value);return [row.id,row];}));
+  const known=new Map<unknown,Record<string,unknown>>();
+  for(const cache of (await listCache(scope)).filter(row=>row.path.startsWith('/animals?')||row.path.startsWith('/animals/')).sort((a,b)=>a.savedAt-b.savedAt)){
+    const data=bodyRecord(cache.payload);const animals=Array.isArray(data.items)?data.items:[data];
+    for(const value of animals){const row=bodyRecord(value);if(row.id)known.set(row.id,row);}
+  }
+  for(const animal of known.values()){
+    const existing=candidates.get(animal.id);
+    if(existing&&existing.birthDate===undefined&&animal.birthDate!==undefined)candidates.set(animal.id,{...existing,birthDate:animal.birthDate});
+    if((offlineFallback||!isRuntimeOnline()||animal.__syncState==='PENDING')&&animal.speciesCode==='BOVINE'){
+      if(animal.availabilityStatusCode==='ACTIVE')candidates.set(animal.id,{...existing,...animal});
+      else candidates.delete(animal.id);
+    }
+  }
+  return [...candidates.values()];
+}
+
+async function validateBeforeQueue(entry:OutboxEntry,init:RequestInit,send:Transport,queued:OutboxEntry[]){
+  const changes=queued.filter(row=>sameScope(row.scope,entry.scope));
+  const body=bodyRecord(entry.jsonBody);
+  const read=async(path:string):Promise<unknown>=>{
+    const cache=await getCache(entry.scope,path);
+    const modified=changes.some(row=>row.id!==entry.id&&(row.path===path
+      ||path==='/reproduction'&&row.path.startsWith('/reproduction/')&&row.path!=='/reproduction/settings'));
+    if(isRuntimeOnline()&&!modified&&!path.includes('/offline-')){
+      try{return (await send<unknown>(path,{method:'GET',headers:init.headers,cache:'no-cache'})).data;}
+      catch(error){if(errorInfo(error).status>0)throw error;}
+    }
+    const original=queued.some(row=>row.id===entry.id)?entry.undo?.find(row=>row.path===path):undefined;
+    if(original?.existed)return original.payload;
+    if(cache)return cache.payload;
+    if(path==='/reproduction/candidates')return [];
+    if(path.startsWith('/animals/')){
+      for(const cached of (await listCache(entry.scope)).filter(row=>row.path.startsWith('/animals?')||row.path.startsWith('/animals/'))){
+        const animal=findRecord(cached.payload,path.split('/').at(-1)!);if(animal)return animal;
+      }
+    }
+    throw new LocalValidationError('Faltan datos para validar este registro. Abre reproducción con conexión y descarga sus datos antes de guardar sin conexión.');
+  };
+  if(entry.method==='POST'&&/^\/reproduction\/(heats|services|pregnancies|births|losses)$/.test(entry.path)){
+    const [settings,data,records]=await Promise.all([read('/reproduction/settings'),read('/reproduction/candidates'),read('/reproduction')]);
+    const policy=bodyRecord(settings),history=bodyRecord(records);
+    if(!['minimumCowMonths','minimumBullMonths','daysAfterBirthHeat','daysAfterBirthPregnancy','daysAfterLossHeat','daysAfterLossPregnancy'].every(key=>typeof policy[key]==='number')
+      ||!['allowSecondHeat','allowFalseHeatInPregnancy','useLastValidHeat'].every(key=>typeof policy[key]==='boolean')
+      ||!['heats','services','pregnancies','births','losses'].every(key=>Array.isArray(history[key])))
+      throw new LocalValidationError('La descarga de reproducción está incompleta. Actualízala con conexión para validar antes de guardar.');
+    const candidates=await reproductionCandidates(entry.scope,data) as unknown as ReproductionCandidate[];
+    const reproductive=records as ReproductionRecords;
+    const linkedService=reproductive.services.find(row=>row.id===body.serviceId);
+    const linkedHeat=reproductive.heats.find(row=>row.id===(body.heatId??linkedService?.heatId));
+    for(const id of new Set([body.cowId,body.bullId,body.fatherId,body.donorId,linkedService?.fatherId,linkedHeat?.bullId])){
+      if(typeof id!=='string'||!id||candidates.some(row=>row.id===id))continue;
+      const animal=bodyRecord(await read(`/animals/${id}`));
+      if(animal.speciesCode==='BOVINE'&&animal.availabilityStatusCode==='ACTIVE')candidates.push(animal as unknown as ReproductionCandidate);
+    }
+    validateReproductionMutation(entry,{settings:settings as ReproductionSettings,records:reproductive,candidates,today:reproductionToday()});
+    if(entry.path==='/reproduction/births'&&Array.isArray(body.calves)&&body.calves.some(calf=>!Array.isArray(bodyRecord(calf).owners)||!(bodyRecord(calf).owners as unknown[]).length)){
+      const pregnancy=reproductive.pregnancies.find(row=>row.id===body.pregnancyId)!;
+      const mother=bodyRecord(await read(`/animals/${pregnancy.cowId}`));
+      if(!Array.isArray(mother.owners)||!mother.owners.length)throw new LocalValidationError('Asigna propietarios a la madre antes de registrar sus crías.');
+    }
+  }
+  if(entry.path==='/animals'&&entry.method==='POST'||/^\/animals\/[^/]+\/parents$/.test(entry.path)){
+    const parents=['mother','father'].map(role=>({role,id:bodyRecord(body[role]).animalId})).filter(row=>row.id);
+    if(parents.length){
+      const policy=bodyRecord(await read('/animals/parent-age-rules'));
+      const child=entry.path==='/animals'?body:bodyRecord(await read(`/animals/${entry.path.split('/')[2]}`));
+      for(const parent of parents){
+        const animal=bodyRecord(await read(`/animals/${parent.id}`));const months=policy[parent.role==='mother'?'minimumCowMonths':'minimumBullMonths'];
+        if(typeof months!=='number'||months!==0&&animal.birthDate===undefined)throw new LocalValidationError('Faltan datos para validar la edad de los progenitores. Abre sus fichas con conexión.');
+        if(animal.sex!==(parent.role==='mother'?'FEMALE':'MALE')||!reachedReproductionAge(animal.birthDate as string|null,String(child.birthDate??reproductionToday()),months))
+          throw new LocalValidationError(`${animal.name??'El progenitor'} debe cumplir el sexo y la edad mínima de ${months} meses en la fecha de nacimiento de la cría.`);
+      }
+    }
+  }
+  if(!activeScope||!sameScope(activeScope,entry.scope))throw new LocalValidationError('La propiedad o el rol cambiaron. Abre de nuevo el formulario antes de guardar.');
+}
+
 async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transport):Promise<T>{
   installOfflineTransport(send);
   if(!activeScope||!authenticated(init)||path.startsWith('/auth/')||path.startsWith('/superadmin/'))return (await send<T>(path,init)).data;
@@ -1091,21 +1174,28 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
     const requestScope={...activeScope};const generation=cacheGeneration;
     const saveAutomatically=canAutomaticallyDownload()&&selectedData(path);
     const cached=await getCache<T>(activeScope,path);
-    if((path==='/reproduction/settings'||path==='/animals/classification'||path==='/animals/parent-age-rules')&&isRuntimeOnline()
+    if((path==='/reproduction/settings'||path==='/reproduction/candidates'||path==='/reproduction'||path==='/animals/classification'||path==='/animals/parent-age-rules')&&isRuntimeOnline()
       &&!(await listOutbox(activeScope.userId)).some(entry=>sameScope(entry.scope,activeScope!)
-        &&(entry.path===path||path==='/animals/parent-age-rules'&&entry.path==='/reproduction/settings'))){
+        &&(entry.path===path||path==='/reproduction'&&entry.path.startsWith('/reproduction/')||path==='/animals/parent-age-rules'&&entry.path==='/reproduction/settings'))){
       try{
         const response=await send<T>(path,{...init,cache:'no-cache'});
         if(saveAutomatically&&canAutomaticallyDownload()&&activeScope&&sameScope(requestScope,activeScope)
           &&generation===cacheGeneration)await applyServerCache(requestScope,path,response.data,response.etag,generation);
-        return response.data;
-      }catch(error){if(errorInfo(error).status>0||!cached)throw error;}
+        return path==='/reproduction/candidates'?await reproductionCandidates(requestScope,response.data) as T:response.data;
+      }catch(error){
+        if(errorInfo(error).status>0)throw error;
+        if(path==='/reproduction/candidates'){
+          const known=await reproductionCandidates(requestScope,cached?.payload,true);if(known.length)return known as T;
+        }
+        if(!cached)throw error;
+      }
     }
     if(path.split('?')[0]==='/media'){
       const media=await derivedCache<T>(activeScope,path);
       if(media!==null){if(saveAutomatically)void backgroundRefresh<T>(activeScope,path,init);return hydrateLocalMedia(activeScope,media);}
     }
-    if(cached){if(saveAutomatically)void backgroundRefresh<T>(activeScope,path,init);return hydrateLocalMedia(activeScope,cached.payload as T,path);}
+    if(cached){if(saveAutomatically)void backgroundRefresh<T>(activeScope,path,init);
+      return hydrateLocalMedia(activeScope,path==='/reproduction/candidates'?await reproductionCandidates(requestScope,cached.payload,true) as T:cached.payload as T,path);}
     const derived=await derivedCache<T>(activeScope,path);
     if(derived!==null){if(saveAutomatically)void backgroundRefresh<T>(activeScope,path,init);return hydrateLocalMedia(activeScope,derived,path);}
     if(!isRuntimeOnline())throw new OfflineUnavailableError('Este contenido todavía no se descargó para usarlo sin conexión.');
@@ -1117,7 +1207,7 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
         downloadPreferences,activeScope.propertyId,true)));}
       catch{/* Solo Android. */}
     }
-    return response.data;
+    return path==='/reproduction/candidates'?await reproductionCandidates(requestScope,response.data) as T:response.data;
   }
   if(!mutationAllowed(path,init))return (await send<T>(path,init)).data;
 
@@ -1141,15 +1231,10 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
   const current=await cachedRecord(entry);
   if(draftRoots.some(root=>path.startsWith(root+'/'))&&expiredDraft(current))throw new LocalValidationError('Este borrador se eliminó al cumplir 24 horas sin aplicarse.');
   validateLocalMutation(entry,current);
-  if(path==='/reproduction/heats'&&verb==='POST'){
-    const input=bodyRecord(entry.jsonBody);const cached=await getCache(activeScope,'/reproduction');
-    if(cached&&!input.isFalse){
-      const previous=cycleTrueHeats(cached.payload as ReproductionRecords,String(input.cowId),String(input.startsOn));
-      if(previous.length&&!input.trueHeatId)throw new LocalValidationError('Ya hay un celo verdadero en este ciclo. Elige cuál conservar como verdadero.');
-      if(input.trueHeatId&&(previous.length===0||input.trueHeatId!=='NEW'&&!previous.some(heat=>heat.id===input.trueHeatId)))
-        throw new LocalValidationError('El celo verdadero cambió. Vuelve a abrir el registro y elige otra vez.');
-    }
-  }
+  const failed=queued.find(row=>sameScope(row.scope,entry.scope)&&row.state==='FAILED'
+    &&[row.temporaryId??entityId(row.path,null),'local-object-'+row.id].some(id=>id&&mentions(entry,id)));
+  if(failed)throw new LocalValidationError('Este cambio usa un registro que requiere revisión. Corrige o descarta primero ese registro antes de guardar otro relacionado.');
+  await validateBeforeQueue(entry,init,send,queued);
   const optimistic=await optimisticRecord(entry);
   if(entry.bodyType==='binary'){
     const part=entry.formParts[0]!;const file=part.value as Blob;
@@ -1167,6 +1252,11 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
     }catch(error){
       const info=errorInfo(error);entry.attempts=1;entry.lastError=info.message;entry.errorCode=info.code;
       if(info.status>0&&info.status<500&&info.status!==429&&info.code!=='IDEMPOTENCY_IN_PROGRESS'){
+        if(entry.method==='POST'&&/^\/reproduction\/(heats|services|pregnancies|births|losses)$/.test(entry.path)){
+          await rewindPendingFrom(entry);await removeOutbox(entry.id);await reprojectQueued(entry.scope,true);
+          try{window.SGBAndroid?.removeMirroredMutation?.(entry.id);}catch{/* Solo Android. */}
+          emit('sgb-v2-cache-updated');await publishState();throw error;
+        }
         entry.state='FAILED';await putOutbox(entry);await projectEntry(entry,{...optimistic,
           __syncState:'FAILED',__syncError:info.message},false);
         try{window.SGBAndroid?.removeMirroredMutation?.(entry.id);}catch{/* Solo Android. */}
@@ -1425,6 +1515,8 @@ export function editPendingMutation(id:string,fields:Record<string,unknown>):Pro
       entry.path='/media?'+query;
     }else {const current=await cachedRecord(entry);validateLocalMutation({...entry,jsonBody:body},
       current&&typeof original.expectedVersion==='number'?{...current,version:original.expectedVersion}:current);}
+    if(entry.bodyType!=='binary')await validateBeforeQueue({...entry,jsonBody:body},
+      {headers:{authorization:`Bearer ${activeToken??''}`}},transport??(async()=>{throw new OfflineUnavailableError('Sin conexión.');}),await listOutbox(entry.scope.userId));
     reservePending(entry);await rewindPendingFrom(entry);
     if(confirmed)await projectEntry({...entry,path:`/animals/${entry.path.split('/')[2]}`,method:'PATCH'},confirmed,false);
     if(entry.bodyType!=='binary')entry.jsonBody=body;

@@ -7,6 +7,7 @@ export const getReproduction=async()=>structuredClone(records);
 export const getReproductionCandidates=async()=>[{id:'cow-a',name:'Lucera',sex:'FEMALE',birthDate:null},
  {id:'young-a',name:'Ternera pequeña',sex:'FEMALE',birthDate:'2026-01-01'},
  {id:'young-bull',name:'Macho pequeño',sex:'MALE',birthDate:'2026-01-01'},
+ {id:'unverified-bull',name:'Macho con descarga antigua',sex:'MALE'},
  {id:'adult-bull',name:'Toro adulto',sex:'MALE',birthDate:'2020-01-01'},
  {id:'unknown-bull',name:'Macho sin nacimiento',sex:'MALE',birthDate:null}];
 export const getReproductionSettings=async()=>({enabledSections:window.enabledSections,canManageRules:!window.restrictedRules,minimumCowMonths:18,minimumBullMonths:24,
@@ -85,6 +86,7 @@ const photo=(form,name,fileName)=>{const transfer=new DataTransfer();transfer.it
  const heatForm=[...document.querySelectorAll('.reproduction-forms form')].find(x=>!x.hidden);
  assert(!heatForm.elements.namedItem('cowId').querySelector('option[value="young-a"]'),'La hembra demasiado joven no aparece');
  assert(!heatForm.elements.namedItem('bullId').querySelector('option[value="young-bull"]'),'El padre demasiado joven no aparece');
+ assert(!heatForm.elements.namedItem('bullId').querySelector('option[value="unverified-bull"]'),'Una descarga sin fecha no habilita al padre por error');
  assert(heatForm.elements.namedItem('bullId').querySelector('option[value="unknown-bull"]'),'Sin nacimiento se puede elegir padre');
  await set(heatForm,'startsOn','2026-10-10');
  await set(heatForm,'cowId','cow-a');heatForm.requestSubmit();await wait(()=>window.heatCalls===1&&!document.querySelector('.reproduction-forms'));
