@@ -551,6 +551,7 @@ await seedReproductionRules(birthScope);
 await runtime.putCache(birthScope,'/reproduction',{heats:[],services:[],births:[],losses:[],pregnancies:[{id:'pregnancy-a',cowId:'cow-a',cowName:'Madre',status:'CONFIRMED',confirmedOn:'2026-01-01'}]});
 await runtime.putCache(birthScope,'/animals?page=1',{items:[{id:'cow-a',name:'Madre',sex:'FEMALE',speciesCode:'BOVINE',owners:[{id:'owner-a',name:'Ana',percent:100,isPrimary:true}]}],page:1,total:1,hasMore:false});
 await runtime.putCache(birthScope,'/owners',[{id:'owner-b',name:'Luis'}]);
+await runtime.putCache(birthScope,'/catalogs/MEDIA_TAGS/items',[{id:'tag-birth',name:'Parto',active:true}]);
 const queuedNewborn=await change('/reproduction/births',{pregnancyId:'pregnancy-a',occurredOn:'2026-10-10',kind:'NORMAL',stillbornCount:0,
  calves:[{name:'Cría offline',sex:'FEMALE',initialWeight:31,initialWeightUnitCode:'KILOGRAM'},{name:'Segunda cría offline',sex:'MALE',owners:[{partyId:'owner-b',percent:100,isPrimary:true}]}]},'POST');
 let newbornList=(await runtime.getCache(birthScope,'/animals?page=1')).payload;
@@ -563,11 +564,19 @@ assert.equal((await runtime.getCache(birthScope,'/animals/'+queuedNewborn.calves
 assert.equal((await runtime.getCache(birthScope,'/reproduction')).payload.pregnancies[0].status,'BORN','A queued birth closes the pregnancy locally');
 await assert.rejects(()=>change('/reproduction/births',{pregnancyId:'pregnancy-a',occurredOn:'2026-10-10',calves:[{name:'Repetida',sex:'FEMALE'}],stillbornCount:0},'POST'),/ya está guardado/);
 await runtime.uploadMedia('test-token',{file:new File([new Uint8Array([255,216,255,217])],'calf.jpg',{type:'image/jpeg'}),animalIds:[queuedNewborn.calves[0].id],relationCode:'PROFILE'});
-await runtime.uploadMedia('test-token',{file:new File([new Uint8Array([255,216,255,217])],'birth.jpg',{type:'image/jpeg'}),entityType:'REPRODUCTION_BIRTH',entityId:queuedNewborn.id});
+await runtime.uploadMedia('test-token',{file:new File([new Uint8Array([255,216,255,217])],'birth.jpg',{type:'image/jpeg'}),entityType:'REPRODUCTION_BIRTH',entityId:queuedNewborn.id,tagIds:['tag-birth'],description:'Foto del parto',capturedOn:'2026-10-10'});
 runtime=await load();await runtime.configureOfflineRuntime(birthScope,'test-token');
 assert.equal((await runtime.getCache(birthScope,'/animals?page=1')).payload.items.length,3,'Calves survive restart');
 assert.equal((await runtime.getCache(birthScope,'/media?entityType=ANIMAL&entityId=cow-a')).payload.length,1,'The birth photo is visible for the mother offline');
 assert.equal((await runtime.getCache(birthScope,'/media?entityType=ANIMAL&entityId='+queuedNewborn.calves[1].id)).payload.length,1,'The birth photo is visible for the second calf offline');
+const familyMedia=await get('/media');
+assert.equal(familyMedia.find(row=>row.entity_type==='ANIMAL'&&row.entity_id===queuedNewborn.calves[0].id).entity_name,'Cría offline','Unsynced photos retain the calf name');
+assert.equal(familyMedia.find(row=>row.entity_type==='ANIMAL'&&row.entity_id==='cow-a').entity_name,'Madre','The birth photo identifies its mother before sync');
+assert.equal((await get('/animals/'+queuedNewborn.calves[0].id)).name,'Cría offline','An unsynced media target already has a readable profile');
+const birthPhoto=familyMedia.find(row=>row.entity_type==='REPRODUCTION_BIRTH');
+assert.equal(birthPhoto.tags[0].name,'Parto');assert.equal(birthPhoto.description,'Foto del parto');assert.equal(birthPhoto.captured_on,'2026-10-10');
+await runtime.putCache(birthScope,'/media',familyMedia.map(row=>({...row,entity_name:null})));
+assert.equal((await get('/media')).find(row=>row.entity_type==='ANIMAL'&&row.entity_id==='cow-a').entity_name,'Madre','Legacy pending photos recover names from the current local data');
 const photoTargets=[];let birthWrites=0;
 runtime.installOfflineTransport(async(path,init)=>{
  if(path==='/reproduction/births'){birthWrites++;return {data:{id:'birth-server',pregnancyId:'pregnancy-a',motherId:'cow-a',occurredOn:'2026-10-10',calves:[{id:'calf-server',name:'Cría offline',sex:'FEMALE'},{id:'calf-server-2',name:'Segunda cría offline',sex:'MALE'}]},etag:null,notModified:false};}

@@ -19,6 +19,7 @@ export const createCleaning=async(_token,input)=>{window.cleaningCreated=input;c
 export const updateCleaning=async(_token,id,input)=>{window.cleaningUpdated=input;records=records.map(row=>row.id===id?{...row,...input,version:2}:row);return records.find(row=>row.id===id);};
 export const applyCleaning=async(_token,id)=>{window.cleaningApplied=id;records=records.map(row=>row.id===id?{...row,status:'COMPLETADO'}:row);};
 export const getAnimals=async()=>({items:[],hasMore:false});export const getMediaUsage=async()=>({storedBytes:0,limitBytes:100});
+export const getAnimal=async()=>{throw new Error('Animal profiles require ANIMAL_VIEW');};
 export const deleteMediaObject=async()=>{};export const updateMediaDetails=async()=>{};
 const photo=(id,type,object=id)=>({id,entity_type:type,entity_id:id,entity_name:id,storage_object_id:object,kind:'IMAGE',url:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>',byteSize:10,tags:[],created_at:'2026-10-01T12:00:00Z'});
 export const getMedia=async()=>[photo('animal','ANIMAL'),photo('birth-animal','ANIMAL','birth'),photo('birth','REPRODUCTION_BIRTH','birth'),photo('move','LIVESTOCK_MOVEMENT'),photo('clean','CLEANING'),photo('health','HEALTH_CAMPAIGN')];
