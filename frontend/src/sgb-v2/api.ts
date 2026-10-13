@@ -707,7 +707,7 @@ export function listGroups(accessToken: string) {
 }
 
 export function createGroup(accessToken: string, input: {
-  name: string; description: string | null;
+  name: string; description: string | null;locationId:string;
 }) {
   return request<LivestockGroup>('/groups', {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
@@ -723,7 +723,7 @@ export function updateGroup(accessToken: string, id: string, input: {
 }
 
 export function setGroupState(accessToken: string, id: string, input: {
-  active: boolean; expectedVersion: number;
+  active: boolean; expectedVersion: number;locationId?:string;
 }) {
   return request<LivestockGroup>(`/groups/${encodeURIComponent(id)}/state`, {
     method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
@@ -949,7 +949,7 @@ export function createPregnancy(accessToken: string, input: {
   });
 }
 export interface BirthCalfInput {name:string;sex:Animal['sex'];earTagCode?:string;description?:string|null;
-  groupId?:string;initialWeight?:number;initialWeightUnitCode?:string;breedIds?:string[];colorIds?:string[];
+  groupId:string;initialWeight?:number;initialWeightUnitCode?:string;breedIds?:string[];colorIds?:string[];
   owners?:Array<{partyId:string;percent:number;isPrimary:boolean}>;birthCondition?:'ALIVE'|'WEAK'|'UNKNOWN';}
 export function recordBirth(accessToken: string, input: {
   pregnancyId: string; occurredOn: string;

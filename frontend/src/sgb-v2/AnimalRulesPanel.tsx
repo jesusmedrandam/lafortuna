@@ -17,7 +17,6 @@ const days=[
 ] as const;
 const checks=[
   ['allowSecondHeat','Permitir más de un celo en el ciclo'],
-  ['allowFalseHeatInPregnancy','Permitir celos aparentes durante la preñez'],
   ['useLastValidHeat','Usar el final del último celo válido para calcular el parto'],
 ] as const;
 
@@ -42,7 +41,7 @@ export function AnimalRulesPanel({accessToken,propertyName}:{accessToken:string;
     saving.current=true;setBusy(true);setError('');setSaved(false);
     try{
       if(option==='reproduccion'&&reproduction){
-        const input={...reproduction};
+        const input={...reproduction,allowFalseHeatInPregnancy:true};
         for(const [key] of days)input[key]=Number(data.get(key));
         for(const [key] of checks)input[key]=data.get(key)==='on';
         setReproduction(await updateReproductionSettings(accessToken,input));
@@ -72,6 +71,7 @@ export function AnimalRulesPanel({accessToken,propertyName}:{accessToken:string;
       <fieldset disabled={busy}>
         {reproduction&&<>
           <p className="muted">Las edades mínimas se comprueban solo si el animal tiene fecha de nacimiento. Sin esa fecha, la regla de edad se ignora.</p>
+          <p className="muted">Un celo registrado durante una preñez confirmada siempre se considera falso.</p>
           {days.map(([key,label,max])=><label key={key}><span>{label}</span>
             <input type="number" name={key} min={key==='maxMilkingDays'?1:0} max={max} required defaultValue={reproduction[key]}/></label>)}
           {checks.map(([key,label])=><label key={key} className="rule-checkbox">

@@ -2,9 +2,9 @@ export const mockApi=`
 export class ApiRequestError extends Error{}
 window.birthCalls=0;window.heatCalls=0;window.finishedHeats=0;window.photoCalls=[];let coverFailed=false;
 const pregnancy={id:'pregnancy-a',cowId:'cow-a',cowName:'Lucera',status:'CONFIRMED',confirmedOn:'2026-01-01',expectedBirthOn:'2026-10-10'};
-const records={heats:[],services:[],births:[],losses:[],pregnancies:[pregnancy]};
+const records={heats:[],services:[{id:'service-a',cowId:'cow-c',cowName:'Otra hembra',kind:'INSEMINATION',occurredOn:'2026-10-10',cancelled:false,hasPregnancy:false}],births:[],losses:[],pregnancies:[pregnancy]};
 export const getReproduction=async()=>structuredClone(records);
-export const getReproductionCandidates=async()=>[{id:'cow-a',name:'Lucera',sex:'FEMALE',birthDate:null},
+export const getReproductionCandidates=async()=>[{id:'cow-a',name:'Lucera',sex:'FEMALE',birthDate:null},{id:'cow-c',name:'Otra hembra',sex:'FEMALE',birthDate:null},
  {id:'young-a',name:'Ternera pequeña',sex:'FEMALE',birthDate:'2026-01-01'},
  {id:'young-bull',name:'Macho pequeño',sex:'MALE',birthDate:'2026-01-01'},
  {id:'unverified-bull',name:'Macho con descarga antigua',sex:'MALE'},
@@ -17,7 +17,7 @@ export const recordBirth=async(_token,input)=>{window.birthCalls++;window.birthI
  const birth={id:'birth-a',motherId:pregnancy.cowId,pregnancyId:pregnancy.id,occurredOn:input.occurredOn,calves:input.calves.map((calf,index)=>({...calf,id:'calf-'+index}))};records.births.push(birth);return birth;};
 export const uploadMedia=async(_token,input)=>{window.photoCalls.push({name:input.file.name,entityId:input.entityId,animalIds:input.animalIds,relationCode:input.relationCode});
  if(input.file.name==='cover.jpg'&&!coverFailed){coverFailed=true;throw new Error('Fotografía pendiente. Reintenta.');}return {id:'photo'};};
-export const listGroups=async()=>[{id:'group-a',name:'Crías',active:true}];
+export const listGroups=async()=>[{id:'group-a',name:'Crías',active:true,location:{id:'pasture-a',name:'Norte',kind:'PASTURE'}}];
 export const listCatalogItems=async(_token,code)=>[{id:code+'-a',name:code==='BREEDS'?'Jersey':'Pinta',active:true}];
 export const listOwners=async()=>[{id:'owner-a',name:'Ana',active:true}];
 export const getMedia=async()=>[];export const deleteMediaObject=async()=>{};
@@ -59,7 +59,7 @@ const photo=(form,name,fileName)=>{const transfer=new DataTransfer();transfer.it
  await set(form,'calfBreed:0','BREEDS-a');await set(form,'calfColor:0','COLORS-a');await set(form,'calfCondition:0','WEAK');
  click('Agregar cría');await wait(()=>form.elements.namedItem('calfName:1'));await set(form,'calfName:1','Ficha para quitar');
  click('Agregar cría');await wait(()=>form.elements.namedItem('calfName:2'));await set(form,'calfName:2','Brisa');
- await set(form,'calfSex:2','MALE');photo(form,'profilePhoto:2','brisa-profile.jpg');photo(form,'coverPhoto:2','brisa-cover.jpg');
+ await set(form,'calfGroup:2','group-a');await set(form,'calfSex:2','MALE');photo(form,'profilePhoto:2','brisa-profile.jpg');photo(form,'coverPhoto:2','brisa-cover.jpg');
  click('Quitar cría 2');await wait(()=>!form.elements.namedItem('calfName:2'));
  assert(form.elements.namedItem('calfName:1').value==='Brisa','Quitar una ficha intermedia conserva la siguiente');
  assert(form.elements.namedItem('profilePhoto:1').files[0].name==='brisa-profile.jpg','La foto sigue con su cría');
@@ -109,21 +109,38 @@ const photo=(form,name,fileName)=>{const transfer=new DataTransfer();transfer.it
  await wait(()=>window.heatCalls===3&&!document.querySelector('.reproduction-forms'));
  click('Preñeces');await wait(()=>document.querySelector('.activity-type-strip .selected')?.textContent==='Preñeces');click('Nuevo evento reproductivo');
  await wait(()=>document.querySelector('.reproduction-forms'));
- const pregnancyForm=[...document.querySelectorAll('.reproduction-forms form')].find(x=>!x.hidden);await set(pregnancyForm,'cowId','cow-a');
+ const pregnancyForm=[...document.querySelectorAll('.reproduction-forms form')].find(x=>!x.hidden);
+ assert(pregnancyForm.elements.namedItem('cowId').type==='hidden','La hembra se deriva del evento');
+ await set(pregnancyForm,'pregnancySource','SERVICE:service-a');assert(pregnancyForm.elements.namedItem('cowId').value==='cow-c','El servicio selecciona su propia hembra');
+ assert(pregnancyForm.elements.namedItem('conceptionMethod').value==='INSEMINATION'&&pregnancyForm.elements.namedItem('fatherId').disabled,'El servicio fija su método y parentesco');
+ await set(pregnancyForm,'pregnancySource','HEAT:heat-new-3');
  await wait(()=>pregnancyForm.elements.namedItem('heatId').value==='heat-new-3');
- assert(pregnancyForm.elements.namedItem('heatId').options.length===2,'Solo aparece el celo verdadero del ciclo');
+ assert(pregnancyForm.elements.namedItem('cowId').value==='cow-a','Elegir el celo selecciona la hembra');
+ assert([...pregnancyForm.elements.namedItem('pregnancySource').options].filter(x=>x.value.startsWith('HEAT:')).length===1,'Solo aparece el celo verdadero del ciclo');
  assert(!pregnancyForm.elements.namedItem('fatherId').querySelector('option[value="young-bull"]'),'La preñez oculta padres jóvenes');
  pregnancyForm.requestSubmit();await wait(()=>window.pregnancyInput&&!document.querySelector('.reproduction-forms'));
  assert(window.pregnancyInput.heatId==='heat-new-3','La preñez envía automáticamente el último celo verdadero');
  [...document.querySelectorAll('.record-list-row')].find(row=>row.textContent.includes('Confirmada')).click();await wait(()=>document.querySelector('.modal'));
  assert(document.querySelector('.modal').textContent.includes('Registrar parto')&&document.querySelector('.modal').textContent.includes('Registrar aborto'),'La preñez ofrece sus desenlaces');
  assert(!document.querySelector('.modal').textContent.includes('Cancelar registro'),'La preñez no tiene cancelación');
+ click('Cerrar');click('Celos');await wait(()=>document.querySelector('.activity-type-strip .selected')?.textContent==='Celos');click('Nuevo evento reproductivo');
+ await wait(()=>document.querySelector('.reproduction-forms'));
+ const pregnantHeatForm=[...document.querySelectorAll('.reproduction-forms form')].find(x=>!x.hidden);await set(pregnantHeatForm,'cowId','cow-a');
+ assert(pregnantHeatForm.elements.namedItem('isFalse').checked&&pregnantHeatForm.elements.namedItem('isFalse').disabled,'Una preñez obliga a registrar un celo falso');
+ pregnantHeatForm.requestSubmit();await wait(()=>window.heatCalls===4&&!document.querySelector('.reproduction-forms'));assert(window.heatInput.isFalse,'Se guarda falso');
+ click('Preñeces');await wait(()=>document.querySelector('.activity-type-strip .selected')?.textContent==='Preñeces');
+ [...document.querySelectorAll('.record-list-row')].find(row=>row.textContent.includes('Confirmada')).click();await wait(()=>document.querySelector('.modal'));
  click('Registrar aborto');await wait(()=>document.querySelector('.reproduction-forms form:not([hidden]) [name="pregnancyId"]'));
  assert(document.querySelector('.reproduction-forms form:not([hidden]) [name="pregnancyId"]').value==='pregnancy-new','El aborto conserva la preñez seleccionada');click('Cerrar');
- window.enabledSections=['REPRODUCTION_HEATS'];render();await wait(()=>document.querySelector('.activity-type-strip')&&!document.body.innerText.includes('Inseminación'));
+ window.enabledSections=['REPRODUCTION_HEATS'];render();await wait(()=>document.querySelector('.activity-type-strip')&&!document.querySelector('.activity-type-strip').textContent.includes('Inseminación'));
  assert(!document.querySelector('.activity-type-strip').textContent.includes('Embriones'),'Transferencia se deshabilita por separado');
  click('Nuevo evento reproductivo');await wait(()=>document.querySelector('.animal-rules-options'));
  assert(!document.querySelector('.animal-rules-options').textContent.includes('Registrar parto'),'Las opciones respetan la política');
+ click('Cerrar');window.enabledSections=['REPRODUCTION_HEATS','REPRODUCTION_PREGNANCIES'];render();
+ await wait(()=>document.querySelector('.activity-type-strip'));click('Preñeces');await wait(()=>document.querySelector('.activity-type-strip .selected')?.textContent==='Preñeces');click('Nuevo evento reproductivo');
+ await wait(()=>document.querySelector('[name="pregnancySource"]'));
+ const limited=document.querySelector('[name="pregnancySource"]');assert(![...limited.options].some(option=>option.value.startsWith('SERVICE:')),'No se ofrecen servicios de módulos deshabilitados');
+ assert(!document.body.innerText.includes('Servicio asistido'),'No se muestra el antiguo selector de servicio asistido');
  document.getElementById('result').textContent='PASS: multiple calf cards, stable removal/photos, mobile layout, retry without duplicates, settings shortcut and minimum-age preflight.';
 })().catch(error=>document.getElementById('result').textContent='FAIL: '+error.message);
 `;

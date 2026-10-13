@@ -557,7 +557,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
           <option value="" disabled>Selecciona</option><option value="FEMALE">Hembra</option>
           <option value="MALE">Macho</option></Select></label>
         <label><span>Grupo *</span><Select name="groupId" required disabled={busy} defaultValue="">
-          <option value="">Selecciona un grupo</option>{groups.filter(group=>group.active).map(group=><option
+          <option value="">Selecciona un grupo</option>{groups.filter(group=>group.active&&group.location).map(group=><option
             key={group.id} value={group.id}>{group.name}{group.location?` · ${group.location.name}`:''}</option>)}
         </Select><small>La ubicación se hereda del grupo.</small></label>
         <label><span>Arete individual</span><input name="earTagCode" maxLength={80} disabled={busy} /></label>

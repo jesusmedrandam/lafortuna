@@ -41,10 +41,17 @@ export const finishHeat=async()=>{};export const cancelHeat=async()=>{};export c
 
 export const getAnimalStatusEvents=async()=>[];
 export const getAnimalStatusOptions=async()=>[{id:'animal-a',name:'Lucera',earTagCode:'A1',status:'ACTIVE',version:1}];
+export const getWeighingOptions=async()=>{if(window.failWeighingOptions)throw new Error('Los pesajes no se descargaron en este dispositivo');return [{id:'animal-a',name:'Lucera',earTagCode:'A1'}];};
+export const createWeighing=async()=>{};export const updateWeighing=async()=>{};export const voidWeighing=async()=>{};
+export const getHealthOptions=async()=>({animals:[{id:'animal-a',name:'Lucera',sex:'FEMALE',groupId:'group-a'}],groups:[],units:[],administrationRoutes:[]});
+export const createHealthCondition=async()=>{};export const updateHealthCondition=async()=>{};export const resolveHealthCondition=async()=>{};
+export const createHealthCampaign=async()=>{};export const updateHealthCampaign=async()=>{};export const applyHealthCampaign=async()=>{};export const cancelHealthCampaign=async()=>{};
+export const getHealthConditionTreatments=async()=>[];
+export const createMovement=async()=>{};export const updateMovement=async()=>{};export const applyMovement=async()=>{};export const cancelMovement=async()=>{};
 export const createAnimalStatusEvent=async(_token,input)=>{window.savedStatus=input;return {id:'status-new',...input};};
 export const getMovements=async()=>[{id:'move-a',movementOn:'2026-10-01',reason:'Rotación',
   destinationGroupName:'Vacas',destinationLocationName:'Potrero Norte',animals:[{id:'animal-a'}]}];
-export const getMovementOptions=async()=>({groups:[{id:'group-a',locationId:'pasture-a'}],properties:[],locations:[]});
+export const getMovementOptions=async()=>({animals:[{id:'animal-a',name:'Lucera',groupId:'group-a',locationId:'pasture-a'}],groups:[{id:'group-a',name:'Vacas',propertyId:'property-a',locationId:'pasture-a'},{id:'group-b',name:'Vacona',propertyId:'property-a',locationId:'corral-b'}],properties:[],locations:[]});
 export const getWeighings=async(_token,id)=>id==='animal-a'?Array.from({length:5},(_,n)=>({
   id:'weight-'+n,weight:300+n,unitCode:'KILOGRAM',weighedOn:'2026-10-0'+(n+1),voidedAt:null})):[];
 export const getHealthMedicines=async()=>[];export const getHealthConditions=async()=>[];
@@ -57,7 +64,7 @@ export const getReproduction=async()=>({services:[],pregnancies:window.profilePr
 `;
 const mockSession=`
 export function useV2Session(){return {session:{accessToken:window.token??'test',overview:{activeContext:{propertyId:'property-a',roleId:'role-a'},
-  properties:[{id:'property-a',enabledModules:['MULTIMEDIA','MOVEMENTS','WEIGHING','HEALTH','REPRODUCTION','PRODUCTION','SALES_PURCHASES']}]}},
+  properties:[{id:'property-a',name:'La Fortuna',enabledModules:['MULTIMEDIA','MOVEMENTS','WEIGHING','HEALTH','REPRODUCTION','PRODUCTION','SALES_PURCHASES']}]}},
   hasPermission:permission=>!window.readOnly||permission.endsWith('_VIEW')};}
 `;
 const entry=`
@@ -88,6 +95,7 @@ try{
   check(info().querySelector('.lucide-calendar-days'),'Date icon');
   check(info().querySelector('.lucide-user-round'),'Owner/parent icon');
   check(info().textContent.includes('0 kg'),'Zero is valid data');
+  check(info().textContent.includes('La Fortuna'),'The profile identifies its property');
   check(info().textContent.includes('304 kg'),'Latest weight first');
   check(info().textContent.includes('Margarita')&&info().textContent.includes('Ana (100%)'),'Existing information preserved');
   check(document.querySelector('.animal-compact-tags').textContent.includes('Jersey'),'Reference breed tags');
@@ -115,6 +123,21 @@ try{
   document.querySelector('#v2-status-form').requestSubmit();await until(()=>window.savedStatus&&!document.querySelector('#v2-status-form'));
   check(window.savedStatus.action==='RECORD_DEATH','Real action saved with the selected kind');
   check(location.pathname==='/animales/animal-a','Successful action closes using browser history');
+  document.querySelector('[aria-label="Registrar pesaje"]').click();await until(()=>document.querySelector('#v2-weighing-form'));
+  const weighingForm=document.querySelector('#v2-weighing-form');check(getComputedStyle(weighingForm).display!=='none','The real weighing form is visible');
+  const rect=weighingForm.querySelector('[name="weight"]').getBoundingClientRect();check(weighingForm.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2)),'The weighing form accepts taps');
+  history.back();await until(()=>!document.querySelector('.v2-animal-action-host'));
+  document.querySelector('[aria-label="Sanidad"]').click();await until(()=>document.querySelector('.v2-animal-sheet'));
+  [...document.querySelectorAll('.v2-animal-sheet button')].find(node=>node.textContent==='Crear condición de salud').click();await until(()=>document.querySelector('.health-overlay form'));
+  check(getComputedStyle(document.querySelector('.health-overlay form')).display!=='none','The real health form opens from the profile');
+  history.back();await until(()=>!document.querySelector('.v2-animal-action-host'));
+  document.querySelector('[aria-label="Movimientos"]').click();await until(()=>document.querySelector('.v2-animal-sheet'));
+  [...document.querySelectorAll('.v2-animal-sheet button')].find(node=>node.textContent==='Cambiar de grupo').click();await until(()=>document.querySelector('.movement-overlay form'));
+  check(getComputedStyle(document.querySelector('.movement-overlay form')).display!=='none','The real movement form opens from the profile');
+  history.back();await until(()=>!document.querySelector('.v2-animal-action-host'));
+  window.failWeighingOptions=true;document.querySelector('[aria-label="Registrar pesaje"]').click();await until(()=>document.querySelector('.v2-animal-action-content .form-error'));
+  check(getComputedStyle(document.querySelector('.v2-animal-action-content .form-error')).display!=='none','A missing download error remains visible');
+  document.querySelector('[aria-label="Cerrar acción"]').click();await until(()=>!document.querySelector('.v2-animal-action-host'));window.failWeighingOptions=false;
   historyCard('Crías').querySelector('.history-entry').click();await until(()=>location.pathname==='/animales/calf-a');
   render('animal-b');await until(()=>document.querySelector('h1')?.textContent==='Bruno');await tick();
   const hidden=['Grupo','Ubicación actual','Clasificación','Nacimiento','Edad','Ingreso','Propietarios','Marquillas','Peso inicial','Padres','Último peso','Último tratamiento','Último traslado'];
@@ -170,13 +193,13 @@ try{
   document.getElementById('result').textContent='PASS: reference profile icons/style, absent fields, split histories, expansion, child links and role permissions';
 }catch(error){document.getElementById('result').textContent='FAIL: '+error.stack;}
 `;
-const panels=['AnimalPanel','MovementPanel','HealthPanel','ProductionPanel','V2WeighingsPage','V2CommercePage'];
+const panels=['AnimalPanel','ProductionPanel','V2CommercePage'];
 const result=await build({root,configFile:false,logLevel:'error',define:{'process.env.NODE_ENV':'"production"'},plugins:[{
   name:'animal-profile-test',enforce:'pre',resolveId(id,importer){
     if(id==='real-profile-candidates')return root+'src/sgb-v2/api.ts';
     importer=importer?.replaceAll('\\','/');
     if(id==='animal-profile-test'||id===root+'animal-profile-test')return '\0profile-test';
-    if(importer?.endsWith('/V2AnimalStatusPage.tsx')||importer?.endsWith('/ReproductionPanel.tsx')||importer?.endsWith('/RecordMedia.tsx')){
+    if(['/V2AnimalStatusPage.tsx','/V2WeighingsPage.tsx','/HealthPanel.tsx','/MovementPanel.tsx','/ReproductionPanel.tsx','/RecordMedia.tsx'].some(path=>importer?.endsWith(path))){
       if(id==='./api')return '\0profile-api';if(id==='./V2Session')return '\0profile-session';
     }
     if(importer?.endsWith('/V2AnimalDetail.tsx')){

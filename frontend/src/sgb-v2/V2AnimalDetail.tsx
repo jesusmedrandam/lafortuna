@@ -230,6 +230,7 @@ export function V2AnimalDetail(){
   const activePregnancy=reproduction?.pregnancies.find(item=>item.cowId===id&&item.status==='CONFIRMED'
     &&!reproduction.births.some(birth=>birth.pregnancyId===item.id)&&!reproduction.losses.some(loss=>loss.pregnancyId===item.id));
   const reproductiveActions:AnimalAction[]=reproductiveAge?(activePregnancy?[
+    ...(reproductionSectionEnabled(reproductionSettings,'HEAT')?[{label:'Registrar celo falso',run:()=>openAction('reproduction','CELO')}]:[]),
     ...(reproductionSectionEnabled(reproductionSettings,'BIRTH')?[{label:'Registrar parto',run:()=>openAction('reproduction','PARTO')}]:[]),
     ...(reproductionSectionEnabled(reproductionSettings,'LOSS')?[{label:'Registrar aborto',run:()=>openAction('reproduction','PERDIDA')}]:[]),
   ]:[
@@ -312,6 +313,7 @@ export function V2AnimalDetail(){
         <Badge tone={usable?'success':animal.availabilityStatusCode==='DEAD'?'danger':'warning'}>
           {status}</Badge></div>
       <div className="animal-compact-info-grid">
+        <CompactInfo icon={MapPin} label="Propiedad" value={property?.name}/>
         <CompactInfo icon={AnimalIcon} label="Especie / sexo" value={[animal.speciesCode==='BOVINE'?'Bovino':animal.speciesCode,
           animal.sex==='FEMALE'?'Hembra':animal.sex==='MALE'?'Macho':null].filter(Boolean).join(' · ')}/>
         <CompactInfo icon={Users} label="Grupo" value={animal.group?.name}/>
@@ -366,6 +368,7 @@ export function V2AnimalDetail(){
       </section></div>}
     {action&&id&&<div className={`v2-animal-action-host action-${action.kind}`}
       role="dialog" aria-modal="true" aria-label={`Acción de ${animal.name}`}>
+      <IconButton className="v2-animal-action-close" label="Cerrar acción" onClick={closeAction}><X size={22}/></IconButton>
       <div className="v2-animal-action-content" key={`${action.kind}:${action.code}`}>
         {action.kind==='movement'&&<MovementPanel accessToken={token} propertyId={property!.id}
           canManage canCancel={hasPermission('MOVEMENT_CANCEL')}

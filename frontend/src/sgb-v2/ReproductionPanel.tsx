@@ -80,18 +80,44 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   },[initialAnimalId,prefilledAnimalId,candidates,canManage,initialAction,settings,records]);
   const cycleHeats=useMemo(()=>records?cycleTrueHeats(records,cowId,eventOn):[],[records,cowId,eventOn]);
   const availableHeats=cycleHeats.filter(heat=>heat.startsOn<=eventOn);
-  const cycleStart=records?[...records.births.filter(row=>row.motherId===cowId),...records.losses.filter(row=>row.cowId===cowId)]
-    .map(row=>row.occurredOn).filter(on=>on<=eventOn).sort().at(-1)??'':'';
   const selectedHeat=records?.heats.find(heat=>heat.id===heatId);
   const selectedService=records?.services.find(service=>service.id===linkedServiceId);
+  const cowPregnant=Boolean(records?.pregnancies.some(row=>row.cowId===cowId&&row.status==='CONFIRMED'
+    &&!records.births.some(birth=>birth.pregnancyId===row.id)&&!records.losses.some(loss=>loss.pregnancyId===row.id)));
+  const assistedEnabled=reproductionSectionEnabled(settings,'INSEMINATION')||reproductionSectionEnabled(settings,'EMBRYO_TRANSFER');
+  const pregnancySources=useMemo(()=>{
+    if(!records||!settings)return [];
+    const eligible=(id:string,on:string)=>{const cow=candidates.find(animal=>animal.id===id);
+      return cow?.sex==='FEMALE'&&(!initialAction||id===initialAnimalId)&&reachedReproductionAge(cow.birthDate,on,settings.minimumCowMonths)
+        &&!records.pregnancies.some(row=>row.cowId===id&&row.status==='CONFIRMED'&&!records.births.some(birth=>birth.pregnancyId===row.id)&&!records.losses.some(loss=>loss.pregnancyId===row.id));};
+    const heats=records.heats.filter(row=>row.startsOn<=eventOn&&eligible(row.cowId,settings.useLastValidHeat?row.endsOn??row.startsOn:row.startsOn)
+      &&cycleTrueHeats(records,row.cowId,eventOn).some(heat=>heat.id===row.id))
+      .map(row=>({value:`HEAT:${row.id}`,cowId:row.cowId,date:row.startsOn,label:`Celo · ${candidates.find(animal=>animal.id===row.cowId)?.name??row.cowName??'Hembra'} · ${formatDate(row.startsOn)}`}));
+    const services=records.services.filter(row=>reproductionSectionEnabled(settings,row.kind)&&!row.cancelled&&!row.hasPregnancy&&row.occurredOn<=eventOn&&eligible(row.cowId,row.occurredOn)
+      &&!records.births.some(birth=>birth.motherId===row.cowId&&birth.occurredOn>row.occurredOn&&birth.occurredOn<=eventOn)
+      &&!records.losses.some(loss=>loss.cowId===row.cowId&&loss.occurredOn>row.occurredOn&&loss.occurredOn<=eventOn)
+      &&(!row.heatId||cycleTrueHeats(records,row.cowId,eventOn).some(heat=>heat.id===row.heatId)))
+      .map(row=>({value:`SERVICE:${row.id}`,cowId:row.cowId,date:row.occurredOn,label:`${row.kind==='INSEMINATION'?'Inseminación':'Transferencia'} · ${candidates.find(animal=>animal.id===row.cowId)?.name??row.cowName??'Hembra'} · ${formatDate(row.occurredOn)}`}));
+    return [...heats,...services].sort((a,b)=>b.date.localeCompare(a.date));
+  },[records,settings,candidates,eventOn,initialAction,initialAnimalId]);
+  const pregnancySource=linkedServiceId?`SERVICE:${linkedServiceId}`:heatId?`HEAT:${heatId}`:'';
+  function choosePregnancySource(value:string){
+    const source=pregnancySources.find(row=>row.value===value);setCowId(source?.cowId??'');setGestationDays('');
+    setLinkedServiceId(value.startsWith('SERVICE:')?value.slice(8):'');setHeatId(value.startsWith('HEAT:')?value.slice(5):'');
+  }
+  useEffect(()=>{if(activeForm==='PREGNANCY'&&records&&settings&&pregnancySource&&!pregnancySources.some(row=>row.value===pregnancySource)){
+    setCowId('');setLinkedServiceId('');setHeatId('');
+  }},[activeForm,records,settings,pregnancySource,pregnancySources]);
+  useEffect(()=>{if(activeForm==='PREGNANCY'&&initialAnimalId&&!pregnancySource&&pregnancySources.length)
+    choosePregnancySource(pregnancySources[0]!.value);},[activeForm,initialAnimalId,pregnancySource,pregnancySources]);
   const estimatedConception=new Date(`${eventOn||localDate()}T00:00:00Z`);
   estimatedConception.setUTCDate(estimatedConception.getUTCDate()-Math.min(400,Math.max(0,Number(gestationDays)||0)));
   const parentOn=activeForm==='PREGNANCY'?(selectedService?.occurredOn
     ??(selectedHeat?(settings?.useLastValidHeat?selectedHeat.endsOn??selectedHeat.startsOn:selectedHeat.startsOn):estimatedConception.toISOString().slice(0,10))):eventOn;
   const females = candidates.filter(animal=>animal.sex==='FEMALE'&&settings&&reachedReproductionAge(animal.birthDate,parentOn,settings.minimumCowMonths));
   const males=candidates.filter(animal=>animal.sex==='MALE'&&settings&&reachedReproductionAge(animal.birthDate,parentOn,settings.minimumBullMonths));
-  useEffect(()=>{setHeatId(cycleHeats.find(heat=>heat.startsOn<=eventOn)?.id??'');},[cowId,eventOn,records]);
-  useEffect(()=>{setLinkedServiceId('');},[cowId]);
+  useEffect(()=>{if(activeForm!=='PREGNANCY')setHeatId(cycleHeats.find(heat=>heat.startsOn<=eventOn)?.id??'');},[cowId,eventOn,records,activeForm]);
+  useEffect(()=>{if(activeForm!=='PREGNANCY')setLinkedServiceId('');},[cowId,activeForm]);
   const confirmed = records?.pregnancies.filter((pregnancy) => pregnancy.status === 'CONFIRMED'&&!records?.births.some(birth=>birth.pregnancyId===pregnancy.id)) ?? [];
   const rows=useMemo<ReproductionRow[]>(()=>records?[
     ...records.heats.map(item=>({id:item.id,kind:'HEAT' as const,name:item.cowName,
@@ -149,7 +175,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
       hasPermission('CATALOG_VIEW')?listCatalogItems(accessToken,'BREEDS'):Promise.resolve([]),
       hasPermission('CATALOG_VIEW')?listCatalogItems(accessToken,'COLORS'):Promise.resolve([]),
       hasPermission('ANIMAL_VIEW')?listOwners(accessToken):Promise.resolve([])]).then(([groups,breeds,colors,owners])=>{
-        if(active)setBirthOptions({groups:groups.filter(x=>x.active),breeds:breeds.filter(x=>x.active),colors:colors.filter(x=>x.active),owners:owners.filter(x=>x.active)});
+        if(active)setBirthOptions({groups:groups.filter(x=>x.active&&x.location),breeds:breeds.filter(x=>x.active),colors:colors.filter(x=>x.active),owners:owners.filter(x=>x.active)});
       }).catch(reason=>{if(active)setError(errorMessage(reason));});return()=>{active=false;};
   },[activeForm,accessToken,hasPermission]);
   async function run(operation: () => Promise<unknown>, form?: HTMLFormElement) {
@@ -181,7 +207,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
     const input={
       cowId: String(data.get('cowId')), bullId: optional(data, 'bullId'),
       startsOn: String(data.get('startsOn')), endsOn: optional(data, 'endsOn'),
-      isFalse: data.get('isFalse') === 'on', notes: optional(data, 'notes'),
+      isFalse: cowPregnant||data.get('isFalse') === 'on', notes: optional(data, 'notes'),
     };
     if(!input.isFalse&&records&&cycleTrueHeats(records,input.cowId,input.startsOn).length){setHeatChoice({input,form});return;}
     void run(()=>createHeat(accessToken,input),form);
@@ -235,7 +261,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         ...(optional(data,`calfTag:${index}`)?{earTagCode:optional(data,`calfTag:${index}`)!}:{}),
         description:optional(data,`calfDescription:${index}`),
         birthCondition:String(data.get(`calfCondition:${index}`)) as 'ALIVE'|'WEAK'|'UNKNOWN',
-        ...(optional(data,`calfGroup:${index}`)?{groupId:optional(data,`calfGroup:${index}`)!}:{}),
+        groupId:String(data.get(`calfGroup:${index}`)||''),
         ...(weight?{initialWeight:Number(weight),initialWeightUnitCode:'KILOGRAM'}:{}),
         breedIds:optional(data,`calfBreed:${index}`)?[optional(data,`calfBreed:${index}`)!]:[],
         colorIds:optional(data,`calfColor:${index}`)?[optional(data,`calfColor:${index}`)!]:[],
@@ -322,38 +348,26 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         </Select></label>
         <label><span>Inicio *</span><DateInput type="date" name="startsOn" required value={eventOn} onChange={event=>setEventOn(event.target.value)} /></label>
         <label><span>Fin</span><DateInput type="date" name="endsOn" /></label>
-        <label><span>Celo aparente o falso</span><input type="checkbox" name="isFalse" /></label>
+        <label><span>Celo aparente o falso</span><input type="checkbox" name="isFalse" key={`${cowId}:${cowPregnant}`} defaultChecked={cowPregnant} disabled={cowPregnant}/></label>
+        {cowPregnant&&<p className="muted">Esta hembra tiene una preñez confirmada. El celo se guardará obligatoriamente como falso.</p>}
         <label><span>Observaciones</span><textarea name="notes" maxLength={500} /></label>
         <button className="primary-button compact" disabled={busy || !females.length}>Guardar celo</button>
       </form>
 
       <form className="group-new-form" onSubmit={pregnancy} hidden={activeForm!=='PREGNANCY'}>
         <h3>Confirmar preñez</h3>
-        <label><span>Vaca *</span><Select name="cowId" required value={cowId}
-          disabled={Boolean(initialAction)}
-          onChange={(event) => setCowId(event.target.value)}>
-          <option value="" disabled>Selecciona la vaca</option>
-          {females.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
-        </Select>{initialAction&&<input type="hidden" name="cowId" value={initialAnimalId}/>}</label>
-        <label><span>Celo relacionado</span><Select name="heatId" value={heatId} onChange={event=>setHeatId(event.target.value)}>
-          <option value="">Sin celo registrado</option>
-          {availableHeats
-            .map((entry) => <option key={entry.id} value={entry.id}>{formatDate(entry.startsOn)}</option>)}
-        </Select></label>
-        <label><span>Servicio asistido relacionado</span><Select name="serviceId" value={linkedServiceId} onChange={event=>setLinkedServiceId(event.target.value)}>
-          <option value="">Sin servicio asistido</option>
-          {records?.services.filter((entry) => entry.cowId === cowId && !entry.cancelled && !entry.hasPregnancy
-            &&entry.occurredOn>=cycleStart&&entry.occurredOn<=eventOn&&(!entry.heatId||availableHeats.some(heat=>heat.id===entry.heatId))
-            &&reproductionSectionEnabled(settings,entry.kind))
-            .map((entry) => <option key={entry.id} value={entry.id}>
-              {formatDate(entry.occurredOn)} · {entry.kind === 'INSEMINATION' ? 'Inseminación' : 'Transferencia'}</option>)}
-        </Select><small>Si eliges un servicio, se toman su celo y padre.</small></label>
-        <label><span>Padre registrado</span><Select name="fatherId" defaultValue="" key={`father:${parentOn}`}>
+        <label><span>{assistedEnabled?'Celo o servicio previo *':'Celo previo *'}</span><Select name="pregnancySource" required value={pregnancySource}
+          onChange={event=>choosePregnancySource(event.target.value)}><option value="" disabled>Selecciona el registro previo</option>
+          {pregnancySources.map(source=><option key={source.value} value={source.value}>{source.label}</option>)}</Select></label>
+        {!pregnancySources.length&&<p className="muted">Registra primero un celo verdadero o un servicio habilitado para confirmar la preñez.</p>}
+        <input type="hidden" name="cowId" value={cowId}/><input type="hidden" name="heatId" value={heatId}/><input type="hidden" name="serviceId" value={linkedServiceId}/>
+        {cowId&&<div className="health-fixed-animal"><span>Hembra seleccionada</span><strong>{candidates.find(animal=>animal.id===cowId)?.name}</strong></div>}
+        <label><span>Padre registrado</span><Select name="fatherId" defaultValue="" disabled={Boolean(selectedService)} key={`father:${parentOn}:${pregnancySource}`}>
           <option value="">No registrado</option>
           {males.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
         </Select></label>
-        <label><span>Padre externo</span><input name="externalFather" maxLength={240} /></label>
-        <label><span>Método de embarazo</span><Select name="conceptionMethod" defaultValue="NATURAL">
+        <label><span>Padre externo</span><input name="externalFather" maxLength={240} disabled={Boolean(selectedService)}/></label>
+        <label><span>Método de embarazo</span><Select name="conceptionMethod" defaultValue={selectedService?.kind??'NATURAL'} key={pregnancySource} disabled={Boolean(selectedService)}>
           <option value="NATURAL">Monta natural</option>
           {reproductionSectionEnabled(settings,'INSEMINATION')&&<option value="INSEMINATION">Inseminación</option>}
           {reproductionSectionEnabled(settings,'EMBRYO_TRANSFER')&&<option value="EMBRYO_TRANSFER">Transferencia de embriones</option>}
@@ -369,7 +383,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         <label><span>Días de gestación</span><input type="number" name="gestationDays" min="0" max="400" value={gestationDays} onChange={event=>setGestationDays(event.target.value)} />
           <small>Con un celo se calculan automáticamente; sin selección se usa el último celo válido según las reglas.</small></label>
         <label><span>Observaciones</span><textarea name="notes" maxLength={500} /></label>
-        <button className="primary-button compact" disabled={busy || !females.length}>
+        <button className="primary-button compact" disabled={busy || !pregnancySources.some(source=>source.value===pregnancySource)}>
           Confirmar preñez</button>
       </form>
 
@@ -426,6 +440,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
           <Button type="button" variant="secondary" disabled={calfKeys.length>=8} onClick={()=>{
             const key=nextCalfKey.current++;setCalfKeys(previous=>[...previous,key]);}}><Plus size={18}/>Agregar cría</Button></div>
         <p className="muted">Registra una ficha por cada cría viva. Puedes agregar hasta 8.</p>
+        {calfKeys.length>0&&!birthOptions.groups.length&&<p className="form-error" role="alert">Necesitas un grupo activo con potrero o corral para registrar las crías.</p>}
         <div className="nested-list">
         {calfKeys.map((key,index)=><div key={key} className="nested-card birth-calf">
           <div className="nested-card-header"><strong>Cría {index+1}</strong>
@@ -441,7 +456,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
           <label><span>Peso al nacer (kg)</span><input name={`calfWeight:${index}`} type="number" min="0.001" max="999999999" step="0.001"/></label>
           <label><span>Raza</span><Select name={`calfBreed:${index}`} defaultValue=""><option value="">Sin registrar</option>{birthOptions.breeds.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>
           <label><span>Color</span><Select name={`calfColor:${index}`} defaultValue=""><option value="">Sin registrar</option>{birthOptions.colors.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>
-          <label><span>Grupo</span><Select name={`calfGroup:${index}`} defaultValue=""><option value="">Sin grupo</option>{birthOptions.groups.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>
+          <label><span>Grupo *</span><Select name={`calfGroup:${index}`} required defaultValue=""><option value="" disabled>Selecciona un grupo</option>{birthOptions.groups.map(item=><option key={item.id} value={item.id}>{item.name} · {item.location?.name}</option>)}</Select></label>
           <label><span>Propietario de la cría</span><Select name={`calfOwner:${index}`} defaultValue=""><option value="">Los mismos propietarios de la madre</option>{birthOptions.owners.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</Select><small>Si eliges uno, tendrá el 100 % de participación.</small></label>
           <label><span>Información de la cría</span><textarea name={`calfDescription:${index}`} maxLength={5000}/></label>
           </div>{canUpload&&<div className="birth-photo-fields">
@@ -451,7 +466,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         </div>)}
         </div><label><span>Crías nacidas muertas</span><input type="number" name="stillbornCount"
           defaultValue="0" min="0" max="8" required /></label></section>
-        </fieldset><button className="primary-button compact" disabled={busy || !confirmed.length}>
+        </fieldset><button className="primary-button compact" disabled={busy || !confirmed.length || calfKeys.length>0&&!birthOptions.groups.length}>
           {birthSaved?'Completar fotografías':'Registrar parto y crías'}</button>
       </form>
 
