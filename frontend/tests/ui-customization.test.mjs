@@ -15,6 +15,8 @@ const base={entity_type:'ANIMAL',relation_code:'GENERAL',kind:'IMAGE',byteSize:1
   created_at:'2026-10-01T15:00:00Z'};
 let photos=[{...base,id:'photo-a',storage_object_id:'object-a',entity_id:'animal-a',entity_name:'Lucera',
   captured_on:null,description:'Foto original',tags:[{id:'tag-a',name:'Parto'}]},
+  {...base,id:'photo-calf',storage_object_id:'object-a',entity_id:'offline-calf',entity_name:'Luna',
+    captured_on:null,description:'Foto original',tags:[{id:'tag-a',name:'Parto'}]},
   {...base,id:'photo-b',storage_object_id:'object-b',entity_id:'animal-b',entity_name:'Moka',
   captured_on:'2026-09-30',description:null,tags:[]}];
 window.savedMedia=[];window.contextCalls=[];
@@ -22,6 +24,9 @@ export const getMedia=async()=>structuredClone(photos);
 export const getMediaUsage=async()=>{throw new Error('Quota unavailable offline');};
 export const listCatalogItems=async()=>[{id:'tag-a',name:'Parto',active:true}];
 export const getAnimals=async()=>({items:[{id:'animal-a',name:'Lucera'},{id:'animal-b',name:'Moka'}]});
+export const getAnimal=async(_t,id)=>({id,name:id==='animal-a'?'Lucera':id==='animal-b'?'Moka':'Luna',
+  profilePhotoUrl:url,classification:{name:id==='offline-calf'?'Ternera':'Vaca'},earTagCode:id==='offline-calf'?'001':null,
+  birthDate:id==='offline-calf'?'2026-10-01':null,group:{name:'Grupo principal'},location:null});
 export const deleteMediaObject=async()=>({deletedFromProvider:true});
 export const uploadMedia=async()=>({});
 export const updateMediaDetails=async(_t,id,input)=>{window.savedMedia.push({id,...input});
@@ -91,6 +96,7 @@ try{
   await until(()=>document.querySelectorAll('.media-tile-open').length===2);
   check(!document.querySelector('input[type="range"]'),'No thumbnail size bar');
   const grid=document.querySelector('.media-gallery');
+  await tick();
   touch(grid,'touchstart',[[0,50],[100,50]]);const pinch=touch(grid,'touchmove',[[0,50],[200,50]]);await tick();
   check(grid.style.getPropertyValue('--media-thumbnail-size')==='260px'&&pinch.defaultPrevented,'Pinch enlarges thumbnails and prevents page zoom');
   touch(grid,'touchend',[]);touch(grid,'touchstart',[[0,50],[100,50]]);touch(grid,'touchmove',[[0,50],[25,50]]);await tick();
@@ -101,6 +107,17 @@ try{
   const downloadStyle=getComputedStyle(download);check(downloadStyle.position==='absolute'&&downloadStyle.right!=='auto'&&downloadStyle.bottom!=='auto','Download is anchored bottom right');
   check(document.querySelector('.image-lightbox-details').textContent.includes('Subida el'),'Upload date fallback');
   check(document.querySelector('.image-lightbox-details').textContent.includes('Parto'),'Photo tags');
+  await until(()=>document.querySelectorAll('.media-related-animal img').length===2);
+  const related=document.querySelectorAll('.media-related-animal');
+  check(related[1].getBoundingClientRect().left>related[0].getBoundingClientRect().left,'Multiple animal thumbnails are offset');
+  check(getComputedStyle(related[0].querySelector('.animal-thumb')).borderRadius==='50%','Related thumbnails are circular');
+  document.querySelector('.media-related-trigger').click();await until(()=>document.querySelector('.media-animal-preview'));
+  check(document.querySelectorAll('.media-animal-preview-card').length===2,'The preview includes mother and unsynced calf');
+  const previewBounds=document.querySelector('.media-animal-preview').getBoundingClientRect();
+  check(previewBounds.left>=0&&previewBounds.right<=innerWidth&&previewBounds.top>=0&&previewBounds.bottom<=innerHeight,'The brief profile stays within the viewport');
+  check(document.querySelector('.media-animal-preview').textContent.includes('Ternera')&&document.querySelector('.media-animal-preview').textContent.includes('Arete 001'),'Brief profile shows classification and ear tag');
+  check(location.pathname==='/','The first touch only opens a brief profile');
+  document.querySelector('[aria-label="Cerrar perfiles"]').click();await until(()=>!document.querySelector('.media-animal-preview'));
   document.querySelector('[aria-label="Editar información de la foto"]').click();await until(()=>document.querySelector('.media-edit-overlay'));
   check(document.querySelector('.media-edit-overlay textarea').value==='Foto original','Saved description loaded');
   check(document.querySelector('.media-edit-overlay input[type="date"]').value==='','Capture date can be empty');
@@ -115,12 +132,19 @@ try{
   await until(()=>window.savedMedia.length===1&&!document.querySelector('.media-edit-overlay'));
   check(window.savedMedia[0].id==='object-b'&&window.savedMedia[0].description==='Descripción nueva','Editing targets swiped photo');
   check(window.savedMedia[0].capturedOn==='2026-10-02','Capture date saved');
-  await tick();document.querySelector('.lightbox-animal-links a').click();await until(()=>document.querySelector('#animal-profile'));
+  await tick();document.querySelector('.media-related-trigger').click();await until(()=>document.querySelector('.media-animal-preview-card'));
+  document.querySelector('.media-animal-preview-card').click();await until(()=>document.querySelector('#animal-profile'));
   check(location.pathname==='/animales/animal-b','Animal name opens profile');
   history.back();await until(()=>document.querySelector('.media-tile-open'));
   document.querySelector('.media-tile-open').click();await until(()=>document.querySelector('.image-lightbox'));
   history.back();await until(()=>!document.querySelector('.image-lightbox'));
   check(location.pathname==='/'&&document.querySelector('.media-gallery'),'Back closes only photo');
+  [...document.querySelectorAll('.media-tile-open')].find(node=>node.getAttribute('aria-label').includes('Lucera')).click();
+  await until(()=>document.querySelector('.media-related-trigger'));document.querySelector('.media-related-trigger').click();
+  await until(()=>document.querySelector('[aria-label="Abrir perfil de Luna"]'));
+  document.querySelector('[aria-label="Abrir perfil de Luna"]').click();await until(()=>document.querySelector('#animal-profile'));
+  check(location.pathname==='/animales/offline-calf','The second touch opens the unsynced calf profile');
+  history.back();await until(()=>document.querySelector('.media-gallery'));
   const defaults=loadDashboardPreferences('user-a');check(defaults.sections.map(item=>item.id).join(',')==='pending,animals,operations','Default panel order');
   const custom={...defaults,sections:[defaults.sections[1],{...defaults.sections[0],visible:false},defaults.sections[2]]};
   saveDashboardPreferences('user-a',custom);check(loadDashboardPreferences('user-a').sections[0].id==='animals','Personal order persists');
@@ -186,7 +210,7 @@ const result=await build({root,configFile:false,logLevel:'error',define:{'proces
   },load(id){if(id==='\0customization-test')return entry;if(id==='\0customization-api')return mockApi;if(id==='\0customization-session')return mockSession;},
 }],build:{write:false,minify:false,lib:{entry:'customization-test',formats:['es'],fileName:'test'},rolldownOptions:{output:{codeSplitting:false}}}});
 const code=(Array.isArray(result)?result[0]:result).output.find(item=>item.type==='chunk').code;
-const css=(await Promise.all(['src/styles/global.css','src/sgb-v2/shell.css','src/sgb-v2/v2.css']
+const css=(await Promise.all(['src/styles/global.css','src/styles/restored-ui.css','src/sgb-v2/shell.css','src/sgb-v2/v2.css']
   .map(path=>readFile(join(root,path),'utf8')))).join('\n');
 const page='<meta name="viewport" content="width=device-width, initial-scale=1"><style>'+css+'</style><div id="root"></div><pre id="result">PENDING</pre><script>'+ 
   'const report=e=>document.getElementById("result").textContent="FAIL: "+(e.message??e.reason);'+

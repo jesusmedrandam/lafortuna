@@ -7,6 +7,7 @@ import {LocalValidationError,validateLocalMutation,validateReproductionMutation}
 import {cycleTrueHeats} from '../reproductionCycle';
 import type {ReproductionRecords,ReproductionSettings,ReproductionCandidate} from '../api';
 import {reachedReproductionAge,reproductionToday} from '../reproductionAge';
+import {reproductionSectionEnabled} from '../reproductionSections';
 import {mediaThumbnailUrl,optimizedCloudinaryMediaUrl} from '../../media';
 import {dataCategoryForPath,defaultDownloadPreferences,downloadCategoryLabel,normalizeDownloadPreferences,
   photoCategoryForPath,photoCategoryForType,type DownloadPreferences} from './preferences';
@@ -205,13 +206,18 @@ function bodyRecord(body:unknown){
 
 async function findCachedName(scope:OfflineScope,id:unknown){
   if(typeof id!=='string'||!id)return null;
-  const entries=await listCache(scope);
+  const entries=(await listCache(scope)).sort((a,b)=>Number(b.path===`/animals/${id}`)-Number(a.path===`/animals/${id}`)||b.savedAt-a.savedAt);
+  for(const entry of entries.filter(row=>row.path===`/animals/${id}`||row.path.startsWith('/animals?'))){
+    const data=bodyRecord(entry.payload);const animals=Array.isArray(data.items)?data.items:[data];
+    const animal=animals.map(bodyRecord).find(row=>row.id===id);
+    if(typeof animal?.name==='string')return animal.name;
+  }
   const visit=(value:unknown):string|null=>{
     if(Array.isArray(value)){for(const item of value){const found=visit(item);if(found)return found;}return null;}
     if(!value||typeof value!=='object')return null;
     const row=value as Record<string,unknown>;
     if(row.id===id||row.animalId===id||row.cowId===id||row.partyId===id){
-      const name=row.name??row.title??row.animalName;if(typeof name==='string')return name;}
+      const name=row.name??row.title??row.animalName??row.cowName??row.motherName??row.locationName;if(typeof name==='string')return name;}
     for(const candidate of Object.values(row)){const found=visit(candidate);if(found)return found;}
     return null;
   };
@@ -358,12 +364,13 @@ async function mediaAttachments(entry:OutboxEntry){
     for(const id of [birth?.motherId,...(Array.isArray(birth?.calves)?birth.calves.map(value=>bodyRecord(value).id):[])])
       if(typeof id==='string'&&!targets.some(target=>target.type==='ANIMAL'&&target.id===id))targets.push({id,type:'ANIMAL'});
   }
-  return targets.map(({id,type},index)=>({id:index===0?entry.temporaryId:`${entry.temporaryId}-${index}`,
+  const tags=await Promise.all((query.get('tagIds')??'').split(',').filter(Boolean).map(async id=>({id,name:await findCachedName(entry.scope,id)??'Etiqueta'})));
+  return Promise.all(targets.map(async({id,type},index)=>({id:index===0?entry.temporaryId:`${entry.temporaryId}-${index}`,
     storage_object_id:`local-object-${entry.id}`,entity_type:type,entity_id:id,
-    entity_name:null,relation_code:query.get('relationCode')??'GENERAL',description:query.get('description'),
-    captured_on:query.get('capturedOn'),tags:[],kind:entry.requestHeaders?.['x-media-kind']??'IMAGE',
+    entity_name:await findCachedName(entry.scope,id),relation_code:query.get('relationCode')??'GENERAL',description:query.get('description'),
+    captured_on:query.get('capturedOn'),tags,kind:entry.requestHeaders?.['x-media-kind']??'IMAGE',
     byteSize:entry.binarySize??(file instanceof Blob?file.size:0),created_at:new Date(entry.createdAt).toISOString(),
-    url:'',thumbnailUrl:null,local_media_id:entry.id,__syncState:entry.state,__mutationId:entry.id}));
+    url:'',thumbnailUrl:null,local_media_id:entry.id,__syncState:entry.state,__mutationId:entry.id})));
 }
 
 async function hydrateLocalMedia<T>(scope:OfflineScope,value:T,path?:string):Promise<T>{
@@ -377,7 +384,9 @@ async function hydrateLocalMedia<T>(scope:OfflineScope,value:T,path?:string):Pro
   const visit=async(value:unknown):Promise<unknown>=>{
     if(Array.isArray(value))return Promise.all(value.filter(item=>!expiredDraft(item)).map(visit));
     if(!value||typeof value!=='object')return value;
-    const row=value as Record<string,unknown>;const id=row.local_media_id;
+    let row=value as Record<string,unknown>;const id=row.local_media_id;
+    if(typeof row.entity_type==='string'&&typeof row.entity_id==='string'&&(row.entity_name==null||row.__syncState))
+      row={...row,entity_name:await findCachedName(scope,row.entity_id)??row.entity_name};
     if(typeof row.profile_local_media_id==='string'){
       const photo=await visit({local_media_id:row.profile_local_media_id,kind:'IMAGE'}) as Record<string,unknown>;
       return {...row,profilePhotoUrl:photo.url??row.profilePhotoUrl};
@@ -1127,6 +1136,15 @@ async function validateBeforeQueue(entry:OutboxEntry,init:RequestInit,send:Trans
     }
     throw new LocalValidationError('Faltan datos para validar este registro. Abre reproducción con conexión y descarga sus datos antes de guardar sin conexión.');
   };
+  if(entry.method==='POST'&&/^\/reproduction\/heats\/[^/]+\/finish$/.test(entry.path)){
+    const [settings,records]=await Promise.all([read('/reproduction/settings'),read('/reproduction')]);
+    if(!reproductionSectionEnabled(settings as ReproductionSettings,'HEAT'))throw new LocalValidationError('Los celos están desactivados en las políticas de operación.');
+    const heats=bodyRecord(records).heats;
+    const heat=Array.isArray(heats)?heats.find(row=>bodyRecord(row).id===entry.path.split('/')[3]):null;
+    if(!heat||typeof bodyRecord(heat).startsOn!=='string')throw new LocalValidationError('El celo no está disponible. Actualiza reproducción antes de finalizarlo.');
+    if(bodyRecord(heat).cancelled||bodyRecord(heat).endsOn)throw new LocalValidationError('Este celo ya fue finalizado o cancelado.');
+    validateLocalMutation(entry,bodyRecord(heat));
+  }
   if(entry.method==='POST'&&/^\/reproduction\/(heats|services|pregnancies|births|losses)$/.test(entry.path)){
     const [settings,data,records]=await Promise.all([read('/reproduction/settings'),read('/reproduction/candidates'),read('/reproduction')]);
     const policy=bodyRecord(settings),history=bodyRecord(records);
@@ -1252,7 +1270,7 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
     }catch(error){
       const info=errorInfo(error);entry.attempts=1;entry.lastError=info.message;entry.errorCode=info.code;
       if(info.status>0&&info.status<500&&info.status!==429&&info.code!=='IDEMPOTENCY_IN_PROGRESS'){
-        if(entry.method==='POST'&&/^\/reproduction\/(heats|services|pregnancies|births|losses)$/.test(entry.path)){
+        if(entry.method==='POST'&&/^\/reproduction\/(?:(heats|services|pregnancies|births|losses)|heats\/[^/]+\/finish)$/.test(entry.path)){
           await rewindPendingFrom(entry);await removeOutbox(entry.id);await reprojectQueued(entry.scope,true);
           try{window.SGBAndroid?.removeMirroredMutation?.(entry.id);}catch{/* Solo Android. */}
           emit('sgb-v2-cache-updated');await publishState();throw error;

@@ -1,13 +1,14 @@
 import {DateInput} from '../components/ui';
-import {useEffect,useMemo,useRef,useState,type CSSProperties,type FormEvent} from 'react';
+import {useEffect,useId,useMemo,useRef,useState,type CSSProperties,type FormEvent} from 'react';
 import {Link} from 'react-router-dom';
-import {Pencil,Trash2} from 'lucide-react';
+import {Pencil,Trash2,X} from 'lucide-react';
 import {formatDate} from '../utils';
 import {IconButton} from '../components/ui';
 import {ShellIcon,type ShellIconName} from './ShellIcon';
 import {ImageLightbox,type LightboxMedia} from '../components/ImageLightbox';
 import {mediaThumbnailUrl} from '../media';
-import {ApiRequestError,deleteMediaObject,getAnimals,getMedia,getMediaUsage,
+import {AnimalThumb} from '../components/AnimalPicker';
+import {ApiRequestError,deleteMediaObject,getAnimal,getAnimals,getMedia,getMediaUsage,
   listCatalogItems,uploadMedia,updateMediaDetails,type Animal,type CatalogItem,type MediaItem,type MediaUsage} from './api';
 
 const message=(error:unknown)=>error instanceof ApiRequestError?error.message:'No se pudo completar la operación.';
@@ -28,6 +29,41 @@ const mediaIcon=(type:string):ShellIconName=>type.startsWith('REPRODUCTION_')?'r
   type==='LIVESTOCK_MOVEMENT'?'movements':type==='CLEANING'?'cleanings':
   type==='LIVESTOCK_ACTIVITY'?'activities':type.startsWith('MILK_')?'production':
   type==='HEALTH_CAMPAIGN'?'health':'animals';
+
+function MediaAnimalProfiles({accessToken,related,canView}:{accessToken:string;related:MediaItem[];canView:boolean}){
+  const [profiles,setProfiles]=useState<Record<string,Animal>>({});const [open,setOpen]=useState(false);
+  const trigger=useRef<HTMLButtonElement>(null);const preview=useRef<HTMLDivElement>(null);const previewId=useId();
+  const ids=related.map(item=>item.entity_id).join(',');
+  useEffect(()=>{if(!canView)return;let active=true;
+    const requested=ids.split(',').filter(Boolean);
+    void Promise.allSettled(requested.map(id=>getAnimal(accessToken,id))).then(results=>{
+      if(active)setProfiles(Object.fromEntries(results.flatMap((result,index)=>result.status==='fulfilled'?[[requested[index],result.value]]:[])));
+    });return()=>{active=false;};},[accessToken,ids,canView]);
+  useEffect(()=>{if(open)preview.current?.querySelector<HTMLAnchorElement>('a')?.focus();},[open]);
+  const close=()=>{setOpen(false);trigger.current?.focus();};
+  if(!related.length)return <strong>Sin animal relacionado</strong>;
+  return <div className="lightbox-animal-links media-related-animals" onTouchStart={event=>event.stopPropagation()}
+    onTouchMove={event=>event.stopPropagation()} onTouchEnd={event=>event.stopPropagation()}
+    onKeyDown={event=>{if(open&&event.key==='Escape'){event.stopPropagation();close();}}}>
+    <button ref={trigger} type="button" className="media-related-trigger" disabled={!canView} aria-expanded={open}
+      aria-controls={previewId} aria-label="Ver perfiles de los animales relacionados" onClick={()=>setOpen(value=>!value)}>
+      {related.slice(0,3).map((item,index)=>{const animal=canView?profiles[item.entity_id]:undefined;const name=animal?.name??item.entity_name??'Animal';
+        return <span className="media-related-animal" key={item.entity_id} style={{marginLeft:index*12}}>
+          <AnimalThumb photoUrl={animal?.profilePhotoUrl} name={name}/><strong>{name}</strong></span>;})}
+      {related.length>3&&<small>+{related.length-3} animales</small>}
+    </button>
+    {open&&canView&&<div ref={preview} id={previewId} className="media-animal-preview" role="region" aria-label="Perfiles relacionados">
+      <header><strong>Animales de esta foto</strong><IconButton label="Cerrar perfiles" onClick={close}><X size={18}/></IconButton></header>
+      {related.map(item=>{const animal=profiles[item.entity_id];const name=animal?.name??item.entity_name??'Animal';
+        return <Link className="media-animal-preview-card" key={item.entity_id} to={`/animales/${encodeURIComponent(animal?.id??item.entity_id)}`}
+          replace aria-label={`Abrir perfil de ${name}`}>
+          <AnimalThumb photoUrl={animal?.profilePhotoUrl} name={name}/><span><strong>{name}</strong>
+            <small>{[animal?.classification?.name,animal?.earTagCode?`Arete ${animal.earTagCode}`:null,
+              animal?.group?.name,animal?.location?.name].filter(Boolean).join(' · ')||'Ver ficha completa'}</small>
+            {animal?.birthDate&&<small>Nació el {formatDate(animal.birthDate)}</small>}</span></Link>;})}
+    </div>}
+  </div>;
+}
 
 export function MediaPanel({accessToken,permissions}:{accessToken:string;permissions:string[]}){
   const [items,setItems]=useState<MediaItem[]>([]);
@@ -220,9 +256,7 @@ export function MediaPanel({accessToken,permissions}:{accessToken:string;permiss
         const related=row.attachments.filter(entry=>entry.entity_type==='ANIMAL')
           .filter((entry,index,all)=>all.findIndex(other=>other.entity_id===entry.entity_id)===index);
         const labels=[...new Set(row.attachments.flatMap(entry=>entry.tags.map(tag=>tag.name)))];
-        return <><div className="lightbox-animal-links">{related.length?related.map(animal=><Link
-          key={animal.entity_id} to={`/animales/${encodeURIComponent(animal.entity_id)}`} replace>
-          {animal.entity_name??'Ver perfil del animal'}</Link>):<strong>Sin animal relacionado</strong>}</div>
+        return <><MediaAnimalProfiles key={row.id} accessToken={accessToken} related={related} canView={permissions.includes('ANIMAL_VIEW')}/>
           <small>{row.main.captured_on?'Capturada':'Subida'} el {shownDate(row.main)}</small>
           {labels.length>0&&<small>{labels.join(' · ')}</small>}
           {row.main.description&&<p className="lightbox-description">{row.main.description}</p>}</>;
