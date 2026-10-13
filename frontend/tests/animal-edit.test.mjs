@@ -31,7 +31,7 @@ export const listCatalogItems=async(_token,code)=>[{id:code==='BREEDS'?'breed-ne
 export const listOwners=async()=>[{id:'owner-new',name:'Nuevo dueño',active:true,kind:'EXTERNAL_PERSON'}];
 export const listBrands=async()=>[{id:'brand-new',name:'Nueva marquilla',active:true}];
 export const listAccountUsers=async()=>[];
-export const listGroups=async()=>[{id:'group-a',name:'Grupo de prueba',active:true}];
+export const listGroups=async()=>[{id:'group-a',name:'Grupo de prueba',active:true,location:{id:'pasture-a',name:'Norte',kind:'PASTURE'}},{id:'group-unplaced',name:'Grupo antiguo sin ubicación',active:true,location:null}];
 export const listLocations=async()=>[];
 export const getMedia=async()=>[];
 export const getAnimalParentRules=async()=>({minimumCowMonths:18,minimumBullMonths:24});

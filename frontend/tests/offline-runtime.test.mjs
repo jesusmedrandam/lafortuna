@@ -60,7 +60,9 @@ const reproductiveCandidates=[{id:'cow-a',name:'Vacona adulta sin fecha',sex:'FE
  {id:'cow-b',name:'Otra vacona adulta',sex:'FEMALE',birthDate:null},
  {id:'young-father',name:'Padre joven',sex:'MALE',birthDate:'2026-01-01'},
  {id:'adult-father',name:'Padre adulto',sex:'MALE',birthDate:'2020-01-01'}];
+const locatedGroup={id:'group-a',name:'Vacas',active:true,location:{id:'pasture-a',name:'Norte',kind:'PASTURE'}};
 async function seedReproductionRules(scope){
+ await runtime.putCache(scope,'/groups',[locatedGroup]);
  await runtime.putCache(scope,'/reproduction/settings',reproductionPolicy);
  await runtime.putCache(scope,'/reproduction/candidates',reproductiveCandidates);
  await runtime.putCache(scope,'/animals/parent-age-rules',reproductionPolicy);
@@ -115,7 +117,7 @@ await runtime.putCache(scope,'/animals/animal-a',animal);
 await runtime.putCache(scope,'/catalogs/BREEDS/items',[{id:'breed-new',name:'Jersey'}]);
 await runtime.putCache(scope,'/animal-owners',[{id:'owner-new',name:'Jesús'}]);
 await runtime.putCache(scope,'/animal-brands',[{id:'brand-new',name:'Marca nueva'}]);
-await runtime.putCache(scope,'/groups',[{id:'group-a',name:'Vacas',active:true}]);
+await runtime.putCache(scope,'/groups',[locatedGroup]);
 let row=await change('/animals/animal-a/description',{description:'Primera edición',expectedVersion:1});
 assert.equal(row.name,'Lucera');assert.equal(row.version,2);assert.equal(row.brands.map(x=>x.name)[0],'Marca vieja');
 row=await change('/animals/animal-a/catalogs',{breedIds:['breed-new'],colorIds:[],expectedVersion:2});
@@ -171,7 +173,7 @@ const send=async(path,init)=>{
     // An older response must leave the final queued description visible.
     return {data:{id:'animal-a',...data,version:serverVersion},etag:null,notModified:false};
   }
-  return {data:{id:'group-a',name:'Grupo nuevo'},etag:null,notModified:false};
+  return {data:{...locatedGroup,name:'Grupo nuevo'},etag:null,notModified:false};
 };
 runtime.installOfflineTransport(send);online=true;
 await runtime.syncOfflineMutations();online=false;
@@ -553,7 +555,7 @@ await runtime.putCache(birthScope,'/animals?page=1',{items:[{id:'cow-a',name:'Ma
 await runtime.putCache(birthScope,'/owners',[{id:'owner-b',name:'Luis'}]);
 await runtime.putCache(birthScope,'/catalogs/MEDIA_TAGS/items',[{id:'tag-birth',name:'Parto',active:true}]);
 const queuedNewborn=await change('/reproduction/births',{pregnancyId:'pregnancy-a',occurredOn:'2026-10-10',kind:'NORMAL',stillbornCount:0,
- calves:[{name:'Cría offline',sex:'FEMALE',initialWeight:31,initialWeightUnitCode:'KILOGRAM'},{name:'Segunda cría offline',sex:'MALE',owners:[{partyId:'owner-b',percent:100,isPrimary:true}]}]},'POST');
+ calves:[{name:'Cría offline',groupId:'group-a',sex:'FEMALE',initialWeight:31,initialWeightUnitCode:'KILOGRAM'},{name:'Segunda cría offline',groupId:'group-a',sex:'MALE',owners:[{partyId:'owner-b',percent:100,isPrimary:true}]}]},'POST');
 let newbornList=(await runtime.getCache(birthScope,'/animals?page=1')).payload;
 assert.equal(newbornList.items.length,3,'The mother and both calves are immediately listed');
 assert.equal(newbornList.total,3);
@@ -562,7 +564,7 @@ assert.equal((await runtime.getCache(birthScope,'/animals/'+queuedNewborn.calves
 assert.equal((await runtime.getCache(birthScope,'/animals/'+queuedNewborn.calves[1].id)).payload.owners[0].name,'Luis','Resolve the selected owner in the offline calf profile');
 assert.equal((await runtime.getCache(birthScope,'/animals/'+queuedNewborn.calves[1].id)).payload.primaryOwnerName,'Luis');
 assert.equal((await runtime.getCache(birthScope,'/reproduction')).payload.pregnancies[0].status,'BORN','A queued birth closes the pregnancy locally');
-await assert.rejects(()=>change('/reproduction/births',{pregnancyId:'pregnancy-a',occurredOn:'2026-10-10',calves:[{name:'Repetida',sex:'FEMALE'}],stillbornCount:0},'POST'),/ya está guardado/);
+await assert.rejects(()=>change('/reproduction/births',{pregnancyId:'pregnancy-a',occurredOn:'2026-10-10',calves:[{name:'Repetida',groupId:'group-a',sex:'FEMALE'}],stillbornCount:0},'POST'),/ya está guardado/);
 await runtime.uploadMedia('test-token',{file:new File([new Uint8Array([255,216,255,217])],'calf.jpg',{type:'image/jpeg'}),animalIds:[queuedNewborn.calves[0].id],relationCode:'PROFILE'});
 await runtime.uploadMedia('test-token',{file:new File([new Uint8Array([255,216,255,217])],'birth.jpg',{type:'image/jpeg'}),entityType:'REPRODUCTION_BIRTH',entityId:queuedNewborn.id,tagIds:['tag-birth'],description:'Foto del parto',capturedOn:'2026-10-10'});
 runtime=await load();await runtime.configureOfflineRuntime(birthScope,'test-token');
@@ -698,7 +700,9 @@ const context={records:emptyReproduction,settings:reproductionPolicy,candidates:
 const validate=(path,jsonBody,overrides={})=>runtime.validateReproductionMutation({path,method:'POST',jsonBody},{...context,...overrides});
 const pregnancyInput={cowId:'cow-a',confirmedOn:'2026-10-01',conceptionMethod:'NATURAL',confirmationMethod:'PALPATION'};
 assert.throws(()=>validate('/reproduction/pregnancies',{...pregnancyInput,fatherId:'young-father'}),/24 meses/);
-assert.throws(()=>validate('/reproduction/heats',heatInput,{records:{...emptyReproduction,pregnancies:[{id:'pregnancy-a',cowId:'cow-a',status:'CONFIRMED'}]}}),/preñez confirmada/);
+const pregnantHeat={...heatInput,trueHeatId:'NEW'};
+validate('/reproduction/heats',pregnantHeat,{settings:{...reproductionPolicy,allowFalseHeatInPregnancy:false,allowSecondHeat:false},records:{...emptyReproduction,pregnancies:[{id:'pregnancy-a',cowId:'cow-a',status:'CONFIRMED',confirmedOn:'2026-01-01'}]}});
+assert.equal(pregnantHeat.isFalse,true);assert.equal(pregnantHeat.trueHeatId,undefined);
 assert.throws(()=>validate('/reproduction/heats',heatInput,{records:{...emptyReproduction,births:[{motherId:'cow-a',occurredOn:'2026-08-15'}]}}),/30 días/);
 assert.throws(()=>validate('/reproduction/services',{cowId:'cow-a',occurredOn:'2026-10-01',kind:'INSEMINATION',heatId:'false-heat'},
  {records:{...emptyReproduction,heats:[{id:'false-heat',cowId:'cow-a',startsOn:'2026-09-01',isFalse:true}]}}),/celo verdadero/);
@@ -740,7 +744,7 @@ const calfScope={userId:'calf-preflight',propertyId:'calf-property',roleId:'owne
 await runtime.configureOfflineRuntime(calfScope,'test-token');await seedReproductionRules(calfScope);
 await runtime.putCache(calfScope,'/reproduction',{...emptyReproduction,pregnancies:[{id:'pregnancy-calf',cowId:'cow-a',status:'CONFIRMED',confirmedOn:'2026-01-01'}]});
 await runtime.putCache(calfScope,'/animals/cow-a',{id:'cow-a',name:'Madre',owners:[{partyId:'owner-a',percent:100,isPrimary:true}]});
-const calfInput={pregnancyId:'pregnancy-calf',occurredOn:'2026-10-10',kind:'NORMAL',stillbornCount:0,calves:[{name:'Luna',sex:'FEMALE'}]};
+const calfInput={pregnancyId:'pregnancy-calf',occurredOn:'2026-10-10',kind:'NORMAL',stillbornCount:0,calves:[{name:'Luna',groupId:'group-a',sex:'FEMALE'}]};
 for(const invalid of [{initialWeight:0,initialWeightUnitCode:'KILOGRAM'},
  {initialWeight:12.3456,initialWeightUnitCode:'KILOGRAM'},{initialWeight:12},
  {owners:[{partyId:'owner-a',percent:90,isPrimary:true}]},{breedIds:['breed-a','breed-a']},
@@ -749,7 +753,7 @@ for(const invalid of [{initialWeight:0,initialWeightUnitCode:'KILOGRAM'},
  assert.equal((await runtime.listOutbox(calfScope.userId)).length,0,'Invalid calf data never enters either the queue or history');
  assert.equal((await get('/reproduction')).births.length,0);
 }
-await change('/reproduction/births',{...calfInput,notes:'x'.repeat(5000),calves:[{name:'A',sex:'FEMALE',initialWeight:12.345,initialWeightUnitCode:'KILOGRAM'}]},'POST');
+await change('/reproduction/births',{...calfInput,notes:'x'.repeat(5000),calves:[{name:'A',groupId:'group-a',sex:'FEMALE',initialWeight:12.345,initialWeightUnitCode:'KILOGRAM'}]},'POST');
 assert.equal((await get('/reproduction')).births.length,1,'A valid calf may have a one-character name and the birth accepts 5000 note characters');
 validate('/reproduction/services',{cowId:'cow-a',kind:'INSEMINATION',occurredOn:'2026-10-10',notes:'x'.repeat(2000)});
 assert.throws(()=>validate('/reproduction/services',{cowId:'cow-a',kind:'INSEMINATION',occurredOn:'2026-10-10',donorId:'cow-b'}),/donante.*transferencia/i);
@@ -794,3 +798,35 @@ assert.equal((await get('/reproduction')).heats[0].endsOn,null,'A concurrent rej
 assert.deepEqual(new Set(mirrored.keys()),finishMirrors,'Android must not retain a rejected completion');
 online=false;
 console.log('PASS: heat completion verifies current status before queueing and uses stable calendar dates.');
+
+const actionsScope={userId:'actions-offline',propertyId:'actions-property',roleId:'owner'};
+online=false;await runtime.configureOfflineRuntime(actionsScope,'test-token');
+await runtime.putCache(actionsScope,'/groups',[locatedGroup]);
+await runtime.putCache(actionsScope,'/locations',[{id:'pasture-a',name:'Norte',kind:'PASTURE',active:true,group:{id:'group-a',name:'Vacas'}},
+ {id:'corral-free',name:'Corral libre',kind:'CORRAL',active:true,group:null}]);
+const localAdult={...animal,availabilityStatusCode:'ACTIVE',group:{id:'group-a',name:'Vacas'},location:locatedGroup.location};
+await runtime.putCache(actionsScope,'/animals/animal-a',localAdult);
+for(const path of ['/weighings/options','/animal-status/options','/commerce/animals']){
+ assert.equal((await get(path))[0].id,'animal-a','A downloaded profile derives the missing action roster');
+ await runtime.putCache(actionsScope,path,[{id:'other-a',name:'Lista antigua'}]);
+ assert.ok((await get(path)).some(row=>row.id==='animal-a'),'A stale roster includes the downloaded profile');
+}
+for(const path of ['/health-records/options','/movements/options']){
+ await runtime.putCache(actionsScope,path,{animals:[],groups:[{id:'group-a'}],locations:[],units:[]});
+ assert.equal((await get(path)).animals[0].id,'animal-a');
+ assert.equal((await get(path)).animals[0].groupId,'group-a');
+}
+await runtime.putCache(actionsScope,'/animals/animal-a',{...localAdult,availabilityStatusCode:'DEAD'});
+assert.ok(!(await get('/weighings/options')).some(row=>row.id==='animal-a'),'An unavailable animal is removed from the old roster');
+await assert.rejects(()=>change('/groups',{name:'Sin ubicación'},'POST'),/potrero o corral/);
+const localGroup=await change('/groups',{name:'Nuevo lote',locationId:'corral-free'},'POST');
+assert.equal((await get('/locations')).find(row=>row.id==='corral-free').group.id,localGroup.id);
+const localCalf=await change('/animals',{name:'Cría con ubicación',groupId:localGroup.id,sex:'FEMALE',speciesCode:'BOVINE'},'POST');
+assert.equal((await get('/animals/'+localCalf.id)).location.id,'corral-free');
+assert.ok((await get('/weighings/options')).some(row=>row.id===localCalf.id),'A new unsynced animal can open its action forms');
+await assert.rejects(()=>change('/groups',{name:'Duplicado',locationId:'corral-free'},'POST'),/otro grupo/);
+await assert.rejects(()=>change('/animals',{name:'Sin grupo',sex:'FEMALE',speciesCode:'BOVINE'},'POST'),/grupo/);
+await runtime.discardPendingMutation((await runtime.listOutbox(actionsScope.userId)).find(row=>row.path==='/animals').id);
+await runtime.discardPendingMutation((await runtime.listOutbox(actionsScope.userId)).find(row=>row.path==='/groups').id);
+assert.equal((await get('/locations')).find(row=>row.id==='corral-free').group,null,'Discard restores the free location');
+console.log('PASS: profile action rosters, unavailable animals, mandatory placement, unsynced groups/calves and placement rollback.');

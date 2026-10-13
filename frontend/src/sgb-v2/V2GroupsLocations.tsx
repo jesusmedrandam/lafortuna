@@ -2,7 +2,7 @@ import {useEffect,useState,type FormEvent} from 'react';
 import {ChevronRight,Edit3,Plus,SlidersHorizontal,Sprout,Users,Warehouse} from 'lucide-react';
 import {useNavigate} from 'react-router-dom';
 import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,Field,FloatingActionDock,
-  IconButton,Input,LoadingState,Modal,Textarea} from '../components/ui';
+  IconButton,Input,LoadingState,Modal,Select,Textarea} from '../components/ui';
 import {LocationFields,locationInput} from './GroupPanel';
 import {createGroup,createLocation,listCatalogItems,listGroups,listLocations,setGroupState,
   updateGroup,updateLocation,type CatalogItem,type LivestockGroup,type PhysicalLocation} from './api';
@@ -20,6 +20,7 @@ function areaLabel(place:PhysicalLocation){
 export function V2GroupsPage(){
   const {session,hasPermission}=useV2Session();const navigate=useNavigate();const token=session!.accessToken;
   const [groups,setGroups]=useState<LivestockGroup[]|null>(null);
+  const [locations,setLocations]=useState<PhysicalLocation[]>([]);const [restoring,setRestoring]=useState<LivestockGroup|null>(null);
   const [query,setQuery]=useState('');const [filter,setFilter]=useState<Filter>('ALL');
   const [selected,setSelected]=useState<string|null>(null);
   const [editing,setEditing]=useState<LivestockGroup|null|undefined>(undefined);
@@ -27,6 +28,8 @@ export function V2GroupsPage(){
   const canManage=hasPermission('GROUP_MANAGE');
   useEffect(()=>{let active=true;setError('');
     void listGroups(token).then(items=>{if(active)setGroups(items);})
+      .catch(reason=>{if(active)setError(message(reason));});
+    if(hasPermission('LOCATION_VIEW'))void listLocations(token).then(items=>{if(active)setLocations(items);})
       .catch(reason=>{if(active)setError(message(reason));});
     return()=>{active=false;};},[token,revision]);
   const item=groups?.find(group=>group.id===selected);
@@ -37,12 +40,13 @@ export function V2GroupsPage(){
     const data=new FormData(event.currentTarget);setBusy(true);setError('');
     try{const input={name:String(data.get('name')??'').trim(),description:String(data.get('description')??'').trim()||null};
       if(editing)await updateGroup(token,editing.id,{...input,expectedVersion:editing.version});
-      else await createGroup(token,input);
+      else await createGroup(token,{...input,locationId:String(data.get('locationId')||'')});
       setEditing(undefined);setRevision(value=>value+1);
     }catch(reason){setError(message(reason));}finally{setBusy(false);}
   }
-  async function toggle(group:LivestockGroup){setBusy(true);setError('');
-    try{await setGroupState(token,group.id,{active:!group.active,expectedVersion:group.version});
+  async function toggle(group:LivestockGroup,locationId?:string){setBusy(true);setError('');
+    try{await setGroupState(token,group.id,{active:!group.active,expectedVersion:group.version,...(locationId?{locationId}:{})});
+      setRestoring(null);setSelected(null);
       setRevision(value=>value+1);
     }catch(reason){setError(message(reason));}finally{setBusy(false);}
   }
@@ -76,7 +80,7 @@ export function V2GroupsPage(){
         {item.description&&<section><h3>Descripción</h3><p>{item.description}</p></section>}
         <section><Button variant="secondary" onClick={()=>navigate(`/animales?groupId=${encodeURIComponent(item.id)}`)}>
           Ver animales del grupo <ChevronRight size={17}/></Button></section>
-        {canManage&&<Button variant="ghost" disabled={busy} onClick={()=>void toggle(item)}>
+        {canManage&&<Button variant="ghost" disabled={busy} onClick={()=>item.active?void toggle(item):setRestoring(item)}>
           {item.active?'Archivar grupo':'Reactivar grupo'}</Button>}
       </div></Modal>}
     {editing!==undefined&&<Modal title={editing?'Editar grupo':'Nuevo grupo'} onClose={()=>setEditing(undefined)}
@@ -87,8 +91,18 @@ export function V2GroupsPage(){
         <Field label="Nombre" required><Input name="name" required maxLength={160} defaultValue={editing?.name??''}/></Field>
         <Field label="Descripción"><Textarea name="description" rows={3} maxLength={5000}
           defaultValue={editing?.description??''}/></Field>
+        {!editing&&<Field label="Potrero o corral" required><Select name="locationId" required defaultValue="">
+          <option value="" disabled>Selecciona la ubicación</option>{locations.filter(place=>place.active&&!place.group)
+            .map(place=><option key={place.id} value={place.id}>{place.kind==='PASTURE'?'Potrero':'Corral'} · {place.name}</option>)}</Select></Field>}
+        {!editing&&!locations.some(place=>place.active&&!place.group)&&<p className="form-error">Crea primero un potrero o corral disponible para este grupo.</p>}
       </form></Modal>}
-    {canManage&&<FloatingActionDock><IconButton label="Nuevo grupo" onClick={()=>setEditing(null)}>
+    {restoring&&<Modal title="Reactivar grupo" onClose={()=>setRestoring(null)}><form className="form-stack" onSubmit={event=>{
+      event.preventDefault();void toggle(restoring,String(new FormData(event.currentTarget).get('locationId')||''));}}>
+      {error&&<p className="form-error" role="alert">{error}</p>}<Field label="Potrero o corral" required><Select name="locationId" required defaultValue="">
+        <option value="" disabled>Selecciona la ubicación</option>{locations.filter(place=>place.active&&!place.group)
+          .map(place=><option key={place.id} value={place.id}>{place.name}</option>)}</Select></Field><Button type="submit" loading={busy}>Reactivar grupo</Button>
+    </form></Modal>}
+    {canManage&&hasPermission('LOCATION_MANAGE')&&<FloatingActionDock><IconButton label="Nuevo grupo" onClick={()=>setEditing(null)}>
       <Plus size={23}/></IconButton></FloatingActionDock>}
   </div>;
 }

@@ -261,7 +261,11 @@ async function optimisticRecord(entry:OutboxEntry){
           percent:owner.percent,isPrimary:owner.isPrimary};}));
       animal.primaryOwnerName=(animal.owners as Record<string,unknown>[]).find(owner=>owner.isPrimary)?.name??null;
     }
-    if(input.groupId)animal.group={id:input.groupId,name:await findCachedName(entry.scope,input.groupId)??'Grupo'};
+    if(input.groupId){
+      const group=await cachedRecord({...entry,path:`/groups/${input.groupId}`,temporaryId:null});
+      animal.group={id:input.groupId,name:group?.name??await findCachedName(entry.scope,input.groupId)??'Grupo'};
+      animal.location=group?.location??null;
+    }
     for(const key of ['mother','father'])if(key in input){
       const parent=bodyRecord(input[key]);animal[key]=input[key]?{animalId:parent.animalId??null,
         name:parent.reportedName??await findCachedName(entry.scope,parent.animalId)??'Animal'}:null;
@@ -270,7 +274,11 @@ async function optimisticRecord(entry:OutboxEntry){
   }
   if(entry.path.startsWith('/media?')&&entry.bodyType==='binary')return {
     id:entry.temporaryId,attachmentIds:(await mediaAttachments(entry)).map(row=>row.id),...pending};
-  if(entry.path==='/groups')return {...common,active:true,animalCount:0,location:null};
+  if(entry.path==='/groups'||/^\/groups\/[^/]+\/state$/.test(entry.path)&&input.active===true){
+    const place=await cachedRecord({...entry,path:`/locations/${input.locationId}`,temporaryId:null});
+    return {...common,active:true,animalCount:current?.animalCount??0,location:place?{id:place.id,name:place.name,kind:place.kind}:null};
+  }
+  if(/^\/groups\/[^/]+\/state$/.test(entry.path)&&input.active===false)return {...common,location:null};
   if(['/health-records/medicines','/health-records/medicines/structured','/health-records/medicines/classification','/catalogs/medicines','/catalogs/medicines/classification'].includes(entry.path))return {
     active:true,administrationRoutes:['ORAL','INTRAMUSCULAR','SUBCUTANEA','INTRAVENOSA','TOPICA','OTRA'],
     doseAmount:null,doseWeight:null,doseWeightUnitCode:null,doseClassificationRanges:[],...common};
@@ -374,6 +382,7 @@ async function mediaAttachments(entry:OutboxEntry){
 }
 
 async function hydrateLocalMedia<T>(scope:OfflineScope,value:T,path?:string):Promise<T>{
+  if(path)value=await hydrateAnimalOptions(scope,value,path) as T;
   if(path==='/health-records/options'){
     const routes=await getCache<unknown[]>(scope,'/catalogs/ADMINISTRATION_ROUTES/items');
     if(routes&&Array.isArray(routes.payload)){
@@ -686,6 +695,13 @@ async function projectEntry(entry:OutboxEntry,record:Record<string,unknown>,crea
     await putCache(entry.scope,cached.path,payload,cached.etag);
   }
   if(entry.path==='/animals'&&entry.temporaryId)await putCache(entry.scope,`/animals/${id}`,record);
+  if(target.root==='/groups')for(const cached of entries.filter(row=>row.path==='/locations'||row.path.startsWith('/locations/'))){
+    const update=(value:unknown)=>{const place=bodyRecord(value);
+      if(record.active&&place.id===bodyRecord(record.location).id)return {...place,group:{id,name:record.name}};
+      if([id,originalId].includes(String(bodyRecord(place.group).id))&&(!record.active||place.id!==bodyRecord(record.location).id))return {...place,group:null};
+      return value;};
+    await putCache(entry.scope,cached.path,Array.isArray(cached.payload)?cached.payload.map(update):update(cached.payload),cached.etag);
+  }
   if(entry.path==='/reproduction/births')await projectBirthAnimals(entry,record);
   if(entry.path==='/reproduction/losses'&&typeof record.pregnancyId==='string')await projectEntry(
     {...entry,path:`/reproduction/pregnancies/${record.pregnancyId}`,temporaryId:null},
@@ -737,12 +753,12 @@ async function restorePending(entries:OutboxEntry[]){
   }
 }
 async function rewindPendingFrom(entry:OutboxEntry){
-  const later=(await listOutbox(entry.scope.userId)).filter(item=>sameScope(item.scope,entry.scope)&&item.createdAt>=entry.createdAt);
-  await restorePending(later);
+  const entries=(await listOutbox(entry.scope.userId)).filter(item=>sameScope(item.scope,entry.scope)&&item.createdAt>=entry.createdAt);
+  await restorePending(entries);
 }
 
-async function reprojectQueued(scope:OfflineScope,rebase=false,rebaseVersions=true){
-  const entries=(await listOutbox(scope.userId)).filter(entry=>sameScope(entry.scope,scope));
+async function reprojectQueued(scope:OfflineScope,rebase=false,rebaseVersions=true,fromCreatedAt=-Infinity){
+  const entries=(await listOutbox(scope.userId)).filter(entry=>sameScope(entry.scope,scope)&&entry.createdAt>=fromCreatedAt);
   const replacements=await getSetting<Record<string,string>>(`temporary-ids:${scope.userId}`)??{};
   for(const original of entries){
     const entry={...original,path:replaceIds(original.path,replacements),jsonBody:replaceValues(original.jsonBody,replacements)};
@@ -987,6 +1003,15 @@ async function backgroundRefresh<T>(scope:OfflineScope,path:string,init:RequestI
 }
 
 async function derivedCache<T>(scope:OfflineScope,path:string):Promise<T|null>{
+  if(['/weighings/options','/animal-status/options','/commerce/animals'].includes(path)){
+    const rows=await hydrateAnimalOptions(scope,[],path);if(Array.isArray(rows)&&rows.length)return rows as T;
+  }
+  if(path==='/health-records/options'){
+    const reference=bodyRecord((await getCache(scope,'/catalogs/reference'))?.payload);
+    const payload=await hydrateAnimalOptions(scope,{groups:(await getCache(scope,'/groups'))?.payload??[],
+      units:Array.isArray(reference.units)?reference.units.filter(item=>bodyRecord(item).contextCode==='MEDICINE_DOSE'):[],administrationRoutes:[]},path);
+    if((bodyRecord(payload).animals as unknown[]).length)return payload as T;
+  }
   if(path==='/reproduction/candidates'){
     const candidates=await reproductionCandidates(scope,[]);return candidates.length?candidates as T:null;
   }
@@ -1096,13 +1121,33 @@ function preserveLocalMedia(previous:unknown,next:unknown):unknown{
     return local?.local_media_id?{...row,local_media_id:local.local_media_id}:value;});
 }
 
-async function reproductionCandidates(scope:OfflineScope,payload:unknown,offlineFallback=false){
-  const candidates=new Map((Array.isArray(payload)?payload:[]).map(value=>{const row=bodyRecord(value);return [row.id,row];}));
+async function knownAnimals(scope:OfflineScope){
   const known=new Map<unknown,Record<string,unknown>>();
   for(const cache of (await listCache(scope)).filter(row=>row.path.startsWith('/animals?')||row.path.startsWith('/animals/')).sort((a,b)=>a.savedAt-b.savedAt)){
     const data=bodyRecord(cache.payload);const animals=Array.isArray(data.items)?data.items:[data];
     for(const value of animals){const row=bodyRecord(value);if(row.id)known.set(row.id,row);}
   }
+  return known;
+}
+async function hydrateAnimalOptions(scope:OfflineScope,payload:unknown,path:string){
+  const array=['/weighings/options','/animal-status/options','/commerce/animals'].includes(path);
+  const nested=['/health-records/options','/movements/options'].includes(path);
+  if(!array&&!nested)return payload;
+  const options=bodyRecord(payload);const rows=array?payload:options.animals;
+  const animals=new Map((Array.isArray(rows)?rows:[]).map(value=>{const row=bodyRecord(value);return [row.id,row];}));
+  for(const animal of (await knownAnimals(scope)).values()){
+    if(isRuntimeOnline()&&animal.__syncState!=='PENDING')continue;
+    if(animal.speciesCode!=='BOVINE'||typeof animal.availabilityStatusCode!=='string')continue;
+    const allowed=path==='/animal-status/options'?['ACTIVE','MISSING','INACTIVE'].includes(animal.availabilityStatusCode):animal.availabilityStatusCode==='ACTIVE';
+    if(!allowed){animals.delete(animal.id);continue;}
+    animals.set(animal.id,{...animals.get(animal.id),...animal,status:animal.availabilityStatusCode,
+      groupId:bodyRecord(animal.group).id??null,locationId:bodyRecord(animal.location).id??null});
+  }
+  return array?[...animals.values()]:{...options,animals:[...animals.values()]};
+}
+async function reproductionCandidates(scope:OfflineScope,payload:unknown,offlineFallback=false){
+  const candidates=new Map((Array.isArray(payload)?payload:[]).map(value=>{const row=bodyRecord(value);return [row.id,row];}));
+  const known=await knownAnimals(scope);
   for(const animal of known.values()){
     const existing=candidates.get(animal.id);
     if(existing&&existing.birthDate===undefined&&animal.birthDate!==undefined)candidates.set(animal.id,{...existing,birthDate:animal.birthDate});
@@ -1119,7 +1164,7 @@ async function validateBeforeQueue(entry:OutboxEntry,init:RequestInit,send:Trans
   const body=bodyRecord(entry.jsonBody);
   const read=async(path:string):Promise<unknown>=>{
     const cache=await getCache(entry.scope,path);
-    const modified=changes.some(row=>row.id!==entry.id&&(row.path===path
+    const modified=changes.some(row=>row.id!==entry.id&&(row.path===path||path!=='/reproduction'&&row.path.startsWith(path+'/')
       ||path==='/reproduction'&&row.path.startsWith('/reproduction/')&&row.path!=='/reproduction/settings'));
     if(isRuntimeOnline()&&!modified&&!path.includes('/offline-')){
       try{return (await send<unknown>(path,{method:'GET',headers:init.headers,cache:'no-cache'})).data;}
@@ -1136,6 +1181,21 @@ async function validateBeforeQueue(entry:OutboxEntry,init:RequestInit,send:Trans
     }
     throw new LocalValidationError('Faltan datos para validar este registro. Abre reproducción con conexión y descarga sus datos antes de guardar sin conexión.');
   };
+  const requireGroup=async(id:unknown)=>{
+    const groups=await read('/groups');const group=Array.isArray(groups)?groups.map(bodyRecord).find(row=>row.id===id):null;
+    if(!group||group.active!==true||!['PASTURE','CORRAL'].includes(String(bodyRecord(group.location).kind)))
+      throw new LocalValidationError('Selecciona un grupo activo de esta propiedad con potrero o corral.');
+  };
+  if(entry.method==='POST'&&entry.path==='/animals')await requireGroup(body.groupId);
+  if(entry.method==='POST'&&entry.path==='/reproduction/births'&&Array.isArray(body.calves))
+    for(const calf of body.calves)await requireGroup(bodyRecord(calf).groupId);
+  if(entry.method==='POST'&&entry.path==='/groups'||/^\/groups\/[^/]+\/state$/.test(entry.path)&&body.active===true){
+    const [locations,groups]=await Promise.all([read('/locations'),read('/groups')]);
+    const place=Array.isArray(locations)?locations.map(bodyRecord).find(row=>row.id===body.locationId):null;
+    if(!place||place.active!==true||!['PASTURE','CORRAL'].includes(String(place.kind)))throw new LocalValidationError('Selecciona un potrero o corral activo de esta propiedad.');
+    if(Array.isArray(groups)&&groups.some(group=>bodyRecord(bodyRecord(group).location).id===body.locationId))
+      throw new LocalValidationError('Este potrero o corral ya pertenece a otro grupo. Selecciona una ubicación disponible.');
+  }
   if(entry.method==='POST'&&/^\/reproduction\/heats\/[^/]+\/finish$/.test(entry.path)){
     const [settings,records]=await Promise.all([read('/reproduction/settings'),read('/reproduction')]);
     if(!reproductionSectionEnabled(settings as ReproductionSettings,'HEAT'))throw new LocalValidationError('Los celos están desactivados en las políticas de operación.');
@@ -1511,7 +1571,7 @@ export function discardPendingMutation(id:string):Promise<void>{
     try{window.SGBAndroid?.removeMirroredMutation?.(id);}catch{/* Solo Android. */}
     if(entry.bodyType==='binary'){await removeLocalMedia(id);const key=entry.scope.userId+':'+id;const url=mediaUrls.get(key);
       if(url)URL.revokeObjectURL(url);mediaUrls.delete(key);}
-    await reprojectQueued(entry.scope,true);emit('sgb-v2-cache-updated');await publishState();
+    await reprojectQueued(entry.scope,true,true,entry.createdAt);emit('sgb-v2-cache-updated');await publishState();
   });mutationChain=operation.catch(()=>{});return operation;
 }
 export function editPendingMutation(id:string,fields:Record<string,unknown>):Promise<void>{
@@ -1541,7 +1601,7 @@ export function editPendingMutation(id:string,fields:Record<string,unknown>):Pro
     entry.idempotencyKey=crypto.randomUUID();entry.state='PENDING';entry.lastError=null;entry.errorCode=null;entry.attempts=0;
     entry.summary=await pendingChangeSummary(entry);await putOutbox(entry);
     try{window.SGBAndroid?.removeMirroredMutation?.(id);}catch{/* Solo Android. */}
-    await reprojectQueued(entry.scope,true);emit('sgb-v2-cache-updated');await publishState();
+    await reprojectQueued(entry.scope,true,true,entry.createdAt);emit('sgb-v2-cache-updated');await publishState();
   });mutationChain=operation.catch(()=>{});return operation;
 }
 function reservePending(entry:OutboxEntry){

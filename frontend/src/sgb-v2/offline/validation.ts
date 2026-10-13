@@ -43,8 +43,8 @@ export function validateReproductionMutation(entry:OutboxEntry,context:{records:
   };
   age(cowId,'FEMALE',on);
   const active=records.pregnancies.some(row=>row.cowId===cowId&&row.status==='CONFIRMED'&&unresolved(row.id));
+  if(kind==='heats'&&active){input.isFalse=true;delete input.trueHeatId;}
   requireValue(!active||(kind==='heats'&&input.isFalse===true),kind==='heats'?'La hembra tiene una preñez confirmada. Solo puede registrarse un celo aparente o falso.':'La hembra ya tiene una preñez confirmada.');
-  if(active&&input.isFalse)requireValue(settings.allowFalseHeatInPregnancy,'Las políticas de operación no permiten celos falsos durante la preñez.');
   const shift=(date:string,days:number)=>{const value=new Date(date+'T12:00:00Z');value.setUTCDate(value.getUTCDate()+days);return value.toISOString().slice(0,10);};
   const birth=records.births.filter(row=>row.motherId===cowId&&row.occurredOn<=on).map(row=>row.occurredOn).sort().at(-1);
   const loss=records.losses.filter(row=>row.cowId===cowId&&row.occurredOn<=on).map(row=>row.occurredOn).sort().at(-1);
@@ -52,7 +52,7 @@ export function validateReproductionMutation(entry:OutboxEntry,context:{records:
     [loss,kind==='heats'?settings.daysAfterLossHeat:settings.daysAfterLossPregnancy,'aborto o pérdida']] as const)
     if(previous)requireValue(on>=shift(previous,days),`Deben transcurrir ${days} días después del ${label}.`);
   const boundary=[birth,loss].filter(Boolean).sort().at(-1)??'';
-  if(kind==='heats'&&!settings.allowSecondHeat)requireValue(!records.heats.some(row=>row.cowId===cowId&&!row.cancelled&&row.startsOn>=boundary&&row.startsOn<=on),
+  if(kind==='heats'&&!settings.allowSecondHeat&&!active)requireValue(!records.heats.some(row=>row.cowId===cowId&&!row.cancelled&&row.startsOn>=boundary&&row.startsOn<=on),
     'Las políticas de operación no permiten otro celo en este ciclo.');
   const trueHeats=cycleTrueHeats(records,cowId,on);
   if(kind==='heats'){
@@ -100,7 +100,7 @@ export function validateReproductionMutation(entry:OutboxEntry,context:{records:
   if(fatherId)age(fatherId,'MALE',conceptionOn);
   if(input.donorId)age(input.donorId,'FEMALE',on);
 }
-export function validateLocalMutation(entry:OutboxEntry,current:Record<string,unknown>|null,birthCalf=false){
+export function validateLocalMutation(entry:OutboxEntry,current:Record<string,unknown>|null){
   const original=(entry.jsonBody??{}) as Record<string,unknown>;
   const editingMedicine=entry.method==='PATCH'&&/^\/catalogs\/medicines\/[^/]+$/.test(entry.path);
   const input=editingMedicine?{...(original.medicine as Record<string,unknown>),expectedVersion:original.expectedVersion}:original;
@@ -111,6 +111,7 @@ export function validateLocalMutation(entry:OutboxEntry,current:Record<string,un
     else if(value&&typeof value==='object')Object.values(value).forEach(validateNumbers);
   };
   validateNumbers(input);
+  if(entry.method==='POST'&&entry.path==='/groups'||/^\/groups\/[^/]+\/state$/.test(entry.path)&&input.active===true)requireValue(typeof input.locationId==='string'&&input.locationId.length>0,'Selecciona un potrero o corral para el grupo.');
   if(entry.path==='/reproduction/births'){
     const calves=input.calves;const stillborn=Number(input.stillbornCount);
     requireValue(Array.isArray(calves)&&Number.isInteger(stillborn)&&stillborn>=0&&calves.length+stillborn>=1&&calves.length+stillborn<=8,
@@ -119,7 +120,7 @@ export function validateLocalMutation(entry:OutboxEntry,current:Record<string,un
     for(const calf of calves){
       requireValue(calf&&typeof calf==='object'&&!Array.isArray(calf),'Completa la ficha de cada cría.');
       requireValue(calf.birthCondition===undefined||['ALIVE','WEAK','UNKNOWN'].includes(calf.birthCondition),'Selecciona el estado al nacer de cada cría.');
-      validateLocalMutation({...entry,path:'/animals',jsonBody:{...calf,speciesCode:'BOVINE'}},null,true);
+      validateLocalMutation({...entry,path:'/animals',jsonBody:{...calf,speciesCode:'BOVINE'}},null);
     }
   }
   if(/^\/reproduction\/heats\/[^/]+\/finish$/.test(entry.path)){
@@ -217,7 +218,7 @@ export function validateLocalMutation(entry:OutboxEntry,current:Record<string,un
     if(entry.path==='/animals'){
       requireValue(typeof input.name==='string'&&input.name.trim().length>0&&input.name.trim().length<=160,
         'El nombre debe tener entre 1 y 160 caracteres.');
-      if(!birthCalf)requireValue(input.groupId,'Selecciona un grupo para el animal.');
+      requireValue(input.groupId,'Selecciona un grupo para el animal.');
       requireValue(['FEMALE','MALE'].includes(String(input.sex))&&input.speciesCode==='BOVINE',
         'Selecciona el sexo y la especie del animal.');
       requireValue((input.initialWeight===undefined)===(input.initialWeightUnitCode===undefined),

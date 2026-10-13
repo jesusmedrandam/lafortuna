@@ -139,6 +139,7 @@ export function GroupPanel({ accessToken, modules, canManage, canViewLocations,
       await createGroup(accessToken, {
         name: String(data.get('name')).trim(),
         description: String(data.get('description') || '').trim() || null,
+        locationId:String(data.get('locationId')||''),
       });
       form.reset();
     });
@@ -216,15 +217,18 @@ export function GroupPanel({ accessToken, modules, canManage, canViewLocations,
               <button className="secondary-button compact" disabled={busy}>Guardar ubicación</button>
             </form></details>}</details>)}</div>}
     </div>}
-    {canManage && <details className="group-create-toggle"><summary>+ Crear grupo</summary>
+    {canManage&&canManageLocations && <details className="group-create-toggle"><summary>+ Crear grupo</summary>
       <form className="group-new-form" onSubmit={addGroup}>
       <h3>Nuevo grupo</h3>
       <label><span>Nombre *</span><input name="name" required maxLength={160} disabled={busy}
         placeholder="Ej. Paridas" /></label>
       <label className="group-description"><span>Descripción</span>
         <textarea name="description" rows={2} maxLength={5000} disabled={busy} /></label>
-      {canPlace && <small>La primera ubicación se asigna desde Movimientos.</small>}
-      <button className="primary-button compact" type="submit" disabled={busy}>Crear grupo</button>
+      <label><span>Potrero o corral *</span><Select name="locationId" required defaultValue="" disabled={busy}>
+        <option value="" disabled>Selecciona la ubicación</option>{locations.filter(place=>place.active&&!place.group)
+          .map(place=><option key={place.id} value={place.id}>{label(place)}</option>)}</Select></label>
+      {!locations.some(place=>place.active&&!place.group)&&<p className="muted">Crea primero un potrero o corral disponible para este grupo.</p>}
+      <button className="primary-button compact" type="submit" disabled={busy||!locations.some(place=>place.active&&!place.group)}>Crear grupo</button>
     </form></details>}
     {canPlace && <p className="muted">Las rotaciones y los cambios de potrero o corral se registran en Movimientos.</p>}
     <h3>Grupos de esta propiedad</h3>
@@ -236,10 +240,16 @@ export function GroupPanel({ accessToken, modules, canManage, canViewLocations,
               <small>{entry.animalCount} {entry.animalCount === 1 ? 'animal' : 'animales'} · {entry.location
                 ? label(entry.location) : 'Sin ubicación'}</small></div></div></summary>
             <p className="muted">{entry.description || 'Sin descripción'}</p>
-            {canManage && <button type="button" className="secondary-button compact" disabled={busy}
+            {canManage && entry.active && <button type="button" className="secondary-button compact" disabled={busy}
                 onClick={() => void run(() => setGroupState(accessToken, entry.id, {
-                  active: !entry.active, expectedVersion: entry.version,
-                }))}>{entry.active ? 'Archivar' : 'Reactivar'}</button>}
+                  active: false, expectedVersion: entry.version,
+                }))}>Archivar</button>}
+            {canManage && canManageLocations && !entry.active && <form className="group-inline-form" onSubmit={event=>{
+              event.preventDefault();const data=new FormData(event.currentTarget);
+              void run(()=>setGroupState(accessToken,entry.id,{active:true,expectedVersion:entry.version,locationId:String(data.get('locationId')||'')}));
+            }}><label><span>Potrero o corral *</span><Select name="locationId" required defaultValue="">
+              <option value="">Selecciona una ubicación</option>{locations.filter(place=>place.active&&!place.group).map(place=><option key={place.id} value={place.id}>{place.name}</option>)}
+            </Select></label><button className="secondary-button compact" disabled={busy}>Reactivar</button></form>}
             {entry.active && canManage && <details className="group-edit-toggle"><summary>Editar grupo</summary>
             <form className="group-inline-form" key={`edit:${entry.version}`}
               onSubmit={(event) => editGroup(event, entry)}>
