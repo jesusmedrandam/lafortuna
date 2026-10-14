@@ -5,6 +5,8 @@ import {
 } from './database';
 import {LocalValidationError,validateLocalMutation,validateReproductionMutation} from './validation';
 import {cycleTrueHeats} from '../reproductionCycle';
+import {animalClassification} from '../animalClassification';
+import type {Animal,AnimalClassificationPolicy} from '../api';
 import type {ReproductionRecords,ReproductionSettings,ReproductionCandidate} from '../api';
 import {reachedReproductionAge,reproductionToday} from '../reproductionAge';
 import {reproductionSectionEnabled} from '../reproductionSections';
@@ -246,6 +248,7 @@ async function optimisticRecord(entry:OutboxEntry){
     earTagCode:input.earTagCode??null,birthDate:input.birthDate??null,entryDate:input.entryDate??now.slice(0,10),
     initialWeight:input.initialWeight??null,initialWeightUnitCode:input.initialWeightUnitCode??null,
     availabilityStatusCode:'ACTIVE',profilePhotoUrl:null,primaryOwnerName:null,classification:null,
+    hasReproductiveHistory:false,registeredBirthDate:null,activePregnancyId:null,
     breed:null,breeds:[],colors:[],owners:[],brands:[],mother:null,father:null,group:null,location:null,...common};
     const references=async(ids:unknown)=>Promise.all((Array.isArray(ids)?ids:[]).map(async value=>({
       id:String(value),name:await findCachedName(entry.scope,value)??String(value)})));
@@ -410,6 +413,8 @@ async function uploadedMediaLookup(scope:OfflineScope){
 }
 
 async function hydrateLocalMedia<T>(scope:OfflineScope,value:T,path?:string):Promise<T>{
+  if(path&&(path.startsWith('/animals?')||/^\/animals\/[^/]+$/.test(path)&&!['/animals/summary','/animals/classification','/animals/parent-age-rules'].includes(path)))
+    await refreshAnimalClassification(scope);
   if(path)value=await hydrateAnimalOptions(scope,value,path) as T;
   if(path==='/health-records/options'){
     const routes=await getCache<unknown[]>(scope,'/catalogs/ADMINISTRATION_ROUTES/items');
@@ -419,10 +424,19 @@ async function hydrateLocalMedia<T>(scope:OfflineScope,value:T,path?:string):Pro
     }
   }
   const uploaded=await uploadedMediaLookup(scope);
+  const animalPath=Boolean(path&&(path.startsWith('/animals?')||/^\/animals\/[^/]+$/.test(path)));
+  const classificationPolicy=animalPath?bodyRecord((await getCache(scope,'/animals/classification'))?.payload) as Partial<AnimalClassificationPolicy>:{};
+  const reproductiveRecords=animalPath?bodyRecord((await getCache(scope,'/reproduction'))?.payload) as Partial<ReproductionRecords>:{};
+  const localAnimals=animalPath?await knownAnimals(scope):new Map();
   const visit=async(value:unknown):Promise<unknown>=>{
     if(Array.isArray(value))return Promise.all(value.filter(item=>!expiredDraft(item)).map(visit));
     if(!value||typeof value!=='object')return value;
     let row=value as Record<string,unknown>;const id=row.local_media_id??uploaded[`object:${row.storage_object_id}`]??uploaded[`url:${row.url}`];
+    if(animalPath&&row.speciesCode==='BOVINE'&&row.birthDate!==undefined&&['FEMALE','MALE'].includes(String(row.sex)))
+      row={...row,classification:animalClassification(row as unknown as Animal,classificationPolicy,reproductiveRecords),
+        hasReproductiveHistory:row.hasReproductiveHistory===true||localAnimals.get(row.id)?.hasReproductiveHistory===true
+          ?true:row.hasReproductiveHistory??localAnimals.get(row.id)?.hasReproductiveHistory,
+        registeredBirthDate:row.registeredBirthDate??localAnimals.get(row.id)?.registeredBirthDate};
     if(typeof row.entity_type==='string'&&typeof row.entity_id==='string'&&(row.entity_name==null||row.__syncState))
       row={...row,entity_name:await findCachedName(scope,row.entity_id)??row.entity_name};
     const profileId=row.profile_local_media_id??uploaded[`url:${row.profilePhotoUrl}`];
@@ -549,7 +563,7 @@ function entityId(path:string,temporary:string|null){
   if(temporary)return temporary;
   const parts=path.split('?')[0]!.split('/').filter(Boolean);
   const action=new Set(['apply','cancel','resolve','finish','void','action','milking','state','description',
-    'catalogs','owners','brands','parents']);
+    'catalogs','owners','brands','parents','details']);
   const tail=parts.at(-1)??'';
   return decodeURIComponent(action.has(tail)?parts.at(-2)??'':tail);
 }
@@ -696,7 +710,9 @@ async function projectEntry(entry:OutboxEntry,record:Record<string,unknown>,crea
   if(entry.path.endsWith('/settings')||entry.path==='/animals/classification'){
     if(entry.path==='/reproduction/settings')await putCache(entry.scope,'/animals/parent-age-rules',
       {minimumCowMonths:record.minimumCowMonths,minimumBullMonths:record.minimumBullMonths});
-    await putCache(entry.scope,entry.path,record);return;
+    await putCache(entry.scope,entry.path,record);
+    if(entry.path==='/animals/classification')await refreshAnimalClassification(entry.scope);
+    return;
   }
   if(create&&!entries.some(cache=>cache.path===target.root||cache.path.startsWith(`${target.root}?`))){
     const payload=target.root==='/reproduction'?{heats:[],services:[],pregnancies:[],births:[],losses:[],[target.field!]:[record]}
@@ -733,6 +749,8 @@ async function projectEntry(entry:OutboxEntry,record:Record<string,unknown>,crea
     await putCache(entry.scope,cached.path,Array.isArray(cached.payload)?cached.payload.map(update):update(cached.payload),cached.etag);
   }
   if(entry.path==='/reproduction/births')await projectBirthAnimals(entry,record);
+  if(entry.path==='/animals/classification'||entry.path.startsWith('/animals/')||entry.path.startsWith('/reproduction/'))
+    await refreshAnimalClassification(entry.scope);
   if(entry.path==='/reproduction/losses'&&typeof record.pregnancyId==='string')await projectEntry(
     {...entry,path:`/reproduction/pregnancies/${record.pregnancyId}`,temporaryId:null},
     {id:record.pregnancyId,status:'LOST'},false);
@@ -1001,7 +1019,9 @@ function applyServerCache(scope:OfflineScope,path:string,payload:unknown,etag:st
     const entries=(await listOutbox(scope.userId)).filter(entry=>sameScope(entry.scope,scope));
     await restorePending(entries);const previous=await getCache(scope,path);
     await putCache(scope,path,preserveLocalMedia(previous?.payload,payload),etag);
-    await reprojectQueued(scope,true,false);return true;
+    await reprojectQueued(scope,true,false);
+    if(path==='/reproduction'||path==='/animals/classification')await refreshAnimalClassification(scope);
+    return true;
   });mutationChain=operation.catch(()=>{});return operation;
 }
 
@@ -1159,6 +1179,44 @@ async function knownAnimals(scope:OfflineScope){
   }
   return known;
 }
+
+async function refreshAnimalClassification(scope:OfflineScope){
+  const [storedPolicy,storedRecords,entries]=await Promise.all([getCache(scope,'/animals/classification'),getCache(scope,'/reproduction'),listCache(scope)]);
+  const policy=bodyRecord(storedPolicy?.payload) as Partial<AnimalClassificationPolicy>;
+  const records=bodyRecord(storedRecords?.payload) as Partial<ReproductionRecords>;
+  const classify=(value:unknown)=>{
+    const row=bodyRecord(value);
+    if(typeof row.id!=='string'||!['FEMALE','MALE'].includes(String(row.sex))||row.birthDate===undefined)return value;
+    // Server history may extend beyond the downloaded records. Preserve adult history classifications.
+    const classification=animalClassification(row as unknown as Animal,policy,records);
+    const history=(records.heats??[]).some(item=>item.cowId===row.id||item.bullId===row.id)
+      ||(records.services??[]).some(item=>item.cowId===row.id||item.fatherId===row.id||item.donorId===row.id)
+      ||(records.pregnancies??[]).some(item=>item.cowId===row.id||item.fatherId===row.id)
+      ||(records.births??[]).some(item=>item.motherId===row.id);
+    const registeredBirthDate=(records.births??[]).find(birth=>birth.calves?.some(calf=>calf.id===row.id))?.occurredOn;
+    return {...row,classification,...(history?{hasReproductiveHistory:true}:{}),
+      ...(registeredBirthDate?{registeredBirthDate}:{})};
+  };
+  for(const cached of entries.filter(row=>row.path.startsWith('/animals?')||/^\/animals\/[^/?]+$/.test(row.path)
+    &&!['/animals/summary','/animals/classification','/animals/parent-age-rules'].includes(row.path))){
+    const payload=bodyRecord(cached.payload);
+    const next=Array.isArray(payload.items)?{...payload,items:payload.items.map(classify)}:classify(payload);
+    if(JSON.stringify(next)!==JSON.stringify(cached.payload))await putCache(scope,cached.path,next,cached.etag);
+  }
+  const summary=await getCache(scope,'/animals/summary');
+  if(summary){
+    const value=bodyRecord(summary.payload);const animals=await knownAnimals(scope);
+    if(animals.size===value.total){
+      const counts:Array<Record<string,unknown>&{count:number}>=Array.isArray(value.classifications)?value.classifications.map(row=>({...bodyRecord(row),count:0})):[];
+      for(const animal of animals.values()){
+        const classification=bodyRecord(animal.classification);const next=counts.find(row=>row.code===classification.code);
+        if(next)next.count++;else if(classification.code)counts.push({code:classification.code,label:classification.name,count:1});
+      }
+      if(JSON.stringify(counts)!==JSON.stringify(value.classifications))
+        await putCache(scope,'/animals/summary',{...value,classifications:counts},summary.etag);
+    }
+  }
+}
 async function hydrateAnimalOptions(scope:OfflineScope,payload:unknown,path:string){
   const array=['/weighings/options','/animal-status/options','/commerce/animals'].includes(path);
   const nested=['/health-records/options','/movements/options'].includes(path);
@@ -1216,7 +1274,7 @@ async function validateBeforeQueue(entry:OutboxEntry,init:RequestInit,send:Trans
     if(!group||group.active!==true||!['PASTURE','CORRAL'].includes(String(bodyRecord(group.location).kind)))
       throw new LocalValidationError('Selecciona un grupo activo de esta propiedad con potrero o corral.');
   };
-  if(entry.method==='POST'&&entry.path==='/animals')await requireGroup(body.groupId);
+  if(entry.method==='POST'&&entry.path==='/animals'||/^\/animals\/[^/]+\/details$/.test(entry.path))await requireGroup(body.groupId);
   if(entry.method==='POST'&&entry.path==='/reproduction/births'&&Array.isArray(body.calves))
     for(const calf of body.calves)await requireGroup(bodyRecord(calf).groupId);
   if(entry.method==='POST'&&entry.path==='/groups'||/^\/groups\/[^/]+\/state$/.test(entry.path)&&body.active===true){

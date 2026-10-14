@@ -122,6 +122,12 @@ const photo=(form,name,fileName)=>{const transfer=new DataTransfer();transfer.it
  assert(!pregnancyForm.elements.namedItem('fatherId').querySelector('option[value="young-bull"]'),'La preñez oculta padres jóvenes');
  pregnancyForm.requestSubmit();await wait(()=>window.pregnancyInput&&!document.querySelector('.reproduction-forms'));
  assert(window.pregnancyInput.heatId==='heat-new-3','La preñez envía automáticamente el último celo verdadero');
+ click('Nuevo evento reproductivo');await wait(()=>document.querySelector('[name="pregnancyOrigin"]'));
+ const blockedForm=document.querySelector('[name="pregnancyOrigin"]').form;
+ assert(!blockedForm.elements.namedItem('cowId').querySelector('option[value="cow-a"]'),'La hembra preñada no aparece desde Ninguno');
+ await set(blockedForm,'pregnancyOrigin','HEAT');
+ assert(!blockedForm.elements.namedItem('pregnancySource').querySelector('option[value="HEAT:heat-new-3"]'),'La hembra preñada tampoco aparece desde el celo');
+ click('Cerrar');await wait(()=>!document.querySelector('.reproduction-forms')&&document.querySelector('.record-list-row'));
  [...document.querySelectorAll('.record-list-row')].find(row=>row.textContent.includes('Confirmada')).click();await wait(()=>document.querySelector('.modal'));
  assert(document.querySelector('.modal').textContent.includes('Registrar parto')&&document.querySelector('.modal').textContent.includes('Registrar aborto'),'La preñez ofrece sus desenlaces');
  assert(!document.querySelector('.modal').textContent.includes('Cancelar registro'),'La preñez no tiene cancelación');

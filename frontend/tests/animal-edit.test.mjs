@@ -19,7 +19,7 @@ const saved={id:'animal-a',name:'Lucera',description:'Notas guardadas',version:7
     {id:'owner-other',name:'Otro dueño',percent:40,isPrimary:false}],
   mother:{animalId:'mother-old',name:'Madre guardada'},father:{animalId:null,name:'Padre externo'},
   availabilityStatusCode:'ACTIVE',classification:null,birthDate:null,entryDate:'2026-01-01',
-  initialWeight:null,initialWeightUnitCode:null,earTagCode:'A1',group:null,location:null};
+  initialWeight:32.5,initialWeightUnitCode:'POUND',earTagCode:'A1',group:{id:'group-a',name:'Grupo de prueba'},location:{id:'pasture-a',name:'Norte',kind:'PASTURE'}};
 window.calls=[];window.backCount=0;window.failSection=null;
 export const getAnimal=async()=>structuredClone(saved);
 export const getAnimals=async()=>({items:[structuredClone(saved),
@@ -40,7 +40,7 @@ async function update(section,input){
   window.calls.push({section,...structuredClone(input)});
   if(window.failSection===section)throw new ApiRequestError('Fallo de prueba');
   if(input.expectedVersion!==saved.version)throw new ApiRequestError('Versión incorrecta');
-  if(section==='description')saved.description=input.description;
+  if(section==='details')Object.assign(saved,Object.fromEntries(Object.entries(input).filter(([key])=>!['expectedVersion','groupId'].includes(key))));
   if(section==='owners')saved.owners=input.owners.map(owner=>({id:owner.partyId,
     name:owner.partyId,percent:owner.percent,isPrimary:owner.isPrimary}));
   if(section==='catalogs')for(const key of ['breed','color'])saved[key+'s']=input[key+'Ids'].map(id=>({id,name:id}));
@@ -49,7 +49,7 @@ async function update(section,input){
     {animalId:input[key].animalId??null,name:input[key].reportedName??input[key].animalId}:null;
   saved.version++;return structuredClone(saved);
 }
-export const updateAnimalDescription=(_t,_id,input)=>update('description',input);
+export const updateAnimalDetails=(_t,_id,input)=>update('details',input);
 export const updateAnimalOwners=(_t,_id,input)=>update('owners',input);
 export const updateAnimalCatalogs=(_t,_id,input)=>update('catalogs',input);
 export const updateAnimalBrands=(_t,_id,input)=>update('brands',input);
@@ -85,6 +85,10 @@ try{
   check(form().querySelectorAll('button[type="submit"]').length===1,'Must have one save button');
   check(form().querySelector('button[type="submit"]').textContent==='Guardar','Save label');
   check(field('description').value==='Notas guardadas','Saved description');
+  check(field('name').value==='Lucera'&&field('earTagCode').value==='A1','Saved identification');
+  check(field('sex').value==='FEMALE'&&field('groupId').value==='group-a','Saved sex and group');
+  check(field('birthDate').value===''&&field('entryDate').value==='2026-01-01','Saved dates');
+  check(field('initialWeight').value==='32.5'&&field('weightUnit').value==='POUND','Saved weight and unit');
   for(const [name,id] of [['breedIds','breed-old'],['colorIds','color-old'],['brandIds','brand-old'],
     ['ownerIds','owner-old'],['ownerIds','owner-other']])check(field(name,id).checked,'Saved '+name);
   check(field('percent:owner-old').value==='60'&&field('percent:owner-other').value==='40','Saved shares');
@@ -94,15 +98,16 @@ try{
   check(field('motherAnimalId').nextElementSibling.textContent.includes('Madre guardada'),'Parent displayed');
   submit();await until(()=>window.backCount===1);await tick();
   check(window.calls.length===0,'Unchanged form must not write');
-  field('description').value='Nueva descripción';
+  field('name').value='Lucera corregida';field('earTagCode').value='A2';field('description').value='Nueva descripción';
   for(const [name,oldId,newId] of [['breedIds','breed-old','breed-new'],['colorIds','color-old','color-new'],
     ['brandIds','brand-old','brand-new']]){field(name,oldId).click();await tick();field(name,newId).click();await tick();}
   field('ownerIds','owner-old').click();await tick();field('ownerIds','owner-other').click();await tick();
   field('ownerIds','owner-new').click();await tick();
   field('fatherReportedName').value='Nuevo padre externo';
   submit();await until(()=>window.backCount===2);await tick();
-  check(window.calls.map(call=>call.section).join(',')==='description,owners,catalogs,brands,parents','All sections saved');
+  check(window.calls.map(call=>call.section).join(',')==='details,owners,catalogs,brands,parents','All sections saved');
   check(window.calls.map(call=>call.expectedVersion).join(',')==='7,8,9,10,11','Versions must advance in order');
+  check(window.calls[0].name==='Lucera corregida'&&window.calls[0].earTagCode==='A2','Identity fields saved');
   check(window.calls[1].owners[0].partyId==='owner-new'&&window.calls[1].owners[0].percent===100,'Owner update');
   check(window.calls[2].breedIds[0]==='breed-new'&&window.calls[2].colorIds[0]==='color-new','Catalog update');
   check(window.calls[3].brandIds[0]==='brand-new','Brand update');
@@ -114,7 +119,7 @@ try{
   check(document.querySelector('[role="alert"]').textContent.includes('Se guardó parte'),'Partial save is reported');
   window.failSection=null;submit();await until(()=>window.backCount===3);await tick();
   check(window.calls.at(-1).section==='catalogs'&&window.calls.at(-1).expectedVersion===13,'Retry uses latest version');
-  check(window.calls.filter(call=>call.section==='description').length===2,'Retry must not repeat saved changes');
+  check(window.calls.filter(call=>call.section==='details').length===2,'Retry must not repeat saved changes');
   field('ownerIds','owner-new').click();await tick();field('description').value='No guardar';submit();await tick();
   check(window.calls.length===8&&window.backCount===3,'Invalid owners must block every write');
   flushSync(()=>animalRoot.render(createElement(AnimalPanel,{key:'create',accessToken:'test',canCreate:true,canUpdate:true,

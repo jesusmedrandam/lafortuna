@@ -115,6 +115,9 @@ export interface Animal {
   initialWeightUnitCode: string | null;
   availabilityStatusCode: string;
   profilePhotoUrl?:string|null;
+  activePregnancyId?:string|null;
+  hasReproductiveHistory?:boolean;
+  registeredBirthDate?:string|null;
   primaryOwnerName?:string|null;
   classification: {code:string;name:string}|null;
   version: number;
@@ -702,6 +705,13 @@ export function updateAnimalDescription(accessToken: string, id: string, input: 
   });
 }
 
+export type AnimalDetailsInput=Pick<Animal,'name'|'description'|'sex'|'earTagCode'|'birthDate'|'entryDate'|'initialWeight'|'initialWeightUnitCode'>
+  &{groupId:string;expectedVersion:number};
+export function updateAnimalDetails(accessToken:string,id:string,input:AnimalDetailsInput){
+  return request<Animal>(`/animals/${encodeURIComponent(id)}/details`,{
+    method:'PATCH',headers:bearer(accessToken),body:JSON.stringify(input)});
+}
+
 export function listGroups(accessToken: string) {
   return request<LivestockGroup[]>('/groups', { headers: bearer(accessToken) });
 }
@@ -844,7 +854,7 @@ export function updateCatalogItem(accessToken:string,code:EditableCatalogCode,id
 export interface ReproductionHeat {
   id: string; cowId: string; cowName: string; bullId: string | null;
   startsOn: string; endsOn: string | null; isFalse: boolean;
-  notes: string | null; cancelled: boolean;
+  notes: string | null; cancelled: boolean; hasPregnancy?:boolean;
 }
 export interface ReproductionPregnancy {
   id: string; cowId: string; cowName: string; heatId: string | null;
@@ -878,7 +888,7 @@ export interface ReproductionService {
   materialCode: string | null; quality: string | null; technician: string | null;
   supplier: string | null; notes: string | null; cancelled: boolean; hasPregnancy: boolean;
 }
-export interface ReproductionCandidate { id: string; name: string; sex: Animal['sex'];birthDate?:string|null }
+export interface ReproductionCandidate { id: string; name: string; sex: Animal['sex'];birthDate?:string|null;activePregnancyId?:string|null }
 export interface ReproductionSettings {
   enabledSections?:string[];
   accountId?:string;canManageRules?:boolean;
