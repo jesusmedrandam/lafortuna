@@ -15,6 +15,7 @@ export const setExternalTransferSettings=async()=>({enabled:false,canManage:fals
 export const getExternalTransfers=async()=>[];export const lookupExternalDestination=async()=>{};
 export const createExternalTransfer=async()=>{};export const respondExternalTransfer=async()=>{};
 export const getReceivedAnimalHistory=async()=>null;
+export const setExternalTransferVisibility=async()=>({enabled:false,canManage:false,canRequest:false,canManageVisibility:false,visibility:'HIDDEN',effectiveVisibility:'HIDDEN',visibleUntil:null});
 export const getMovementOptions=async()=>({groups:[],animals:[]});
 
 export class ApiRequestError extends Error{}

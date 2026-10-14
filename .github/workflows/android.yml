@@ -54,6 +54,7 @@ jobs:
           node tests/pastures-browser.test.mjs
           node tests/animal-profile.test.mjs
           node tests/animal-edit.test.mjs
+          node tests/external-transfers-browser.test.mjs
           node tests/session-mode.test.mjs
           node tests/session-startup.test.mjs
       - uses: gradle/actions/setup-gradle@v4

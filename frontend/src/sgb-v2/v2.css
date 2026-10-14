@@ -630,7 +630,7 @@
 
 .external-transfer-list button{display:flex;align-items:center;gap:.75rem;width:100%;text-align:left;padding:.8rem;border:0;border-bottom:1px solid var(--border);background:transparent;color:inherit}
 .external-transfer-list button>span:first-of-type{flex:1;min-width:0}.external-transfer-list small{display:block}.external-transfer-policy{margin-bottom:1rem}
-.external-receive-code{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}.external-receive-code label{flex:1;min-width:12rem}.external-receive-code small{width:100%}
+.external-visibility-form fieldset{border:0;padding:0;min-width:0;display:grid;gap:.8rem}
 .external-animal-review,.previous-animal-history details,.received-animal-history{border-bottom:1px solid var(--border);padding:.7rem 0}
 .external-animal-review>summary,.previous-animal-history summary{display:flex;align-items:center;gap:.6rem;cursor:pointer}.external-animal-review>summary img{width:40px;height:40px;border-radius:50%;object-fit:cover}
 .previous-animal-history summary strong{flex:1}.previous-animal-history summary span{color:var(--muted);font-size:.85rem}.previous-animal-history p{margin:.35rem 0}

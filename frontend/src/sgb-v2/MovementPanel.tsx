@@ -140,9 +140,12 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
     },
       ()=>{reset();onCompleted?.();});
   }
-  if(external)return <ExternalTransfersPanel accessToken={accessToken} propertyId={propertyId} initialAnimalId={initialAnimalId} onCompleted={onCompleted}/>;
+  if(external)return <ExternalTransfersPanel accessToken={accessToken} propertyId={propertyId} initialAnimalId={initialAnimalId}
+    initialAnimalIds={mode==='GRUPO'?groupAnimals.map(animal=>animal.id):selected} onCompleted={onCompleted}
+    onChooseInternal={()=>{const next=new URLSearchParams(params);next.delete('externos');next.delete('solicitud');setParams(next);
+      setKind('PROPIEDAD');setFormOpen(true);setDestinationGroupId('');setDestinationPropertyId(options?.properties.find(item=>item.id!==propertyId)?.id??'');}}/>;
   return <section className="module-no-header movements-panel">
-    {!formOpen&&<Button variant="secondary" onClick={()=>{const next=new URLSearchParams(params);next.set('externos','1');setParams(next);}}><ArrowLeftRight size={18}/>Traslados entre cuentas</Button>}
+    {!formOpen&&<Button variant="secondary" onClick={()=>{const next=new URLSearchParams(params);next.set('externos','1');setParams(next);}}><ArrowLeftRight size={18}/>Solicitudes externas</Button>}
     <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar movimiento…"
       count={visible.length} actions={<IconButton label={order==='NEWEST'?'Más recientes':order==='OLDEST'
         ?'Más antiguos':order==='AZ'?'Motivo A–Z':'Motivo Z–A'}
@@ -154,7 +157,6 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
     {canManage&&formOpen&&options&&<div className="movement-overlay" role="presentation"
       onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)closeForm();}}>
       <div className="movement-dialog" role="dialog" aria-modal="true" aria-label={editing?'Editar borrador':'Nuevo movimiento'}>
-        {kind==='PROPIEDAD'&&!editing&&<Button variant="secondary" onClick={()=>{setFormOpen(false);const next=new URLSearchParams(params);next.set('externos','1');next.set('solicitud','nueva');setParams(next);}}>A una propiedad de otro usuario</Button>}
       <div className="movement-dialog-heading"><h2>{editing?'Editar borrador':'Nuevo movimiento'}</h2>
         <button type="button" onClick={closeForm} disabled={busy} aria-label="Cerrar formulario">×</button></div>
       {error&&<div role="alert" className="form-error movement-dialog-error">{error}</div>}
@@ -170,6 +172,9 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
         setDestinationLocationId('');}} options={Object.entries(kinds).filter(([value])=>
           (value!=='UBICACION'||canChangeLocation)&&(value!=='COMBINADO'||editing?.kind==='COMBINADO'))
           .map(([value,label])=>({value,label}))}/></label>
+      {kind==='PROPIEDAD'&&!editing&&<label><span>Tipo de propiedad *</span><select aria-label="Tipo de propiedad" value="INTERNAL" onChange={()=>{
+        setFormOpen(false);const next=new URLSearchParams(params);next.set('externos','1');next.set('solicitud','nueva');setParams(next);}}>
+        <option value="INTERNAL">Propiedad interna · mismo dueño</option><option value="EXTERNAL">Propiedad externa · otro dueño</option></select></label>}
       <label><span>Grupo de origen *</span><SearchableSelect value={sourceGroupId}
         title="Grupo de origen" placeholder="Selecciona el grupo primero" searchPlaceholder="Buscar grupo…"
         disabled={Boolean(onCompleted)} onChange={id=>{setSourceGroupId(id);setSelected([]);

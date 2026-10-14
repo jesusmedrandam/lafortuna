@@ -2,6 +2,7 @@ import {formatDate} from '../utils';
 import type {AuditRecord} from './api';
 
 const actions:Record<string,string>={
+  EXTERNAL_TRANSFER_VISIBILITY_UPDATED:'Cambió la visibilidad para recibir traslados',
   EXTERNAL_TRANSFER_REQUESTED:'Solicitó trasladar animales a otra cuenta',EXTERNAL_TRANSFER_ACCEPTED:'Aceptó recibir animales',
   EXTERNAL_TRANSFER_REJECTED:'Rechazó una solicitud de traslado',EXTERNAL_TRANSFER_CANCELLED:'Canceló una solicitud de traslado',
   EXTERNAL_TRANSFER_REFRESHED:'Actualizó la información de un traslado pendiente',EXTERNAL_TRANSFER_COMPLETED:'Completó un traslado entre cuentas',
@@ -70,7 +71,7 @@ const entities:Record<string,string>={EXTERNAL_ANIMAL_TRANSFER:'Traslado entre c
   PROPERTY_MODULE:'Función de la propiedad',PROPERTY_MEMBERSHIP:'Colaborador',PROPERTY_INVITATION:'Invitación',
   CATALOG_ITEM:'Opción del catálogo',ADMINISTRATIVE_ACCOUNT:'Cuenta',USER_SESSION:'Sesión',
   COMMERCE:'Compra o venta',FINANCE_ACCOUNT:'Cuenta de dinero',FINANCE_MOVEMENT:'Ingreso o egreso'};
-const fields:Record<string,string>={ownerName:'Propietario',areaValue:'Extensión',address:'Ubicación',expiredAt:'Eliminación automática',name:'Nombre',displayName:'Nombre',description:'Descripción',notes:'Notas',
+const fields:Record<string,string>={visibility:'Visibilidad de recepción',durationDays:'Duración (días)',ownerName:'Propietario',areaValue:'Extensión',address:'Ubicación',expiredAt:'Eliminación automática',name:'Nombre',displayName:'Nombre',description:'Descripción',notes:'Notas',
   previousEmail:'Correo anterior',newEmail:'Nuevo correo',sessionCount:'Sesiones cerradas',currentSessionClosed:'Cerró este dispositivo',
   activeIngredient:'Principio activo',defaultUnitCode:'Unidad de dosis',doseAmount:'Cantidad de referencia',doseWeight:'Peso de referencia',
   doseWeightUnitCode:'Unidad de peso',administrationRoutes:'Vías de administración',doseClassificationRanges:'Rangos por clasificación',
@@ -96,7 +97,7 @@ const values:Record<string,string>={BORRADOR:'Borrador',COMPLETADO:'Completado',
   VACUNA:'Vacuna',DESPARASITACION:'Desparasitación',ENFERMEDAD:'Tratamiento de enfermedad',OTRO:'Otro tratamiento',
   ORAL:'Oral',INTRAMUSCULAR:'Intramuscular',SUBCUTANEA:'Subcutánea',INTRAVENOSA:'Intravenosa',TOPICA:'Tópica',OTRA:'Otra',
   EXITED:'Fuera de la propiedad',FEMALE:'Hembra',MALE:'Macho',KILOGRAM:'kg',POUND:'lb',PASTURE:'Potrero',CORRAL:'Corral',
-  CURRENT:'Activo',TRASHED:'En la papelera',PURGED:'Eliminado',
+  HIDDEN:'Oculta',COLLABORATORS:'Solo colaboradores',PUBLIC:'Visible para todos',CURRENT:'Activo',TRASHED:'En la papelera',PURGED:'Eliminado',
   HECTARE:'ha',SQUARE_METER:'m²',SALE:'Venta',PURCHASE:'Compra',DRAFT:'Pendiente',COMPLETED:'Completado',
   ACCEPTED:'Aceptado',REJECTED:'Rechazado',PENDING:'Pendiente',TRANSFERRED:'Continúa en otra propiedad',CANCELLED:'Anulado',CONFIRMED:'Confirmado',OPEN:'Abierto',CLOSED:'Cerrado',INCOME:'Ingreso',EXPENSE:'Egreso',
   GRAZING:'Pastoreo',CUTTING:'Corte',MIXED:'Mixto',CORE:'Gestión principal',PASTURES:'Potreros',CORRALS:'Corrales',
