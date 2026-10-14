@@ -1433,7 +1433,10 @@ export function finishHeat(token:string,id:string,endsOn:string){return request<
 
 export interface PreviousAnimalEvent {id:string;module:string;title:string;date:string;notes:string|null;lines:string[];sourcePropertyName:string}
 export interface ReceivedAnimalHistory {sourcePropertyName:string;receivedAt:string;sourceProfile:Animal;history:PreviousAnimalEvent[]}
-export interface ExternalTransferSettings {enabled:boolean;canManage:boolean;canRequest:boolean;receiveCode:string|null}
+export type ExternalTransferVisibility='HIDDEN'|'COLLABORATORS'|'PUBLIC';
+export interface ExternalTransferSettings {enabled:boolean;canManage:boolean;canRequest:boolean;canManageVisibility:boolean;
+ visibility:ExternalTransferVisibility;visibleUntil:string|null;effectiveVisibility:ExternalTransferVisibility}
+export interface ExternalTransferDestination {id:string;name:string;ownerName:string}
 export interface ExternalTransfer {id:string;status:'PENDING'|'ACCEPTED'|'REJECTED'|'CANCELLED';version:number;
  sourcePropertyId:string;sourcePropertyName:string;destinationPropertyId:string;destinationPropertyName:string;
  movementOn:string;reason:string;notes:string|null;decisionReason:string|null;
@@ -1441,9 +1444,11 @@ export interface ExternalTransfer {id:string;status:'PENDING'|'ACCEPTED'|'REJECT
  media:MediaItem[];processes:{pregnancy:boolean;conditions:number;milking:boolean}}>}
 export function getExternalTransferSettings(token:string){return request<ExternalTransferSettings>('/external-transfers/settings',{headers:bearer(token)});}
 export function setExternalTransferSettings(token:string,enabled:boolean){return request<ExternalTransferSettings>('/external-transfers/settings',{method:'PATCH',headers:bearer(token),body:JSON.stringify({enabled})});}
+export function setExternalTransferVisibility(token:string,input:{visibility:ExternalTransferVisibility;durationDays:number|null}){
+ return request<ExternalTransferSettings>('/external-transfers/visibility',{method:'PATCH',headers:bearer(token),body:JSON.stringify(input)});}
 export function getExternalTransfers(token:string){return request<ExternalTransfer[]>('/external-transfers',{headers:bearer(token)});}
-export function lookupExternalDestination(token:string,receiveCode:string){return request<{id:string;name:string;ownerName:string}>('/external-transfers/lookup',{method:'POST',headers:bearer(token),body:JSON.stringify({receiveCode})});}
-export function createExternalTransfer(token:string,input:{receiveCode:string;animalIds:string[];movementOn:string;reason:string;notes:string|null}){
+export function lookupExternalDestination(token:string,email:string){return request<ExternalTransferDestination[]>('/external-transfers/lookup',{method:'POST',headers:bearer(token),body:JSON.stringify({email})});}
+export function createExternalTransfer(token:string,input:{destinationPropertyId:string;animalIds:string[];movementOn:string;reason:string;notes:string|null}){
  return request<ExternalTransfer>('/external-transfers',{method:'POST',headers:bearer(token),body:JSON.stringify(input)});}
 export function respondExternalTransfer(token:string,id:string,action:'accept'|'reject'|'cancel'|'refresh',input:{expectedVersion:number;groupId?:string;reason?:string;earTags?:Array<{animalId:string;earTagCode:string|null}>}){
  return request<ExternalTransfer>(`/external-transfers/${encodeURIComponent(id)}/${action}`,{method:'POST',headers:bearer(token),body:JSON.stringify(input)});}
