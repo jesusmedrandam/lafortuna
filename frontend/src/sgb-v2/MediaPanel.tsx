@@ -1,13 +1,15 @@
 import {DateInput} from '../components/ui';
 import {useEffect,useId,useMemo,useRef,useState,type CSSProperties,type FormEvent} from 'react';
 import {Link} from 'react-router-dom';
-import {Pencil,Trash2,X} from 'lucide-react';
+import {createPortal} from 'react-dom';
+import {Pencil,Trash2} from 'lucide-react';
 import {formatDate} from '../utils';
-import {IconButton} from '../components/ui';
+import {IconButton,Modal} from '../components/ui';
 import {ShellIcon,type ShellIconName} from './ShellIcon';
 import {ImageLightbox,type LightboxMedia} from '../components/ImageLightbox';
 import {mediaThumbnailUrl} from '../media';
 import {AnimalThumb} from '../components/AnimalPicker';
+import {MediaRecordDetails} from './MediaRecordDetails';
 import {ApiRequestError,deleteMediaObject,getAnimal,getAnimals,getMedia,getMediaUsage,
   listCatalogItems,uploadMedia,updateMediaDetails,type Animal,type CatalogItem,type MediaItem,type MediaUsage} from './api';
 
@@ -52,8 +54,7 @@ function MediaAnimalProfiles({accessToken,related,canView}:{accessToken:string;r
           <AnimalThumb photoUrl={animal?.profilePhotoUrl} name={name}/><strong>{name}</strong></span>;})}
       {related.length>3&&<small>+{related.length-3} animales</small>}
     </button>
-    {open&&canView&&<div ref={preview} id={previewId} className="media-animal-preview" role="region" aria-label="Perfiles relacionados">
-      <header><strong>Animales de esta foto</strong><IconButton label="Cerrar perfiles" onClick={close}><X size={18}/></IconButton></header>
+    {open&&canView&&createPortal(<div className="media-profile-overlay"><Modal title="Animales de esta foto" onClose={close}><div ref={preview} id={previewId} className="media-animal-preview" role="region" aria-label="Perfiles relacionados">
       {related.map(item=>{const animal=profiles[item.entity_id];const name=animal?.name??item.entity_name??'Animal';
         return <Link className="media-animal-preview-card" key={item.entity_id} to={`/animales/${encodeURIComponent(animal?.id??item.entity_id)}`}
           replace aria-label={`Abrir perfil de ${name}`}>
@@ -61,7 +62,7 @@ function MediaAnimalProfiles({accessToken,related,canView}:{accessToken:string;r
             <small>{[animal?.classification?.name,animal?.earTagCode?`Arete ${animal.earTagCode}`:null,
               animal?.group?.name,animal?.location?.name].filter(Boolean).join(' · ')||'Ver ficha completa'}</small>
             {animal?.birthDate&&<small>Nació el {formatDate(animal.birthDate)}</small>}</span></Link>;})}
-    </div>}
+    </div></Modal></div>,document.body)}
   </div>;
 }
 
@@ -130,7 +131,7 @@ export function MediaPanel({accessToken,permissions}:{accessToken:string;permiss
       .filter(({main,attachments})=>{
         const content=[main.description,...attachments.map(item=>item.entity_name),
           ...attachments.flatMap(item=>item.tags.map(tag=>tag.name))].join(' ').toLocaleLowerCase();
-        return (category==='ALL'||attachments.some(item=>categoryOf(item.entity_type)===category))
+        return (category==='ALL'||attachments.some(item=>categoryOf(item.entity_type)===category||categoryOf(item.recordType??'')===category))
           &&(kind==='ALL'||main.kind===kind)&&content.includes(query.trim().toLocaleLowerCase());
       });
     return newest?matching:matching.reverse();
@@ -159,7 +160,7 @@ export function MediaPanel({accessToken,permissions}:{accessToken:string;permiss
     const row=gallery.find(item=>item.id===id);if(!row)return;
     setViewerId(id);
     setEditing({id,attachments:row.attachments});setEditDate(row.main.captured_on??'');
-    setEditDescription(row.main.description??'');setEditTags([...new Set(row.attachments.flatMap(item=>item.tags.map(tag=>tag.id)))]);
+    setEditDescription(row.attachments.find(item=>item.description)?.description??'');setEditTags([...new Set(row.attachments.flatMap(item=>item.tags.map(tag=>tag.id)))]);
     setEditAnimals(row.attachments.filter(item=>item.entity_type==='ANIMAL')
       .filter((item,index,all)=>all.findIndex(other=>other.entity_id===item.entity_id)===index)
       .map(item=>({id:item.entity_id,name:item.entity_name??'Animal'})));
@@ -240,8 +241,8 @@ export function MediaPanel({accessToken,permissions}:{accessToken:string;permiss
               aria-label={`Ver ${main.kind==='VIDEO'?'video':'foto'} de ${title}`}>
               {main.kind==='IMAGE'?<img src={main.thumbnailUrl??mediaThumbnailUrl(main.url)} loading="lazy" decoding="async" alt=""/>:
                 <span className="media-video-placeholder">▶<small>Toca para reproducir</small></span>}
-              <span className="media-tile-type" data-media-module={mediaIcon((attachments.find(item=>item.entity_type!=='ANIMAL')??main).entity_type)} aria-hidden="true">
-                <ShellIcon name={mediaIcon((attachments.find(item=>item.entity_type!=='ANIMAL')??main).entity_type)} size={23}/></span>
+              <span className="media-tile-type" data-media-module={mediaIcon(main.recordType??(attachments.find(item=>item.entity_type!=='ANIMAL')??main).entity_type)} aria-hidden="true">
+                <ShellIcon name={mediaIcon(main.recordType??(attachments.find(item=>item.entity_type!=='ANIMAL')??main).entity_type)} size={23}/></span>
               <span className="media-tile-caption"><strong>{title}</strong>
                 {thumbnailSize>=132&&<small>{shownDate(main)} · {size(main.byteSize)}</small>}</span>
             </button>
@@ -256,10 +257,13 @@ export function MediaPanel({accessToken,permissions}:{accessToken:string;permiss
         const related=row.attachments.filter(entry=>entry.entity_type==='ANIMAL')
           .filter((entry,index,all)=>all.findIndex(other=>other.entity_id===entry.entity_id)===index);
         const labels=[...new Set(row.attachments.flatMap(entry=>entry.tags.map(tag=>tag.name)))];
+        const contexts=row.attachments.filter(entry=>entry.entity_type!=='ANIMAL');
+        if(!contexts.length){const context=row.attachments.find(entry=>entry.recordDetails);if(context)contexts.push(context);}
         return <><MediaAnimalProfiles key={row.id} accessToken={accessToken} related={related} canView={permissions.includes('ANIMAL_VIEW')}/>
           <small>{row.main.captured_on?'Capturada':'Subida'} el {shownDate(row.main)}</small>
           {labels.length>0&&<small>{labels.join(' · ')}</small>}
-          {row.main.description&&<p className="lightbox-description">{row.main.description}</p>}</>;
+          {row.attachments.find(entry=>entry.description)?.description&&<p className="lightbox-description">{row.attachments.find(entry=>entry.description)?.description}</p>}
+          {contexts.filter((entry,index,all)=>all.findIndex(other=>other.entity_type===entry.entity_type&&other.entity_id===entry.entity_id)===index).map(entry=><MediaRecordDetails key={`${entry.entity_type}:${entry.entity_id}`} accessToken={accessToken} item={entry} permissions={permissions}/>)}</>;
       }} actions={item=>permissions.includes('MEDIA_MANAGE')?<div className="lightbox-actions">
         <IconButton label="Editar información de la foto" disabled={busy} onClick={()=>beginEdit(item.key)}><Pencil size={20}/></IconButton>
         <IconButton label="Eliminar archivo" className="media-delete" disabled={busy}

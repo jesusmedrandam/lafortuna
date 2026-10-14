@@ -13,7 +13,7 @@ export class ApiRequestError extends Error{}
 const url='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="green"/></svg>');
 const base={entity_type:'ANIMAL',relation_code:'GENERAL',kind:'IMAGE',byteSize:10,url,thumbnailUrl:url,
   created_at:'2026-10-01T15:00:00Z'};
-let photos=[{...base,id:'photo-a',storage_object_id:'object-a',entity_id:'animal-a',entity_name:'Lucera',
+let photos=[{...base,id:'birth-photo',storage_object_id:'object-a',entity_type:'REPRODUCTION_BIRTH',entity_id:'birth-a',captured_on:null,description:null,tags:[],recordType:'REPRODUCTION_BIRTH',recordDetails:{title:'Parto',date:'2026-10-01',notes:'Parto sin dificultad',lines:['Madre: Lucera','1 cría viva','Luna · Hembra · 32 kg']}},{...base,id:'photo-a',storage_object_id:'object-a',entity_id:'animal-a',entity_name:'Lucera',
   captured_on:null,description:'Foto original',tags:[{id:'tag-a',name:'Parto'}]},
   {...base,id:'photo-calf',storage_object_id:'object-a',entity_id:'offline-calf',entity_name:'Luna',
     captured_on:null,description:'Foto original',tags:[{id:'tag-a',name:'Parto'}]},
@@ -39,7 +39,8 @@ export const getHealthConditions=async()=>[];export const getHealthMedicines=asy
 export const getMovements=async()=>[];export const getAnimalStatusEvents=async()=>[];
 export const listBrands=async()=>[];export const listOwners=async()=>[];
 export const getProduction=async()=>({milk:[],tanks:[],cows:[],lactations:[]});
-export const getReproduction=async()=>({pregnancies:[],births:[],losses:[]});
+export const getReproduction=async()=>({heats:[],services:[],pregnancies:[],births:[],losses:[]});
+export const getCleanings=async()=>[];export const getActivities=async()=>[];
 export const getPropertyTeam=async()=>({});
 export const createPropertyInvitation=async()=>{};export const revokePropertyInvitation=async()=>{};
 export const updateMembershipStatus=async()=>{};
@@ -91,7 +92,7 @@ const touch=(target,type,points,changed=points)=>{const event=new Event(type,{bu
 const change=(node,value)=>{Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(node,value);
   node.dispatchEvent(new Event('input',{bubbles:true}));node.dispatchEvent(new Event('change',{bubbles:true}));};
 try{
-  render(h(BrowserRouter,null,h(Routes,null,h(Route,{path:'/',element:h(MediaPanel,{accessToken:'test',permissions:['MEDIA_VIEW','MEDIA_MANAGE','CATALOG_VIEW','ANIMAL_VIEW']})}),
+  render(h(BrowserRouter,null,h(Routes,null,h(Route,{path:'/',element:h(MediaPanel,{accessToken:'test',permissions:['MEDIA_VIEW','MEDIA_MANAGE','CATALOG_VIEW','ANIMAL_VIEW','REPRODUCTION_VIEW']})}),
     h(Route,{path:'/animales/:id',element:h('p',{id:'animal-profile'},'Perfil del animal')}))));
   await until(()=>document.querySelectorAll('.media-tile-open').length===2);
   check(!document.querySelector('input[type="range"]'),'No thumbnail size bar');
@@ -117,7 +118,7 @@ try{
   check(previewBounds.left>=0&&previewBounds.right<=innerWidth&&previewBounds.top>=0&&previewBounds.bottom<=innerHeight,'The brief profile stays within the viewport');
   check(document.querySelector('.media-animal-preview').textContent.includes('Ternera')&&document.querySelector('.media-animal-preview').textContent.includes('Arete 001'),'Brief profile shows classification and ear tag');
   check(location.pathname==='/','The first touch only opens a brief profile');
-  document.querySelector('[aria-label="Cerrar perfiles"]').click();await until(()=>!document.querySelector('.media-animal-preview'));
+  document.querySelector('.media-profile-overlay [aria-label="Cerrar"]').click();await until(()=>!document.querySelector('.media-animal-preview'));
   document.querySelector('[aria-label="Editar información de la foto"]').click();await until(()=>document.querySelector('.media-edit-overlay'));
   check(document.querySelector('.media-edit-overlay textarea').value==='Foto original','Saved description loaded');
   check(document.querySelector('.media-edit-overlay input[type="date"]').value==='','Capture date can be empty');
@@ -140,8 +141,11 @@ try{
   history.back();await until(()=>!document.querySelector('.image-lightbox'));
   check(location.pathname==='/'&&document.querySelector('.media-gallery'),'Back closes only photo');
   [...document.querySelectorAll('.media-tile-open')].find(node=>node.getAttribute('aria-label').includes('Lucera')).click();
+  await until(()=>document.querySelector('.media-record-details')?.textContent.includes('Parto sin dificultad'));
+  check(document.querySelector('.media-record-details').textContent.includes('Luna')&&document.querySelector('.media-record-details').textContent.includes('32 kg'),'The birth photo displays its calf and weight');
   await until(()=>document.querySelector('.media-related-trigger'));document.querySelector('.media-related-trigger').click();
   await until(()=>document.querySelector('[aria-label="Abrir perfil de Luna"]'));
+  const mini=document.querySelector('[aria-label="Abrir perfil de Luna"]');const r=mini.getBoundingClientRect();check(r.top>=0&&r.bottom<=innerHeight&&mini.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),'The mini profile is visible and accepts taps outside the scrolling footer');
   document.querySelector('[aria-label="Abrir perfil de Luna"]').click();await until(()=>document.querySelector('#animal-profile'));
   check(location.pathname==='/animales/offline-calf','The second touch opens the unsynced calf profile');
   history.back();await until(()=>document.querySelector('.media-gallery'));

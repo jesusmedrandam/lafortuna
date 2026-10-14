@@ -51,6 +51,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   const [cowId, setCowId] = useState('');
   const [eventOn,setEventOn]=useState(localDate());
   const [heatId,setHeatId]=useState('');const [linkedServiceId,setLinkedServiceId]=useState('');
+  const [pregnancyOrigin,setPregnancyOrigin]=useState<'NONE'|'HEAT'|'INSEMINATION'|'EMBRYO_TRANSFER'>('NONE');
   const [gestationDays,setGestationDays]=useState('');
   const [targetPregnancyId,setTargetPregnancyId]=useState<string|null>(null);
   const [heatChoice,setHeatChoice]=useState<{input:Parameters<typeof createHeat>[1];form:HTMLFormElement}|null>(null);
@@ -84,7 +85,6 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   const selectedService=records?.services.find(service=>service.id===linkedServiceId);
   const cowPregnant=Boolean(records?.pregnancies.some(row=>row.cowId===cowId&&row.status==='CONFIRMED'
     &&!records.births.some(birth=>birth.pregnancyId===row.id)&&!records.losses.some(loss=>loss.pregnancyId===row.id)));
-  const assistedEnabled=reproductionSectionEnabled(settings,'INSEMINATION')||reproductionSectionEnabled(settings,'EMBRYO_TRANSFER');
   const pregnancySources=useMemo(()=>{
     if(!records||!settings)return [];
     const eligible=(id:string,on:string)=>{const cow=candidates.find(animal=>animal.id===id);
@@ -108,8 +108,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   useEffect(()=>{if(activeForm==='PREGNANCY'&&records&&settings&&pregnancySource&&!pregnancySources.some(row=>row.value===pregnancySource)){
     setCowId('');setLinkedServiceId('');setHeatId('');
   }},[activeForm,records,settings,pregnancySource,pregnancySources]);
-  useEffect(()=>{if(activeForm==='PREGNANCY'&&initialAnimalId&&!pregnancySource&&pregnancySources.length)
-    choosePregnancySource(pregnancySources[0]!.value);},[activeForm,initialAnimalId,pregnancySource,pregnancySources]);
+  useEffect(()=>{if(activeForm==='PREGNANCY'){setPregnancyOrigin('NONE');setHeatId('');setLinkedServiceId('');if(!initialAnimalId)setCowId('');}},[activeForm,initialAnimalId]);
   const estimatedConception=new Date(`${eventOn||localDate()}T00:00:00Z`);
   estimatedConception.setUTCDate(estimatedConception.getUTCDate()-Math.min(400,Math.max(0,Number(gestationDays)||0)));
   const parentOn=activeForm==='PREGNANCY'?(selectedService?.occurredOn
@@ -223,6 +222,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
     const service = records?.services.find((row) => row.id === serviceId);
     void run(() => createPregnancy(accessToken, {
       cowId: String(data.get('cowId')), heatId: service ? null : optional(data, 'heatId'), serviceId,
+      useLastHeat:pregnancyOrigin!=='NONE',
       fatherId: service ? null : optional(data, 'fatherId'),
       externalFather: service ? null : optional(data, 'externalFather'),
       conceptionMethod: service?.kind ?? String(data.get('conceptionMethod')),
@@ -356,18 +356,24 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
 
       <form className="group-new-form" onSubmit={pregnancy} hidden={activeForm!=='PREGNANCY'}>
         <h3>Confirmar preñez</h3>
-        <label><span>{assistedEnabled?'Celo o servicio previo *':'Celo previo *'}</span><Select name="pregnancySource" required value={pregnancySource}
+        <label><span>Seleccionar desde</span><Select name="pregnancyOrigin" value={pregnancyOrigin} onChange={event=>{
+          setPregnancyOrigin(event.target.value as typeof pregnancyOrigin);setHeatId('');setLinkedServiceId('');if(!initialAnimalId)setCowId('');
+        }}><option value="NONE">Ninguno</option>{reproductionSectionEnabled(settings,'HEAT')&&<option value="HEAT">Celo</option>}
+          {reproductionSectionEnabled(settings,'INSEMINATION')&&<option value="INSEMINATION">Inseminación artificial</option>}
+          {reproductionSectionEnabled(settings,'EMBRYO_TRANSFER')&&<option value="EMBRYO_TRANSFER">Implantación de embrión</option>}</Select></label>
+        {pregnancyOrigin==='NONE'?<label><span>Hembra *</span><Select name="cowId" required value={cowId} onChange={event=>setCowId(event.target.value)}>
+          <option value="" disabled>Selecciona la hembra</option>{females.filter(animal=>(!initialAction||animal.id===initialAnimalId)&&!confirmed.some(row=>row.cowId===animal.id)).map(animal=><option key={animal.id} value={animal.id}>{animal.name}</option>)}
+        </Select><small>Puedes confirmar la preñez aunque no hayas registrado un celo o servicio.</small></label>:<label><span>Registro previo *</span><Select name="pregnancySource" required value={pregnancySource}
           onChange={event=>choosePregnancySource(event.target.value)}><option value="" disabled>Selecciona el registro previo</option>
-          {pregnancySources.map(source=><option key={source.value} value={source.value}>{source.label}</option>)}</Select></label>
-        {!pregnancySources.length&&<p className="muted">Registra primero un celo verdadero o un servicio habilitado para confirmar la preñez.</p>}
-        <input type="hidden" name="cowId" value={cowId}/><input type="hidden" name="heatId" value={heatId}/><input type="hidden" name="serviceId" value={linkedServiceId}/>
+          {pregnancySources.filter(source=>pregnancyOrigin==='HEAT'?source.value.startsWith('HEAT:'):records?.services.find(row=>`SERVICE:${row.id}`===source.value)?.kind===pregnancyOrigin).map(source=><option key={source.value} value={source.value}>{source.label}</option>)}</Select></label>}
+        {pregnancyOrigin!=='NONE'&&<input type="hidden" name="cowId" value={cowId}/>}<input type="hidden" name="heatId" value={heatId}/><input type="hidden" name="serviceId" value={linkedServiceId}/>
         {cowId&&<div className="health-fixed-animal"><span>Hembra seleccionada</span><strong>{candidates.find(animal=>animal.id===cowId)?.name}</strong></div>}
         <label><span>Padre registrado</span><Select name="fatherId" defaultValue="" disabled={Boolean(selectedService)} key={`father:${parentOn}:${pregnancySource}`}>
           <option value="">No registrado</option>
           {males.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
         </Select></label>
         <label><span>Padre externo</span><input name="externalFather" maxLength={240} disabled={Boolean(selectedService)}/></label>
-        <label><span>Método de embarazo</span><Select name="conceptionMethod" defaultValue={selectedService?.kind??'NATURAL'} key={pregnancySource} disabled={Boolean(selectedService)}>
+        <label><span>Método de embarazo</span><Select name="conceptionMethod" defaultValue={selectedService?.kind??(pregnancyOrigin==='NONE'?'UNKNOWN':'NATURAL')} key={`${pregnancyOrigin}:${pregnancySource}`} disabled={Boolean(selectedService)}>
           <option value="NATURAL">Monta natural</option>
           {reproductionSectionEnabled(settings,'INSEMINATION')&&<option value="INSEMINATION">Inseminación</option>}
           {reproductionSectionEnabled(settings,'EMBRYO_TRANSFER')&&<option value="EMBRYO_TRANSFER">Transferencia de embriones</option>}
@@ -381,9 +387,9 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
         <label><span>Fecha de confirmación *</span><DateInput type="date" name="confirmedOn"
           required value={eventOn} onChange={event=>setEventOn(event.target.value)} /></label>
         <label><span>Días de gestación</span><input type="number" name="gestationDays" min="0" max="400" value={gestationDays} onChange={event=>setGestationDays(event.target.value)} />
-          <small>Con un celo se calculan automáticamente; sin selección se usa el último celo válido según las reglas.</small></label>
+          <small>Con un evento se calculan automáticamente. Si elegiste Ninguno, puedes indicar una estimación.</small></label>
         <label><span>Observaciones</span><textarea name="notes" maxLength={500} /></label>
-        <button className="primary-button compact" disabled={busy || !pregnancySources.some(source=>source.value===pregnancySource)}>
+        <button className="primary-button compact" disabled={busy || (pregnancyOrigin==='NONE'?!cowId:!pregnancySources.some(source=>source.value===pregnancySource))}>
           Confirmar preñez</button>
       </form>
 

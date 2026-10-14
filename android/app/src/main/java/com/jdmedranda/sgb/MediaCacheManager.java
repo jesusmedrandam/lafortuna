@@ -21,6 +21,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -99,7 +101,7 @@ final class MediaCacheManager {
     private void enqueue(MediaRequest request, String scope) {
         String taskKey = scope + ':' + digest(request.source);
         CacheReference cached = cachedReference(request.source, scope);
-        if (cached != null) {
+        if (cached != null && !request.force) {
             rememberAliases(scope, cached.metadata, request.aliases);
             rememberDetails(scope, cached.metadata, request);
             return;
@@ -122,6 +124,9 @@ final class MediaCacheManager {
             if (generation.get() != expectedGeneration) return false;
             if (request.wifiOnly && !hasWifi()) return false;
             if (downloadOnce(request, scope, expectedGeneration)) return true;
+            if (!request.deliveryUrl.equals(request.source) && downloadOnce(new MediaRequest(request.source,
+                    request.source, request.aliases, request.categories, request.propertyId, request.name,
+                    request.wifiOnly, request.force), scope, expectedGeneration)) return true;
             try {
                 Thread.sleep(400L * (attempt + 1));
             } catch (InterruptedException interrupted) {
@@ -134,7 +139,7 @@ final class MediaCacheManager {
 
     private boolean downloadOnce(MediaRequest request, String scope, int expectedGeneration) {
         CacheReference cached = cachedReference(request.source, scope);
-        if (cached != null) {
+        if (cached != null && !request.force) {
             rememberAliases(scope, cached.metadata, request.aliases);
             rememberDetails(scope, cached.metadata, request);
             return true;
@@ -176,8 +181,7 @@ final class MediaCacheManager {
             }
             synchronized (index) {
                 if (generation.get() != expectedGeneration) { temporary.delete(); return false; }
-                if (target.exists() && !target.delete()) return false;
-                if (!temporary.renameTo(target)) return false;
+                Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
                 String metadata = target.getName() + "\n" + mime;
                 remember(scope, request.source, metadata);
                 remember(scope, request.deliveryUrl, metadata);
@@ -470,7 +474,7 @@ final class MediaCacheManager {
             if (category.matches("[a-z-]{1,60}")) categories.add(category);
         }
         return new MediaRequest(source, delivery, aliases, categories,
-                object.optString("propertyId", ""), object.optString("name", ""), object.optBoolean("wifiOnly", false));
+                object.optString("propertyId", ""), object.optString("name", ""), object.optBoolean("wifiOnly", false), object.optBoolean("force", false));
     }
 
     private static boolean isMediaUrl(String source) {
@@ -552,11 +556,12 @@ final class MediaCacheManager {
         final String propertyId;
         final String name;
         final boolean wifiOnly;
+        final boolean force;
         MediaRequest(String source, String deliveryUrl, List<String> aliases) {
-            this(source, deliveryUrl, aliases, Collections.emptyList(), "", "", false);
+            this(source, deliveryUrl, aliases, Collections.emptyList(), "", "", false, false);
         }
         MediaRequest(String source, String deliveryUrl, List<String> aliases, List<String> categories,
-                     String propertyId, String name, boolean wifiOnly) {
+                     String propertyId, String name, boolean wifiOnly, boolean force) {
             this.source = source;
             this.deliveryUrl = deliveryUrl;
             this.aliases = aliases;
@@ -564,6 +569,7 @@ final class MediaCacheManager {
             this.propertyId = "null".equals(propertyId) ? "" : propertyId;
             this.name = name.length() > 160 ? name.substring(0, 160) : name;
             this.wifiOnly = wifiOnly;
+            this.force = force;
         }
     }
 

@@ -523,7 +523,9 @@
 .media-related-animals .animal-thumb { width: 42px; height: 42px; flex: 0 0 42px; border-radius: 50%; overflow: hidden; border: 2px solid var(--surface); background: var(--surface); color: var(--primary); }
 .media-related-animals .animal-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .media-related-trigger:focus-visible, .media-animal-preview-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
-.media-animal-preview { position: absolute; z-index: 10; bottom: calc(100% + 10px); left: 0; width: min(360px, calc(100vw - 32px)); max-height: min(340px, 50dvh); overflow-y: auto; overscroll-behavior: contain; padding: 10px; border: 1px solid var(--border); border-radius: 16px; color: var(--text); background: var(--surface); box-shadow: 0 8px 30px #0005; }
+.media-profile-overlay .modal-backdrop { z-index:1500; }
+.media-profile-overlay .modal { width:min(360px,calc(100vw - 32px)); }
+.media-animal-preview { max-height:min(340px,50dvh);overflow-y:auto;overscroll-behavior:contain;color:var(--text); }
 .media-animal-preview header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
 .image-lightbox .media-animal-preview .icon-button { width: 32px; height: 32px; color: var(--text); background: transparent; border: 0; }
 .image-lightbox .media-animal-preview-card { display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 8px 3px; border-radius: 10px; color: var(--text); text-decoration: none; }
@@ -531,3 +533,5 @@
 .media-animal-preview-card > span:last-child { display: grid; gap: 3px; min-width: 0; }
 .image-lightbox .media-animal-preview-card small { color: var(--muted); font-size: .72rem; }
 .media-animal-preview-card:hover { background: var(--surface-alt); }
+.media-record-details { border-top:1px solid #ffffff40;margin-top:8px;padding-top:8px; }
+.media-record-details p { margin:4px 0;font-size:.78rem; }

@@ -940,7 +940,7 @@ export function cancelService(accessToken: string, id: string) {
 }
 export function createPregnancy(accessToken: string, input: {
   cowId: string; heatId?: string | null; fatherId?: string | null;
-  serviceId?: string | null;
+  serviceId?: string | null;useLastHeat?:boolean;
   externalFather?: string | null; conceptionMethod: string; confirmationMethod: string;
   confirmedOn: string; gestationDays?: number | null; notes?: string | null;
 }) {
@@ -1376,6 +1376,8 @@ export interface MediaItem {
   relation_code:string;description:string|null;captured_on:string|null;
   tags:Array<{id:string;name:string}>;
   kind:'IMAGE'|'VIDEO';byteSize:number;created_at:string;url:string;thumbnailUrl:string|null;
+  recordDetails?:{title:string;date:string;notes:string|null;lines:string[]}|null;
+  recordType?:string|null;
 }
 export interface MediaUsage {storedBytes:number;reservedBytes:number;limitBytes:number}
 export function getMedia(accessToken:string,entityType?:string,entityId?:string){
