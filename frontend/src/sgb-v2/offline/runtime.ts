@@ -48,7 +48,7 @@ export interface OfflineRuntimeState {
 }
 
 const excludedMutationRoots=['/auth','/invitations','/property-team','/property-settings','/my-account',
-  '/superadmin','/notifications','/audit'];
+  '/superadmin','/notifications','/audit','/external-transfers'];
 let activeScope:OfflineScope|null=null;
 let activeToken:string|null=null;
 let automaticDownloads=false;
@@ -1073,6 +1073,11 @@ async function derivedCache<T>(scope:OfflineScope,path:string):Promise<T|null>{
     const cached=await getCache<T>(scope,alias);if(cached)return cached.payload;
   }
   const entries=await listCache(scope);
+  const received=path.match(/^\/animals\/([^/?]+)\/received-history$/);
+  if(received){for(const entry of entries.filter(row=>row.path.startsWith('/animals/received-histories?'))){
+    const history=(bodyRecord(entry.payload).items as unknown[]|undefined)?.find(row=>bodyRecord(row).id===received[1]);
+    if(history)return history as T;
+  }}
   const conditionTreatments=path.match(/^\/health-records\/conditions\/([^/]+)\/treatments$/);
   if(conditionTreatments){
     const condition=(entries.find(item=>item.path==='/health-records/conditions')?.payload as Array<Record<string,unknown>>|undefined)
@@ -1226,7 +1231,7 @@ async function hydrateAnimalOptions(scope:OfflineScope,payload:unknown,path:stri
   for(const animal of (await knownAnimals(scope)).values()){
     if(isRuntimeOnline()&&animal.__syncState!=='PENDING')continue;
     if(animal.speciesCode!=='BOVINE'||typeof animal.availabilityStatusCode!=='string')continue;
-    const allowed=path==='/animal-status/options'?['ACTIVE','MISSING','INACTIVE'].includes(animal.availabilityStatusCode):animal.availabilityStatusCode==='ACTIVE';
+    const allowed=!animal.transferredOutAt&&(path==='/animal-status/options'?['ACTIVE','MISSING','INACTIVE'].includes(animal.availabilityStatusCode):animal.availabilityStatusCode==='ACTIVE');
     if(!allowed){animals.delete(animal.id);continue;}
     animals.set(animal.id,{...animals.get(animal.id),...animal,status:animal.availabilityStatusCode,
       groupId:bodyRecord(animal.group).id??null,locationId:bodyRecord(animal.location).id??null});
@@ -1336,11 +1341,19 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
   installOfflineTransport(send);
   if(!activeScope||!authenticated(init)||path.startsWith('/auth/')||path.startsWith('/superadmin/'))return (await send<T>(path,init)).data;
   const verb=method(init);
+  if(path.startsWith('/external-transfers')&&verb!=='GET'){
+    if(!isRuntimeOnline())throw new OfflineUnavailableError('Conéctate para enviar o responder un traslado externo.');
+    if((path==='/external-transfers'||/\/(accept|refresh)$/.test(path))&&(await listOutbox(activeScope.userId)).some(entry=>entry.scope.propertyId===activeScope?.propertyId))
+      throw new LocalValidationError('Sincroniza o revisa los cambios pendientes de esta propiedad antes de gestionar un traslado externo.');
+    const result=(await send<T>(path,init)).data;
+    await removeCachedPaths(activeScope,(await listCache(activeScope)).filter(row=>row.path.startsWith('/external-transfers')).map(row=>row.path));
+    return result;
+  }
   if(verb==='GET'){
     const requestScope={...activeScope};const generation=cacheGeneration;
     const saveAutomatically=canAutomaticallyDownload()&&selectedData(path);
     const cached=await getCache<T>(activeScope,path);
-    if((path==='/reproduction/settings'||path==='/reproduction/candidates'||path==='/reproduction'||path==='/animals/classification'||path==='/animals/parent-age-rules')&&isRuntimeOnline()
+    if((path.startsWith('/external-transfers')||path==='/reproduction/settings'||path==='/reproduction/candidates'||path==='/reproduction'||path==='/animals/classification'||path==='/animals/parent-age-rules')&&isRuntimeOnline()
       &&!(await listOutbox(activeScope.userId)).some(entry=>sameScope(entry.scope,activeScope!)
         &&(entry.path===path||path==='/reproduction'&&entry.path.startsWith('/reproduction/')||path==='/animals/parent-age-rules'&&entry.path==='/reproduction/settings'))){
       try{
@@ -1558,7 +1571,7 @@ async function performDownloadPaths(paths:string[],options:{automatic?:boolean;f
       if(!activeScope||!sameScope(activeScope,scope))throw new Error(
         'La sesión o propiedad cambió. Actualiza los datos de la propiedad seleccionada.');
       try{
-        if(requestedPath.startsWith('/animals?')||requestedPath.startsWith('/media?')){
+        if(requestedPath.startsWith('/animals?')||requestedPath.startsWith('/animals/received-histories?')||requestedPath.startsWith('/media?')){
           const query=new URLSearchParams(requestedPath.split('?')[1]??'');query.set('page',String(page));
           path=`${requestedPath.split('?')[0]}?${query}`;
         }
@@ -1570,7 +1583,7 @@ async function performDownloadPaths(paths:string[],options:{automatic?:boolean;f
         if(!await applyServerCache(scope,path,payload,response.etag??current?.etag??null,generation))throw new Error('Los datos cambiaron durante la descarga.');
         downloaded+=1;
         payloads.push({path,payload});
-        const record=bodyRecord(payload);more=requestedPath.startsWith('/animals?')&&record.hasMore===true&&page<500
+        const record=bodyRecord(payload);more=(requestedPath.startsWith('/animals?')||requestedPath.startsWith('/animals/received-histories?'))&&record.hasMore===true&&page<500
           ||requestedPath.startsWith('/media?')&&Array.isArray(payload)&&payload.length===500&&page<10000;
         page+=1;
       }catch(reason){const info=errorInfo(reason);failed+=1;more=false;
@@ -1808,4 +1821,20 @@ async function projectBirthAnimals(entry:OutboxEntry,birth:Record<string,unknown
   const pregnancyId=birth.pregnancyId??input.pregnancyId;
   if(typeof pregnancyId==='string')await projectEntry({...entry,path:`/reproduction/pregnancies/${pregnancyId}`,temporaryId:null},
     {id:pregnancyId,status:'BORN',__syncState:birth.__syncState??null},false);
+}
+
+export async function refreshCachedPaths(paths:string[]){
+ if(!activeScope||!activeToken||!transport||!isRuntimeOnline())return;
+ const scope={...activeScope},generation=cacheGeneration;
+ const cached=await listCache(scope);
+ const wanted=[...new Set([...paths,...cached.filter(row=>paths.some(path=>row.path===path||path==='/animals?page=1&search='&&row.path.startsWith('/animals?')||path==='/animals/received-histories?page=1'&&row.path.startsWith('/animals/received-histories?'))).map(row=>row.path)])];
+ await removeCachedPaths(scope,cached.filter(row=>wanted.includes(row.path)).map(row=>row.path));
+ for(const path of wanted){
+  if(!activeScope||!sameScope(scope,activeScope))return;
+  try{const response=await transport(path,{headers:{authorization:`Bearer ${activeToken}`},cache:'no-cache'});
+   await applyServerCache(scope,path,response.data,response.etag,generation);
+   if(canAutomaticallyDownload())void downloadNativeMedia(collectNativeMedia([{path,payload:response.data}],downloadPreferences,scope.propertyId,true)).catch(()=>{});
+  }catch{/* The transfer is committed; unavailable views reload on their next visit. */}
+ }
+ emit('sgb-v2-cache-updated',{scopeKey:offlineScopeKey(scope)});await publishState();
 }

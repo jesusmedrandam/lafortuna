@@ -3,6 +3,7 @@ import {Plus,SlidersHorizontal,Pencil} from 'lucide-react';
 import {useLocation,useNavigate,useSearchParams} from 'react-router-dom';
 import {Button,IconButton} from '../components/ui';
 import {createOwnAccount,createAccountProperty,getPropertySettings,updatePropertyInformation,updatePropertyModule,type PropertySettings} from './api';
+import {ExternalTransferPolicy} from './ExternalTransfersPanel';
 import {PropertyInformationFields,propertyInformationFrom} from './PropertyInformationFields';
 import {useV2Session} from './V2Session';
 
@@ -61,7 +62,7 @@ export function PropertySettingsPanel({accessToken,onPropertyCreated,onSettingsC
    <h2>{screen==='crear'?'Crear propiedad':'Información de la propiedad'}</h2>{screen==='crear'&&<p className="muted">La propiedad pertenecerá a tu cuenta.</p>}<fieldset disabled={busy}>
     <PropertyInformationFields key={`${screen}-${selected}`} value={screen==='editar'?settings.property:undefined} ownerName={overview.user.displayName}/>
     <Button type="submit" loading={busy}>{screen==='crear'?'Crear propiedad':'Guardar información'}</Button></fieldset></form>}
-  {settings&&screen==='politicas'&&settings.canViewModules&&<><h2>Políticas de operación</h2><p className="muted">{settings.property.name}</p>
+  {settings&&screen==='politicas'&&settings.canViewModules&&<><ExternalTransferPolicy accessToken={accessToken}/><h2>Políticas de operación</h2><p className="muted">{settings.property.name}</p>
    <div className="property-module-grid">{settings.modules.filter(module=>!module.code.startsWith('REPRODUCTION_')).flatMap(module=>
     module.code==='REPRODUCTION'?[module,...settings.modules.filter(child=>child.code.startsWith('REPRODUCTION_'))]:[module])
     .map(module=><div className="property-module-row" key={module.code} style={module.code.startsWith('REPRODUCTION_')?{paddingLeft:'1.5rem'}:undefined}>

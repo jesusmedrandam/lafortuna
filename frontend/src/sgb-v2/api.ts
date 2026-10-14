@@ -117,6 +117,7 @@ export interface Animal {
   profilePhotoUrl?:string|null;
   activePregnancyId?:string|null;
   hasReproductiveHistory?:boolean;
+  transferredOutAt?:string|null;lastBirthOn?:string|null;lastLossOn?:string|null;
   registeredBirthDate?:string|null;
   primaryOwnerName?:string|null;
   classification: {code:string;name:string}|null;
@@ -611,7 +612,7 @@ export function cancelCommerce(token:string,id:string,reason:string){
     method:'POST',headers:bearer(token),body:JSON.stringify({reason})});
 }
 export interface AppNotification {id:string;kind:string;title:string;message:string;
-  agendaItemId:string|null;propertyId:string;propertyName:string;
+  agendaItemId:string|null;externalTransferId?:string|null;propertyId:string;propertyName:string;
   readAt:string|null;createdAt:string}
 export function getNotifications(token:string){return request<AppNotification[]>('/notifications',
   {headers:bearer(token)});}
@@ -862,7 +863,7 @@ export interface ReproductionPregnancy {
   fatherId: string | null; externalFather: string | null;
   conceptionMethod: string; confirmationMethod: string;
   confirmedOn: string; expectedBirthOn: string | null;
-  gestationDays: number | null; status: 'CONFIRMED' | 'BORN' | 'LOST' | 'CANCELLED';
+  gestationDays: number | null; status: 'CONFIRMED' | 'BORN' | 'LOST' | 'CANCELLED' | 'TRANSFERRED';
   notes: string | null;
 }
 export interface ReproductionBirth {
@@ -879,6 +880,7 @@ export interface ReproductionRecords {
   heats: ReproductionHeat[]; pregnancies: ReproductionPregnancy[];
   births: ReproductionBirth[]; losses: ReproductionLoss[];
   services: ReproductionService[];
+  cycleBoundaries?:Array<{cowId:string;lastBirthOn:string|null;lastLossOn:string|null}>;
 }
 export interface ReproductionService {
   id: string; cowId: string; cowName: string; heatId: string | null;
@@ -913,7 +915,7 @@ export function updateReproductionSettings(accessToken: string, input: Reproduct
 export async function getReproduction(accessToken: string):Promise<ReproductionRecords> {
   const records=await request<Partial<ReproductionRecords>>('/reproduction', { headers: bearer(accessToken) });
   return {heats:records.heats??[],services:records.services??[],pregnancies:records.pregnancies??[],
-    births:records.births??[],losses:records.losses??[]};
+    births:records.births??[],losses:records.losses??[],cycleBoundaries:records.cycleBoundaries??[]};
 }
 export async function getReproductionCandidates(accessToken: string,requiredAnimalId?:string) {
   const candidates=await request<ReproductionCandidate[]>('/reproduction/candidates', { headers: bearer(accessToken) });
@@ -1428,3 +1430,21 @@ export function updatePropertyInformation(token:string,input:PropertyInformation
 
 export function finishHeat(token:string,id:string,endsOn:string){return request<{id:string;endsOn:string}>(
   `/reproduction/heats/${encodeURIComponent(id)}/finish`,{method:'POST',headers:bearer(token),body:JSON.stringify({endsOn})});}
+
+export interface PreviousAnimalEvent {id:string;module:string;title:string;date:string;notes:string|null;lines:string[];sourcePropertyName:string}
+export interface ReceivedAnimalHistory {sourcePropertyName:string;receivedAt:string;sourceProfile:Animal;history:PreviousAnimalEvent[]}
+export interface ExternalTransferSettings {enabled:boolean;canManage:boolean;canRequest:boolean;receiveCode:string|null}
+export interface ExternalTransfer {id:string;status:'PENDING'|'ACCEPTED'|'REJECTED'|'CANCELLED';version:number;
+ sourcePropertyId:string;sourcePropertyName:string;destinationPropertyId:string;destinationPropertyName:string;
+ movementOn:string;reason:string;notes:string|null;decisionReason:string|null;
+ animals:Array<{sourceAnimalId:string;destinationAnimalId:string|null;profile:Animal|null;history:PreviousAnimalEvent[];
+ media:MediaItem[];processes:{pregnancy:boolean;conditions:number;milking:boolean}}>}
+export function getExternalTransferSettings(token:string){return request<ExternalTransferSettings>('/external-transfers/settings',{headers:bearer(token)});}
+export function setExternalTransferSettings(token:string,enabled:boolean){return request<ExternalTransferSettings>('/external-transfers/settings',{method:'PATCH',headers:bearer(token),body:JSON.stringify({enabled})});}
+export function getExternalTransfers(token:string){return request<ExternalTransfer[]>('/external-transfers',{headers:bearer(token)});}
+export function lookupExternalDestination(token:string,receiveCode:string){return request<{id:string;name:string;ownerName:string}>('/external-transfers/lookup',{method:'POST',headers:bearer(token),body:JSON.stringify({receiveCode})});}
+export function createExternalTransfer(token:string,input:{receiveCode:string;animalIds:string[];movementOn:string;reason:string;notes:string|null}){
+ return request<ExternalTransfer>('/external-transfers',{method:'POST',headers:bearer(token),body:JSON.stringify(input)});}
+export function respondExternalTransfer(token:string,id:string,action:'accept'|'reject'|'cancel'|'refresh',input:{expectedVersion:number;groupId?:string;reason?:string;earTags?:Array<{animalId:string;earTagCode:string|null}>}){
+ return request<ExternalTransfer>(`/external-transfers/${encodeURIComponent(id)}/${action}`,{method:'POST',headers:bearer(token),body:JSON.stringify(input)});}
+export function getReceivedAnimalHistory(token:string,id:string){return request<ReceivedAnimalHistory|null>(`/animals/${encodeURIComponent(id)}/received-history`,{headers:bearer(token)});}
