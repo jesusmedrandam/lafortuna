@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react';
-import {Bell,CalendarDays,CheckCheck} from 'lucide-react';
+import {ArrowLeftRight,Bell,CalendarDays,CheckCheck} from 'lucide-react';
 import {useNavigate} from 'react-router-dom';
 import {formatDateTime} from '../utils';
 import {getNotifications,readAllNotifications,readNotification,type AppNotification} from './api';
@@ -17,14 +17,14 @@ export function V2NotificationCenter(){
     try{if(!item.readAt){await readNotification(token,item.id);
       setItems(rows=>rows.map(row=>row.id===item.id?{...row,readAt:new Date().toISOString()}:row));}
       const property=session!.overview.properties.find(row=>row.id===item.propertyId);
-      if(!property||!item.agendaItemId)return;
-      const canOpen=(role:{permissions:string[]})=>role.permissions.includes('AGENDA_TASK_VIEW')||
+      if(!property||!item.agendaItemId&&!item.externalTransferId)return;
+      const canOpen=(role:{permissions:string[]})=>item.externalTransferId?role.permissions.includes('MOVEMENT_VIEW'):role.permissions.includes('AGENDA_TASK_VIEW')||
         role.permissions.includes('AGENDA_EVENT_VIEW');
       const role=property.roles.find(canOpen);
       if(!role)return;
       if(item.propertyId!==session!.overview.activeContext?.propertyId||
         role.id!==session!.overview.activeContext?.roleId)await selectContext(property.id,role.id);
-      navigate(`/agenda?item=${encodeURIComponent(item.agendaItemId)}`);setOpen(false);
+      navigate(item.externalTransferId?`/movimientos?externos=1&solicitud=${encodeURIComponent(item.externalTransferId)}`:`/agenda?item=${encodeURIComponent(item.agendaItemId!)}`);setOpen(false);
     }catch(cause){setError(cause instanceof Error?cause.message:'No se pudo abrir la notificación.');}
   }
   async function readAll(){try{await readAllNotifications(token);setItems(rows=>rows.map(item=>
@@ -41,10 +41,10 @@ export function V2NotificationCenter(){
         <CheckCheck size={16}/>Marcar todas como leídas</button>}</header>
       {error&&<p className="form-error" role="alert">{error}</p>}
       <div className="notification-list">{!items.length?<p className="notification-empty">
-        <Bell size={24}/><strong>Sin notificaciones</strong><span>Los avisos de la agenda aparecerán aquí.</span></p>:
+        <Bell size={24}/><strong>Sin notificaciones</strong><span>Los avisos de agenda y traslados aparecerán aquí.</span></p>:
         items.map(item=><button type="button" key={item.id}
           className={`notification-item ${item.readAt?'':'unread'}`} onClick={()=>void openItem(item)}>
-          <span className="notification-item-icon"><CalendarDays size={18}/></span>
+          <span className="notification-item-icon">{item.externalTransferId?<ArrowLeftRight size={18}/>:<CalendarDays size={18}/>}</span>
           <span className="notification-item-copy"><span><strong>{item.title}</strong>
             <small>{formatDateTime(item.createdAt)}</small></span><em>{item.message}</em>
             <i>{item.propertyName}</i></span>{!item.readAt&&<span className="notification-dot"/>}

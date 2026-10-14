@@ -10,6 +10,13 @@ import {build} from 'vite';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const deadline=setTimeout(()=>{console.error('Browser test timed out');process.exit(1);},90000);
 const mockApi=`
+export const getExternalTransferSettings=async()=>({enabled:false,canManage:false,canRequest:false,receiveCode:null});
+export const setExternalTransferSettings=async()=>({enabled:false,canManage:false,canRequest:false,receiveCode:null});
+export const getExternalTransfers=async()=>[];export const lookupExternalDestination=async()=>{};
+export const createExternalTransfer=async()=>{};export const respondExternalTransfer=async()=>{};
+export const getReceivedAnimalHistory=async()=>null;
+export const getMovementOptions=async()=>({groups:[],animals:[]});
+
 export class ApiRequestError extends Error{}
 window.settingsRequests=0;window.ruleCalls=[];
 const reproductionPolicy={canManageRules:true,minimumBullMonths:24,minimumCowMonths:18,daysAfterBirthHeat:30,
@@ -249,7 +256,7 @@ const result=await build({root,configFile:false,logLevel:'error',define:{'proces
     if(/(?:^|\/)theme\/ThemeContext(?:\.tsx)?$/.test(id))return root.replaceAll('\\','/')+'src/theme/ThemeContext.tsx';
     if(id==='settings-screen-test'||id===root+'settings-screen-test')return '\0settings-screen-test';
     if(id==='./api'&&importer?.includes('/src/sgb-v2/'))return '\0settings-screen-api';
-    if(id==='./V2Session'&&['V2SettingsPage.tsx','UserProfileEditor.tsx','AccountSessions.tsx','V2AuditPage.tsx','AuthPages.tsx','PropertySettingsPanel.tsx'].some(file=>importer?.endsWith('/'+file)))return '\0settings-screen-session';
+    if(id==='./V2Session'&&['V2SettingsPage.tsx','UserProfileEditor.tsx','AccountSessions.tsx','V2AuditPage.tsx','AuthPages.tsx','PropertySettingsPanel.tsx','ExternalTransfersPanel.tsx'].some(file=>importer?.endsWith('/'+file)))return '\0settings-screen-session';
     if(importer==='\0settings-screen-test'&&id.startsWith('./src/'))return root+id.slice(2)+'.tsx';
   },load(id){if(id==='\0settings-screen-test')return entry;if(id==='\0settings-screen-api')return mockApi;if(id==='\0settings-screen-session')return mockSession;},
 }],build:{write:false,minify:false,lib:{entry:'settings-screen-test',formats:['es'],fileName:'test'},rolldownOptions:{output:{codeSplitting:false}}}});

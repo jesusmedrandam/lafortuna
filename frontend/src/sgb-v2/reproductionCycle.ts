@@ -24,7 +24,7 @@ export function pregnancyServiceAvailable(records:Partial<ReproductionRecords>,s
 
 export function cycleTrueHeats(records:Partial<ReproductionRecords>,cowId:string,on:string){
   const boundaries=[...(records.births??[]).filter(row=>row.motherId===cowId),
-    ...(records.losses??[]).filter(row=>row.cowId===cowId)].map(row=>row.occurredOn).sort();
+    ...(records.losses??[]).filter(row=>row.cowId===cowId)].map(row=>row.occurredOn).concat((records.cycleBoundaries??[]).filter(row=>row.cowId===cowId).flatMap(row=>[row.lastBirthOn,row.lastLossOn].filter((date):date is string=>Boolean(date)))).sort();
   const previous=boundaries.filter(date=>date<=on).at(-1)??'';
   const next=boundaries.find(date=>date>on)??'9999-12-31';
   return (records.heats??[]).filter(heat=>heat.cowId===cowId&&!heat.cancelled&&!heat.isFalse

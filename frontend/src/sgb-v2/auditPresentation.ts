@@ -2,6 +2,10 @@ import {formatDate} from '../utils';
 import type {AuditRecord} from './api';
 
 const actions:Record<string,string>={
+  EXTERNAL_TRANSFER_REQUESTED:'Solicitó trasladar animales a otra cuenta',EXTERNAL_TRANSFER_ACCEPTED:'Aceptó recibir animales',
+  EXTERNAL_TRANSFER_REJECTED:'Rechazó una solicitud de traslado',EXTERNAL_TRANSFER_CANCELLED:'Canceló una solicitud de traslado',
+  EXTERNAL_TRANSFER_REFRESHED:'Actualizó la información de un traslado pendiente',EXTERNAL_TRANSFER_COMPLETED:'Completó un traslado entre cuentas',
+  EXTERNAL_TRANSFER_POLICY_UPDATED:'Cambió la autorización para traslados entre cuentas',
   ANIMAL_DETAILS_UPDATED:'Editó los datos del animal',
   PROPERTY_INFORMATION_UPDATED:'Actualizó la información de la propiedad',
   MOVEMENT_DRAFT_EXPIRED:'Eliminó un borrador de traslado tras 24 horas',HEALTH_CAMPAIGN_DRAFT_EXPIRED:'Eliminó un borrador de tratamiento tras 24 horas',
@@ -55,7 +59,7 @@ const actions:Record<string,string>={
   SUPERADMIN_QUOTA_UPDATED:'Cambió los límites de una cuenta',SUPERADMIN_MODULE_UPDATED:'Cambió las funciones de una cuenta',
   SYSTEM_CATALOG_CREATED:'Añadió una opción del sistema',SYSTEM_CATALOG_UPDATED:'Editó una opción del sistema',
 };
-const entities:Record<string,string>={ANIMAL:'Animal',ANIMAL_WEIGHING:'Pesaje',APP_USER:'Usuario',
+const entities:Record<string,string>={EXTERNAL_ANIMAL_TRANSFER:'Traslado entre cuentas',ANIMAL:'Animal',ANIMAL_WEIGHING:'Pesaje',APP_USER:'Usuario',
   PHYSICAL_LOCATION:'Potrero o corral',LIVESTOCK_GROUP:'Grupo',LIVESTOCK_MOVEMENT:'Traslado',
   LIVESTOCK_BRAND:'Marquilla',LIVESTOCK_OWNER:'Propietario',HEALTH_MEDICINE:'Medicamento',
   HEALTH_CONDITION:'Condición de salud',HEALTH_CAMPAIGN:'Tratamiento',CLEANING:'Limpieza de potrero',
@@ -94,7 +98,7 @@ const values:Record<string,string>={BORRADOR:'Borrador',COMPLETADO:'Completado',
   EXITED:'Fuera de la propiedad',FEMALE:'Hembra',MALE:'Macho',KILOGRAM:'kg',POUND:'lb',PASTURE:'Potrero',CORRAL:'Corral',
   CURRENT:'Activo',TRASHED:'En la papelera',PURGED:'Eliminado',
   HECTARE:'ha',SQUARE_METER:'m²',SALE:'Venta',PURCHASE:'Compra',DRAFT:'Pendiente',COMPLETED:'Completado',
-  CANCELLED:'Anulado',CONFIRMED:'Confirmado',OPEN:'Abierto',CLOSED:'Cerrado',INCOME:'Ingreso',EXPENSE:'Egreso',
+  ACCEPTED:'Aceptado',REJECTED:'Rechazado',PENDING:'Pendiente',TRANSFERRED:'Continúa en otra propiedad',CANCELLED:'Anulado',CONFIRMED:'Confirmado',OPEN:'Abierto',CLOSED:'Cerrado',INCOME:'Ingreso',EXPENSE:'Egreso',
   GRAZING:'Pastoreo',CUTTING:'Corte',MIXED:'Mixto',CORE:'Gestión principal',PASTURES:'Potreros',CORRALS:'Corrales',
   HEALTH:'Sanidad',REPRODUCTION:'Reproducción',PRODUCTION:'Producción',WEIGHING:'Pesajes',MOVEMENTS:'Traslados',
   MULTIMEDIA:'Fotos y archivos',SALES_PURCHASES:'Compras y ventas',TASKS:'Actividades',EVENTS:'Eventos',

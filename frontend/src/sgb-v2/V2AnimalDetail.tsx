@@ -10,7 +10,7 @@ import {useLocation,useNavigate,useParams} from 'react-router-dom';
 import {Badge,Button,Card,IconButton,LoadingState,ErrorState,Modal} from '../components/ui';
 import {ImageLightbox,type LightboxMedia} from '../components/ImageLightbox';
 import {formatAge,formatDate} from '../utils';
-import {getAnimal,getMedia,uploadMedia,getMovements,getMovementOptions,getWeighings,getHealthConditions,getHealthMedicines,
+import {getReceivedAnimalHistory,type ReceivedAnimalHistory,getAnimal,getMedia,uploadMedia,getMovements,getMovementOptions,getWeighings,getHealthConditions,getHealthMedicines,
   getHealthCampaigns,getReproduction,getProduction,getCommerce,getAnimalStatusEvents,
   getReproductionSettings,type Animal,type MediaItem,type MovementOptions,
   type ReproductionRecords,type ReproductionSettings,type HealthCondition} from './api';
@@ -24,6 +24,7 @@ import {V2AnimalStatusPage} from './V2AnimalStatusPage';
 import {V2CommercePage} from './V2CommercePage';
 import {AnimalPanel} from './AnimalPanel';
 
+import {PreviousAnimalHistory} from './ExternalTransfersPanel';
 type Section={title:string;path:string;entries:Array<{id:string;date:string;label:string;path?:string}>};
 const historyIcons:Record<string,LucideIcon>={Novedades:Activity,Movimientos:ArrowRightLeft,Pesajes:Weight,
   'Condiciones de salud':HeartPulse,Tratamientos:Syringe,Crías:Baby,Partos:CalendarDays,Celos:HeartPulse,
@@ -45,6 +46,7 @@ function CompactInfo({icon:Icon,label,value,wide=false}:{icon:ComponentType<{siz
 }
 export function V2AnimalDetail(){
   const {id}=useParams();const navigate=useNavigate();const location=useLocation();const {session,hasPermission}=useV2Session();
+  const [receivedHistory,setReceivedHistory]=useState<ReceivedAnimalHistory|null>(null);
   const [animal,setAnimal]=useState<Animal|null>(null);const [media,setMedia]=useState<MediaItem[]>([]);
   const [error,setError]=useState('');const [busy,setBusy]=useState(false);
   const [viewer,setViewer]=useState<MediaItem|null>(null);const [purpose,setPurpose]=useState<'PROFILE'|'COVER'>('PROFILE');
@@ -76,7 +78,7 @@ export function V2AnimalDetail(){
   useEffect(()=>{setAnimal(null);setMedia([]);setViewer(null);setMenu(null);},
     [id,context?.propertyId,context?.roleId,session!.overview.supportMode]);
   useEffect(()=>{
-    if(!id)return;let active=true;setError('');if(!canViewMedia)setMedia([]);
+    if(!id)return;let active=true;setError('');setReceivedHistory(null);void getReceivedAnimalHistory(token,id).then(value=>{if(active)setReceivedHistory(value);}).catch(()=>{});if(!canViewMedia)setMedia([]);
     void getAnimal(token,id).then(value=>{if(active){
       if(value.id!==id)navigate(`/animales/${encodeURIComponent(value.id)}`,{replace:true,state:{...location.state,
         ...(location.state?.animalAction?{animalAction:{...location.state.animalAction,animalId:value.id}}:{})}});
@@ -101,7 +103,7 @@ export function V2AnimalDetail(){
     if(can('ANIMAL_VIEW'))jobs.push(getAnimalStatusEvents(token,id).then(items=>
       recent('Novedades','/bajas',items.map(item=>({id:item.id,date:item.occurredAt,
         label:{REPORT_MISSING:'Desaparición',MARK_FOUND:'Recuperación',RECORD_DEATH:'Muerte',
-          RECORD_EXIT:'Salida'}[item.action]})))));
+          RECORD_EXIT:'Salida',EXTERNAL_TRANSFER:'Traslado externo'}[item.action]})))));
     if(can('MOVEMENT_VIEW','MOVEMENTS'))jobs.push(getMovements(token).then(items=>
       recent('Movimientos','/movimientos',items.filter(item=>item.animals.some(row=>row.id===id))
         .map(item=>({id:item.id,date:item.movementOn,
@@ -275,7 +277,7 @@ export function V2AnimalDetail(){
     </section>
     <div className="animal-profile-action-strip" aria-label="Acciones del animal">
       {canManageMedia&&<IconButton label="Fotos del animal" onClick={photoAction}><Camera size={21}/></IconButton>}
-      {hasPermission('ANIMAL_UPDATE')&&<IconButton label="Editar animal" onClick={()=>openAction('edit','EDITAR')}>
+      {!animal.transferredOutAt&&hasPermission('ANIMAL_UPDATE')&&<IconButton label="Editar animal" onClick={()=>openAction('edit','EDITAR')}>
         <Edit3 size={21}/></IconButton>}
       {movementMenuActions.length>0&&can('MOVEMENT_VIEW','MOVEMENTS')&&<IconButton label="Movimientos"
         onClick={()=>setMenu({title:'Movimientos de '+animal.name,actions:movementMenuActions})}>
@@ -294,7 +296,7 @@ export function V2AnimalDetail(){
           <Baby size={21}/></IconButton>}
       {usable&&can('COMMERCE_MANAGE','SALES_PURCHASES')&&<IconButton label="Ventas"
         onClick={()=>openAction('sale','NUEVA')}><ShoppingCart size={21}/></IconButton>}
-      {['ACTIVE','MISSING','INACTIVE'].includes(animal.availabilityStatusCode)&&hasPermission('ANIMAL_UPDATE')&&<>
+      {!animal.transferredOutAt&&['ACTIVE','MISSING','INACTIVE'].includes(animal.availabilityStatusCode)&&hasPermission('ANIMAL_UPDATE')&&<>
         <IconButton label="Registrar fallecimiento" className="danger" onClick={()=>openAction('status','RECORD_DEATH')}><HeartOff size={21}/></IconButton>
         {usable&&<IconButton label="Reportar desaparición" onClick={()=>openAction('status','REPORT_MISSING')}><Search size={21}/></IconButton>}
         {animal.availabilityStatusCode==='MISSING'&&<IconButton label="Marcar como encontrado" onClick={()=>openAction('status','MARK_FOUND')}><MapPin size={21}/></IconButton>}
@@ -338,6 +340,9 @@ export function V2AnimalDetail(){
         {animal.colors?.some(color=>color.name?.trim())&&<span><strong>Colores:</strong> {animal.colors.map(color=>color.name).filter(value=>value?.trim()).join(', ')}</span>}
       </div>}
     </Card>
+    {receivedHistory&&<details className="received-animal-history"><summary>Historial recibido de {receivedHistory.sourcePropertyName}</summary>
+      <p className="muted">Información conservada al traslado · {formatDate(receivedHistory.receivedAt)}</p>
+      <PreviousAnimalHistory entries={receivedHistory.history}/></details>}
     {sections.length>0&&<div className="animal-profile-history-grid" aria-label="Resumen del animal">
       {sections.map(section=>{const Icon=historyIcons[section.title]??Activity;const expanded=Boolean(expandedHistories[section.title]);
         return <Card className="animal-history-preview" key={section.title}>

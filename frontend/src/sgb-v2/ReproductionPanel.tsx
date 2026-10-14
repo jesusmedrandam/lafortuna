@@ -129,7 +129,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
       canCancel:!item.cancelled&&!item.hasPregnancy})),
     ...records.pregnancies.map(item=>({id:item.id,kind:'PREGNANCY' as const,name:item.cowName,
       date:item.confirmedOn,summary:`Parto estimado: ${item.expectedBirthOn?formatDate(item.expectedBirthOn):'sin estimación'}`,
-      notes:item.notes,status:item.status==='CONFIRMED'?'Confirmada':item.status==='BORN'?'Parto registrado':
+      notes:item.notes,status:item.status==='CONFIRMED'?'Confirmada':item.status==='BORN'?'Parto registrado':item.status==='TRANSFERRED'?'Continúa en otra propiedad':
         item.status==='LOST'?'Aborto o pérdida':'Anulada',canCancel:false})),
     ...records.births.map(item=>({id:item.id,kind:'BIRTH' as const,name:item.motherName,
       date:item.occurredOn,summary:`${item.liveCount} vivas · ${item.stillbornCount} nacidas muertas${

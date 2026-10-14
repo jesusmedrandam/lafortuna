@@ -46,8 +46,9 @@ export function validateReproductionMutation(entry:OutboxEntry,context:{records:
   if(kind==='heats'&&active){input.isFalse=true;delete input.trueHeatId;}
   requireValue(!active||(kind==='heats'&&input.isFalse===true),kind==='heats'?'La hembra tiene una preñez confirmada. Solo puede registrarse un celo aparente o falso.':'La hembra ya tiene una preñez confirmada.');
   const shift=(date:string,days:number)=>{const value=new Date(date+'T12:00:00Z');value.setUTCDate(value.getUTCDate()+days);return value.toISOString().slice(0,10);};
-  const birth=records.births.filter(row=>row.motherId===cowId&&row.occurredOn<=on).map(row=>row.occurredOn).sort().at(-1);
-  const loss=records.losses.filter(row=>row.cowId===cowId&&row.occurredOn<=on).map(row=>row.occurredOn).sort().at(-1);
+  const boundaryDates=records.cycleBoundaries?.find(row=>row.cowId===cowId);
+  const birth=[boundaryDates?.lastBirthOn,...records.births.filter(row=>row.motherId===cowId&&row.occurredOn<=on).map(row=>row.occurredOn)].filter((date):date is string=>Boolean(date)&&date!<=on).sort().at(-1);
+  const loss=[boundaryDates?.lastLossOn,...records.losses.filter(row=>row.cowId===cowId&&row.occurredOn<=on).map(row=>row.occurredOn)].filter((date):date is string=>Boolean(date)&&date!<=on).sort().at(-1);
   for(const [previous,days,label] of [[birth,kind==='heats'?settings.daysAfterBirthHeat:settings.daysAfterBirthPregnancy,'parto'],
     [loss,kind==='heats'?settings.daysAfterLossHeat:settings.daysAfterLossPregnancy,'aborto o pérdida']] as const)
     if(previous)requireValue(on>=shift(previous,days),`Deben transcurrir ${days} días después del ${label}.`);

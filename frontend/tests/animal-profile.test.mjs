@@ -10,6 +10,12 @@ import {build} from 'vite';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const deadline=setTimeout(()=>{console.error('Browser test timed out');process.exit(1);},45000);
 const mockApi=`
+export const getExternalTransferSettings=async()=>({enabled:false,canManage:false,canRequest:false,receiveCode:null});
+export const setExternalTransferSettings=async()=>({enabled:false,canManage:false,canRequest:false,receiveCode:null});
+export const getExternalTransfers=async()=>[];export const lookupExternalDestination=async()=>{};
+export const createExternalTransfer=async()=>{};export const respondExternalTransfer=async()=>{};
+export const getReceivedAnimalHistory=async()=>null;
+
 import {getReproductionCandidates as realCandidates} from 'real-profile-candidates';
 const animal={id:'animal-a',name:'Lucera',description:'Vaca de la finca',version:1,speciesCode:'BOVINE',sex:'FEMALE',
   availabilityStatusCode:'ACTIVE',classification:{code:'VACA',name:'Vaca'},earTagCode:'A1',

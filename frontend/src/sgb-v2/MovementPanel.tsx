@@ -1,7 +1,9 @@
+import {useSearchParams} from 'react-router-dom';
+import {ExternalTransfersPanel} from './ExternalTransfersPanel';
 import {DateInput} from '../components/ui';
 import {type FormEvent,useEffect,useMemo,useState} from 'react';
 import {ArrowLeftRight,ArrowUpDown,ChevronRight,Plus} from 'lucide-react';
-import {Badge,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,IconButton,
+import {Button,Badge,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,IconButton,
   LoadingState} from '../components/ui';
 import {formatDate} from '../utils';
 import {ApiRequestError,applyMovement,cancelMovement,createMovement,getMovementOptions,
@@ -29,6 +31,8 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
   accessToken:string;propertyId:string;canManage:boolean;canCancel:boolean;canChangeLocation:boolean;
   initialAnimalId?:string|undefined;initialAction?:string;onCompleted?:()=>void;
 }){
+  const [params,setParams]=useSearchParams();
+  const external=params.get('externos')==='1';
   const [records,setRecords]=useState<MovementRecord[]|null>(null);
   const [options,setOptions]=useState<MovementOptions|null>(null);
   const [reasons,setReasons]=useState<CatalogItem[]>([]);
@@ -136,7 +140,9 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
     },
       ()=>{reset();onCompleted?.();});
   }
+  if(external)return <ExternalTransfersPanel accessToken={accessToken} propertyId={propertyId} initialAnimalId={initialAnimalId} onCompleted={onCompleted}/>;
   return <section className="module-no-header movements-panel">
+    {!formOpen&&<Button variant="secondary" onClick={()=>{const next=new URLSearchParams(params);next.set('externos','1');setParams(next);}}><ArrowLeftRight size={18}/>Traslados entre cuentas</Button>}
     <CompactToolbar search={search} onSearch={setSearch} placeholder="Buscar movimiento…"
       count={visible.length} actions={<IconButton label={order==='NEWEST'?'Más recientes':order==='OLDEST'
         ?'Más antiguos':order==='AZ'?'Motivo A–Z':'Motivo Z–A'}
@@ -148,6 +154,7 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
     {canManage&&formOpen&&options&&<div className="movement-overlay" role="presentation"
       onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)closeForm();}}>
       <div className="movement-dialog" role="dialog" aria-modal="true" aria-label={editing?'Editar borrador':'Nuevo movimiento'}>
+        {kind==='PROPIEDAD'&&!editing&&<Button variant="secondary" onClick={()=>{setFormOpen(false);const next=new URLSearchParams(params);next.set('externos','1');next.set('solicitud','nueva');setParams(next);}}>A una propiedad de otro usuario</Button>}
       <div className="movement-dialog-heading"><h2>{editing?'Editar borrador':'Nuevo movimiento'}</h2>
         <button type="button" onClick={closeForm} disabled={busy} aria-label="Cerrar formulario">×</button></div>
       {error&&<div role="alert" className="form-error movement-dialog-error">{error}</div>}

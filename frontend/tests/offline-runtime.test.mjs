@@ -893,3 +893,23 @@ assert.equal((await get('/animals/animal-edit')).classification.code,'VACA','Exi
 assert.equal((await get('/animals/animal-edit')).hasReproductiveHistory,true,'A local birth also protects the mother historical sex');
 await assert.rejects(()=>change('/animals/animal-edit/details',{...editedOffline,groupId:'group-a',sex:'MALE',expectedVersion:editedOffline.version}),/registros de reproducción/);
 console.log('PASS: complete animal details editing and birth classification remain consistent offline.');
+
+const transferScope={userId:'external-offline',propertyId:'external-property',roleId:'admin'};
+online=false;wifi=false;await runtime.configureOfflineRuntime(transferScope,'external-token');
+await assert.rejects(()=>change('/external-transfers',{animalIds:['cow-a']},'POST'),/Conéctate/);
+await assert.rejects(()=>change('/external-transfers/request-a/accept',{expectedVersion:1,groupId:'group-a'},'POST'),/Conéctate/);
+assert.equal((await runtime.listOutbox(transferScope.userId)).length,0,'External decisions cannot become offline drafts');
+await runtime.putCache(transferScope,'/animals/received-histories?page=1',{items:[{id:'received-cow',sourcePropertyName:'Origen',history:[{title:'Parto',date:'2026-09-01'}]}],page:1,hasMore:false});
+assert.equal((await get('/animals/received-cow/received-history')).history[0].title,'Parto','Downloaded received history works without opening each animal online');
+await runtime.putCache(transferScope,'/reproduction',{...emptyReproduction,cycleBoundaries:[{cowId:'cow-a',lastBirthOn:'2026-10-01',lastLossOn:null}]});
+await seedReproductionRules(transferScope);
+await assert.rejects(()=>change('/reproduction/heats',{cowId:'cow-a',startsOn:'2026-10-10',isFalse:false},'POST'),/30 días después del parto/,'Imported birth enforces postpartum waiting locally');
+await change('/catalogs/BREEDS/items',{name:'Cambio pendiente'},'POST');online=true;
+let externalSent=0;const externalTransport=async()=>{externalSent++;return {data:{enabled:true,canManage:true},etag:null,notModified:false};};
+await assert.rejects(()=>runtime.offlineRequest('/external-transfers',{method:'POST',headers,body:'{}'},externalTransport),/cambios pendientes/);
+assert.equal(externalSent,0,'Pending local changes block consent before network submission');
+await runtime.discardPendingMutation((await runtime.listOutbox(transferScope.userId))[0].id);
+await runtime.putCache(transferScope,'/external-transfers/settings',{enabled:false});
+assert.equal((await runtime.offlineRequest('/external-transfers/settings',{headers},externalTransport)).enabled,true,'Online policy comes from current server state');
+assert.equal(externalSent,1);online=false;
+console.log('PASS: external transfers never queue offline, pending data blocks decisions, received history and imported reproductive rules work locally.');
