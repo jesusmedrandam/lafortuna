@@ -110,10 +110,12 @@ const photo=(form,name,fileName)=>{const transfer=new DataTransfer();transfer.it
  click('Preñeces');await wait(()=>document.querySelector('.activity-type-strip .selected')?.textContent==='Preñeces');click('Nuevo evento reproductivo');
  await wait(()=>document.querySelector('.reproduction-forms'));
  const pregnancyForm=[...document.querySelectorAll('.reproduction-forms form')].find(x=>!x.hidden);
+ assert(pregnancyForm.elements.namedItem('pregnancyOrigin').value==='NONE','Ninguno permite registrar sin evento observado');
+ await set(pregnancyForm,'pregnancyOrigin','INSEMINATION');
  assert(pregnancyForm.elements.namedItem('cowId').type==='hidden','La hembra se deriva del evento');
  await set(pregnancyForm,'pregnancySource','SERVICE:service-a');assert(pregnancyForm.elements.namedItem('cowId').value==='cow-c','El servicio selecciona su propia hembra');
  assert(pregnancyForm.elements.namedItem('conceptionMethod').value==='INSEMINATION'&&pregnancyForm.elements.namedItem('fatherId').disabled,'El servicio fija su método y parentesco');
- await set(pregnancyForm,'pregnancySource','HEAT:heat-new-3');
+ await set(pregnancyForm,'pregnancyOrigin','HEAT');await set(pregnancyForm,'pregnancySource','HEAT:heat-new-3');
  await wait(()=>pregnancyForm.elements.namedItem('heatId').value==='heat-new-3');
  assert(pregnancyForm.elements.namedItem('cowId').value==='cow-a','Elegir el celo selecciona la hembra');
  assert([...pregnancyForm.elements.namedItem('pregnancySource').options].filter(x=>x.value.startsWith('HEAT:')).length===1,'Solo aparece el celo verdadero del ciclo');
@@ -138,6 +140,13 @@ const photo=(form,name,fileName)=>{const transfer=new DataTransfer();transfer.it
  assert(!document.querySelector('.animal-rules-options').textContent.includes('Registrar parto'),'Las opciones respetan la política');
  click('Cerrar');window.enabledSections=['REPRODUCTION_HEATS','REPRODUCTION_PREGNANCIES'];render();
  await wait(()=>document.querySelector('.activity-type-strip'));click('Preñeces');await wait(()=>document.querySelector('.activity-type-strip .selected')?.textContent==='Preñeces');click('Nuevo evento reproductivo');
+ await wait(()=>document.querySelector('[name="pregnancyOrigin"]'));
+ const noneForm=document.querySelector('[name="pregnancyOrigin"]').form;await set(noneForm,'cowId','cow-c');noneForm.requestSubmit();
+ await wait(()=>window.pregnancyInput.cowId==='cow-c'&&!document.querySelector('.reproduction-forms'));
+ assert(window.pregnancyInput.heatId===null&&window.pregnancyInput.serviceId===null&&window.pregnancyInput.useLastHeat===false,'Ninguno no selecciona automáticamente un evento anterior');
+ click('Nuevo evento reproductivo');await wait(()=>document.querySelector('[name="pregnancyOrigin"]'));
+ assert(!document.querySelector('[name="pregnancyOrigin"]').querySelector('option[value="INSEMINATION"]'),'No se ofrece inseminación deshabilitada');
+ await set(document.querySelector('[name="pregnancyOrigin"]').form,'pregnancyOrigin','HEAT');
  await wait(()=>document.querySelector('[name="pregnancySource"]'));
  const limited=document.querySelector('[name="pregnancySource"]');assert(![...limited.options].some(option=>option.value.startsWith('SERVICE:')),'No se ofrecen servicios de módulos deshabilitados');
  assert(!document.body.innerText.includes('Servicio asistido'),'No se muestra el antiguo selector de servicio asistido');

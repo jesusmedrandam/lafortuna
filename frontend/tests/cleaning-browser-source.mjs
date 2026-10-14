@@ -1,5 +1,7 @@
 export const mockApi=`
 export class ApiRequestError extends Error{}
+export const getActivities=async()=>[];export const getMovements=async()=>[];export const getHealthCampaigns=async()=>[];
+export const getProduction=async()=>({milk:[],tanks:[]});export const getReproduction=async()=>({heats:[],services:[],pregnancies:[],births:[],losses:[]});
 const base={locationId:'north',locationName:'Potrero Norte',areaType:'PARCIAL',partialPercent:50,areaValue:2,areaUnitCode:'HECTARE',
   activities:['FUMIGACION'],applicationUnit:'TANQUES',applicationCount:3,tankCapacityLiters:100,version:1,
   products:[{productId:'old',productName:'Producto anterior',unitCode:'MILLILITER',quantityPerApplication:2,totalQuantity:6,notes:'Mezcla registrada'}],

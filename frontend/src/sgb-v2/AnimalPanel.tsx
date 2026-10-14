@@ -14,7 +14,7 @@ import {
   type Animal, type AnimalList, type CatalogItem, type LivestockBrand, type LivestockOwner, type ParentSelection,
 } from './api';
 import {formatDate} from '../utils';
-import {Select} from '../components/ui';
+import {Modal,Select} from '../components/ui';
 import {ShellIcon} from './ShellIcon';
 
 interface AnimalChoices { BREEDS: CatalogItem[]; COLORS: CatalogItem[] }
@@ -545,7 +545,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         }}>{showCreate ? 'Cerrar' : '+ Animal'}</button>}
     </div>
     {error && <div className="form-error admin-error" role="alert">{error}</div>}
-    {!selected&&<>{showCreate && <form className="animal-create animal-registration-form"
+    {!selected&&<>{showCreate && <Modal title="Registrar animal" wide onClose={()=>{if(!busy)setShowCreate(false);}}><form className="animal-create animal-registration-form"
       onSubmit={(event) => void create(event)}>
       <div className="animal-form-intro"><div><h3>Registrar animal</h3>
         <p>Completa primero la identificación y después las relaciones del animal.</p></div>
@@ -592,7 +592,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         <ImagePicker name="coverPhoto" label="Foto de portada"/></div></section>}
       <div className="animal-form-actions"><button className="primary-button compact" type="submit"
         disabled={busy||brands===null}>{busy?'Guardando…':'Registrar animal'}</button></div>
-    </form>}
+    </form></Modal>}
     <form className="animal-search" onSubmit={find} role="search">
       <label><span className="sr-only">Buscar por nombre, arete o marquilla</span><input value={searchInput}
         placeholder="Buscar nombre, arete o marquilla…" maxLength={80}

@@ -121,6 +121,7 @@ try{
     canViewCatalogs:true,canViewMedia:false,canManageMedia:false,canViewLocations:false,modules:[],initialCreate:true,
     onCreated(id){window.createdAnimal=id;},onNavigate(){}})));
   await until(()=>document.querySelector('.animal-create [name="ownerIds"]'));
+  check(document.querySelector('.animal-create').closest('[role="dialog"]'),'Animal creation opens in a separate dialog');
   async function choose(name,value){const select=field(name);select.nextElementSibling.click();await tick();
     const label=[...select.options].find(option=>option.value===value).textContent;
     [...document.querySelectorAll('[role="option"]')].find(option=>option.textContent===label).click();await tick();}

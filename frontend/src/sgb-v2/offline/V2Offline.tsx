@@ -15,7 +15,7 @@ interface OfflineContextValue extends OfflineRuntimeState {
   downloading:boolean;dataRevision:number;downloadError:string;
   setAutomatic:(enabled:boolean)=>Promise<void>;
   setPreferences:(preferences:DownloadPreferences)=>Promise<void>;
-  downloadNow:()=>Promise<void>;synchronize:()=>Promise<void>;retryFailed:()=>Promise<void>;refresh:()=>Promise<void>;
+  downloadNow:(all?:boolean)=>Promise<void>;synchronize:()=>Promise<void>;retryFailed:()=>Promise<void>;refresh:()=>Promise<void>;
 }
 const empty:OfflineRuntimeState={online:true,wifi:false,automaticDownloads:false,preferences:defaultDownloadPreferences(),
   pending:0,failed:0,syncing:false,cachedEntries:0,cachedBytes:0,mediaFiles:0,mediaBytes:0,mediaPending:0,mediaFailed:0,lastDownload:null};
@@ -73,8 +73,8 @@ export function V2OfflineProvider({children}:{children:ReactNode}){
   },[automaticKey,state.automaticDownloads,state.online,state.wifi,paths,refresh,downloading,state.retryAt]);
   const setAutomatic=useCallback(async(enabled:boolean)=>{await setAutomaticDownloads(enabled);await refresh();},[refresh]);
   const setPreferences=useCallback(async(value:DownloadPreferences)=>{await setDownloadPreferences(value);await refresh();},[refresh]);
-  const downloadNow=useCallback(async()=>{if(busy.current)return;busy.current=true;setDownloading(true);setDownloadError('');
-    try{const result=await downloadPaths(paths);if(result.failed)throw new Error(result.errors.slice(0,3).join(' '));}
+  const downloadNow=useCallback(async(all=false)=>{if(busy.current)return;busy.current=true;setDownloading(true);setDownloadError('');
+    try{const result=await downloadPaths(paths,{forceMedia:all});if(result.failed)throw new Error(result.errors.slice(0,3).join(' '));}
     finally{busy.current=false;setDownloading(false);await refresh();}},[paths,refresh]);
   const synchronize=useCallback(async()=>{await syncOfflineMutations();await refresh();},[refresh]);
   const retryFailed=useCallback(async()=>{await retryFailedMutations();await refresh();},[refresh]);
@@ -126,6 +126,7 @@ export function V2OfflinePage(){
   const state=useV2Offline();const paused=Boolean(state.retryAt&&state.retryAt>Date.now());const {session}=useV2Session();const [error,setError]=useState('');
   const [detail,setDetail]=useState<DetailKind|null>(null);const [details,setDetails]=useState<OfflineDetails|null>(null);
   const [deleting,setDeleting]=useState(false);
+  const [downloadChoice,setDownloadChoice]=useState(false);
   const [confirmation,setConfirmation]=useState<{label:string;action:()=>Promise<void>;discard?:boolean}|null>(null);
   const [editing,setEditing]=useState<OutboxEntry|null>(null);const [draft,setDraft]=useState<Record<string,unknown>>({});
   const property=session?.overview.properties.find(item=>item.id===session.overview.activeContext?.propertyId);
@@ -190,10 +191,15 @@ export function V2OfflinePage(){
     </Card>
     <Card className="offline-actions-card"><div><h3>{property?.name??'Mis datos'}</h3><p>Descarga únicamente las opciones elegidas.</p>
       <small>{state.lastDownload?`Última actualización: ${new Date(state.lastDownload).toLocaleString('es-EC')}`:'Aún no has descargado datos.'}</small></div>
-      <div className="offline-buttons"><Button onClick={()=>run(state.downloadNow)} loading={state.downloading} disabled={!state.online||paused||!paths.length||deleting}>
+      <div className="offline-buttons"><Button onClick={()=>{if(state.cachedEntries||state.mediaFiles)setDownloadChoice(true);else run(()=>state.downloadNow());}} loading={state.downloading} disabled={!state.online||paused||!paths.length||deleting}>
         <CloudDownload size={18}/> Descargar ahora</Button><Button variant="secondary" onClick={()=>run(state.synchronize)} loading={state.syncing} disabled={!state.online||paused}>
         <RefreshCw size={18}/> Sincronizar</Button>{state.failed>0&&<Button variant="secondary" onClick={()=>run(state.retryFailed)} disabled={!state.online||paused}>Reintentar con errores</Button>}</div></Card>
     <p className="offline-note">Tus opciones se guardan por usuario. Los cambios pendientes se conservan hasta enviarse al servidor.</p>
+    {downloadChoice&&<Modal title="Actualizar contenido sin conexión" onClose={()=>setDownloadChoice(false)}>
+      <p>La información se actualizará en ambos casos. Elige qué hacer con las fotos y videos guardados.</p>
+      <div className="offline-buttons"><Button onClick={()=>{setDownloadChoice(false);run(()=>state.downloadNow(false));}}>Solo lo que falta</Button>
+        <Button variant="secondary" onClick={()=>{setDownloadChoice(false);run(()=>state.downloadNow(true));}}>Descargar todo</Button></div>
+    </Modal>}
     {detail&&<Modal title={editing?'Corregir cambio pendiente':titles[detail]} onClose={()=>{if(!deleting){setDetail(null);setConfirmation(null);setEditing(null);}}} wide>
       {errorBox}{editing?<div className="pending-edit"><h3>{editing.summary}</h3>
         {editing.lastError&&<p className="form-error">{editing.lastError}</p>}

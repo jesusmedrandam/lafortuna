@@ -381,6 +381,34 @@ async function mediaAttachments(entry:OutboxEntry){
     url:'',thumbnailUrl:null,local_media_id:entry.id,__syncState:entry.state,__mutationId:entry.id})));
 }
 
+let uploadedIndexWrites=Promise.resolve();
+async function uploadedMediaLookup(scope:OfflineScope){
+  const lookup={...await getSetting<Record<string,string>>(`uploaded-media:${scope.userId}`)};
+  const visit=(value:unknown)=>{
+    if(Array.isArray(value)){value.forEach(visit);return;}
+    const row=bodyRecord(value);const id=row.local_media_id??row.profile_local_media_id;
+    if(typeof id==='string'){
+      if(typeof row.storage_object_id==='string')lookup[`object:${row.storage_object_id}`]=id;
+      for(const source of [row.url,row.thumbnailUrl,row.profilePhotoUrl])if(isRemoteMedia(source)){
+        for(const url of [source,mediaThumbnailUrl(source),optimizedCloudinaryMediaUrl(source,row.kind==='VIDEO'?'VIDEO':'IMAGEN','display'),optimizedCloudinaryMediaUrl(source,row.kind==='VIDEO'?'VIDEO':'IMAGEN','offline')])lookup[`url:${url}`]=id;
+      }
+    }
+    Object.values(row).filter(item=>item&&typeof item==='object').forEach(visit);
+  };
+  // ponytail: legacy uploads are indexed from scoped snapshots; remove this scan once older clients have migrated their links.
+  for(const cache of await listCache(scope))visit(cache.payload);
+  const available=new Set((await listLocalMedia(scope.userId)).map(file=>file.id));
+  for(const [key,id] of Object.entries(lookup))if(!available.has(id))delete lookup[key];
+  // Preserve recovered links before a refresh replaces older snapshots. Serialize the small index writes to keep parallel reads from dropping links.
+  const write=uploadedIndexWrites.then(async()=>{
+    const key=`uploaded-media:${scope.userId}`;const current=await getSetting<Record<string,string>>(key)??{};
+    const merged={...current,...lookup};const files=new Set((await listLocalMedia(scope.userId)).map(file=>file.id));
+    for(const [alias,id] of Object.entries(merged))if(!files.has(id))delete merged[alias];
+    if(JSON.stringify(merged)!==JSON.stringify(current))await putSetting(key,merged);
+  });uploadedIndexWrites=write.catch(()=>{});await write;
+  return lookup;
+}
+
 async function hydrateLocalMedia<T>(scope:OfflineScope,value:T,path?:string):Promise<T>{
   if(path)value=await hydrateAnimalOptions(scope,value,path) as T;
   if(path==='/health-records/options'){
@@ -390,14 +418,16 @@ async function hydrateLocalMedia<T>(scope:OfflineScope,value:T,path?:string):Pro
       value={...options,administrationRoutes:[...new Map([...stored,...routes.payload].map(item=>[bodyRecord(item).id,item])).values()]} as T;
     }
   }
+  const uploaded=await uploadedMediaLookup(scope);
   const visit=async(value:unknown):Promise<unknown>=>{
     if(Array.isArray(value))return Promise.all(value.filter(item=>!expiredDraft(item)).map(visit));
     if(!value||typeof value!=='object')return value;
-    let row=value as Record<string,unknown>;const id=row.local_media_id;
+    let row=value as Record<string,unknown>;const id=row.local_media_id??uploaded[`object:${row.storage_object_id}`]??uploaded[`url:${row.url}`];
     if(typeof row.entity_type==='string'&&typeof row.entity_id==='string'&&(row.entity_name==null||row.__syncState))
       row={...row,entity_name:await findCachedName(scope,row.entity_id)??row.entity_name};
-    if(typeof row.profile_local_media_id==='string'){
-      const photo=await visit({local_media_id:row.profile_local_media_id,kind:'IMAGE'}) as Record<string,unknown>;
+    const profileId=row.profile_local_media_id??uploaded[`url:${row.profilePhotoUrl}`];
+    if(typeof profileId==='string'){
+      const photo=await visit({local_media_id:profileId,kind:'IMAGE'}) as Record<string,unknown>;
       return {...row,profilePhotoUrl:photo.url??row.profilePhotoUrl};
     }
     if(typeof id==='string'){
@@ -863,6 +893,7 @@ async function sendEntry(entry:OutboxEntry){
       await remapCachedReferences(entry.scope,String(original.storage_object_id),String(row.storage_object_id));
     }
     await projectMedia({...entry,path},rows.map(row=>({...row,local_media_id:entry.id,__syncState:null,__mutationId:entry.id})));
+    await uploadedMediaLookup(entry.scope);
   }else{
     if(path.startsWith('/media/objects/')&&entry.method==='PATCH'&&Array.isArray(actual.attachments)){
       const objectId=entityId(path,null);
@@ -989,8 +1020,7 @@ async function backgroundRefresh<T>(scope:OfflineScope,path:string,init:RequestI
     if(generation!==cacheGeneration||!canAutomaticallyDownload()||!selectedData(path)
       ||!activeScope||!sameScope(scope,activeScope))return;
     if(canAutomaticallyDownload()&&activeScope&&sameScope(scope,activeScope)){
-      try{window.SGBAndroid?.downloadMedia?.(JSON.stringify(collectNativeMedia(
-        [{path,payload:response.notModified&&current?current.payload:response.data}],downloadPreferences,scope.propertyId,true)));}catch{/* Solo Android. */}
+      void downloadNativeMedia(collectNativeMedia([{path,payload:response.notModified&&current?current.payload:response.data}],downloadPreferences,scope.propertyId,true)).catch(()=>{/* El estado nativo informa los fallos. */});
     }
     if(response.notModified&&current){await putCache(scope,path,current.payload,response.etag??current.etag);return;}
     const fresh=response.data;
@@ -1115,7 +1145,7 @@ export async function offlineRequest<T>(path:string,init:RequestInit,send:Transp
 function preserveLocalMedia(previous:unknown,next:unknown):unknown{
   if(!Array.isArray(previous)||!Array.isArray(next)){
     const old=bodyRecord(previous),fresh=bodyRecord(next);
-    return old.id===fresh.id&&old.profile_local_media_id?{...fresh,profile_local_media_id:old.profile_local_media_id}:next;
+    return old.id===fresh.id&&old.profile_local_media_id&&(fresh.profilePhotoUrl===undefined||fresh.profilePhotoUrl===old.profilePhotoUrl)?{...fresh,profile_local_media_id:old.profile_local_media_id}:next;
   }
   return next.map(value=>{const row=bodyRecord(value);const local=previous.map(bodyRecord).find(item=>item.id===row.id);
     return local?.local_media_id?{...row,local_media_id:local.local_media_id}:value;});
@@ -1259,7 +1289,7 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
         const response=await send<T>(path,{...init,cache:'no-cache'});
         if(saveAutomatically&&canAutomaticallyDownload()&&activeScope&&sameScope(requestScope,activeScope)
           &&generation===cacheGeneration)await applyServerCache(requestScope,path,response.data,response.etag,generation);
-        return path==='/reproduction/candidates'?await reproductionCandidates(requestScope,response.data) as T:response.data;
+        return hydrateLocalMedia(requestScope,path==='/reproduction/candidates'?await reproductionCandidates(requestScope,response.data) as T:response.data,path);
       }catch(error){
         if(errorInfo(error).status>0)throw error;
         if(path==='/reproduction/candidates'){
@@ -1281,11 +1311,9 @@ async function performOfflineRequest<T>(path:string,init:RequestInit,send:Transp
     if(saveAutomatically&&canAutomaticallyDownload()&&selectedData(path)&&activeScope
       &&sameScope(requestScope,activeScope)&&generation===cacheGeneration){
       await applyServerCache(requestScope,path,response.data,response.etag,generation);
-      try{window.SGBAndroid?.downloadMedia?.(JSON.stringify(collectNativeMedia([{path,payload:response.data}],
-        downloadPreferences,activeScope.propertyId,true)));}
-      catch{/* Solo Android. */}
+      void downloadNativeMedia(collectNativeMedia([{path,payload:response.data}],downloadPreferences,activeScope.propertyId,true)).catch(()=>{/* Se informa el estado nativo en la pantalla sin conexión. */});
     }
-    return path==='/reproduction/candidates'?await reproductionCandidates(requestScope,response.data) as T:response.data;
+    return hydrateLocalMedia(requestScope,path==='/reproduction/candidates'?await reproductionCandidates(requestScope,response.data) as T:response.data,path);
   }
   if(!mutationAllowed(path,init))return (await send<T>(path,init)).data;
 
@@ -1350,6 +1378,7 @@ interface NativeMediaDownload {
   source:string;
   url:string;
   aliases:string[];
+  force?:boolean;
   categories:string[];
   propertyId:string|null;
   wifiOnly:boolean;
@@ -1441,20 +1470,22 @@ async function waitForNativeMedia(){
 
 async function downloadNativeMedia(items:NativeMediaDownload[]){
   if(!items.length||!window.SGBAndroid?.downloadMedia)return;
-  const unique=[...new Map(items.map(item=>[item.source,item])).values()];
+  const scope=activeScope?{...activeScope}:null;const uploaded=scope?await uploadedMediaLookup(scope):{};
+  if(!scope||!activeScope||!sameScope(scope,activeScope))return;
+  const unique=[...new Map(items.filter(item=>item.force||!uploaded[`url:${item.source}`]).map(item=>[item.source,item])).values()];
   for(let index=0;index<unique.length;index+=30){
     window.SGBAndroid.downloadMedia(JSON.stringify(unique.slice(index,index+30)));
     await waitForNativeMedia();
   }
 }
 
-export function downloadPaths(paths:string[],options:{automatic?:boolean}={}):Promise<{downloaded:number;failed:number;errors:string[]}>{
-  const key=JSON.stringify([activeScope,paths,Boolean(options.automatic)]);
+export function downloadPaths(paths:string[],options:{automatic?:boolean;forceMedia?:boolean}={}):Promise<{downloaded:number;failed:number;errors:string[]}>{
+  const key=JSON.stringify([activeScope,paths,Boolean(options.automatic),Boolean(options.forceMedia)]);
   if(downloadTask)return downloadTask.key===key?downloadTask.promise:downloadTask.promise.catch(()=>undefined).then(()=>downloadPaths(paths,options));
   const promise=performDownloadPaths([...new Set(paths)],options).finally(()=>{downloadTask=null;});
   downloadTask={key,promise};return promise;
 }
-async function performDownloadPaths(paths:string[],options:{automatic?:boolean}){
+async function performDownloadPaths(paths:string[],options:{automatic?:boolean;forceMedia?:boolean}){
   if(!activeScope||!activeToken||!transport||!isRuntimeOnline())throw new OfflineUnavailableError(
     'Conéctate a internet para descargar los datos.');
   if(Date.now()<retryAt)throw new Error(`El servidor pidió una pausa. Podrás sincronizar en ${Math.max(1,Math.ceil((retryAt-Date.now())/60_000))} minuto(s). Tus cambios siguen guardados en este dispositivo.`);
@@ -1475,7 +1506,7 @@ async function performDownloadPaths(paths:string[],options:{automatic?:boolean})
         }
         const generation=cacheGeneration;const current=await getCache(scope,path);
         const headers=new Headers({authorization:`Bearer ${token}`});
-        if(current?.etag)headers.set('if-none-match',current.etag);
+        if(current?.etag&&!options.forceMedia)headers.set('if-none-match',current.etag);
         const response=await transport(path,{headers,cache:'no-cache'});
         const payload=response.notModified&&current?current.payload:response.data;
         if(!await applyServerCache(scope,path,payload,response.etag??current?.etag??null,generation))throw new Error('Los datos cambiaron durante la descarga.');
@@ -1494,7 +1525,7 @@ async function performDownloadPaths(paths:string[],options:{automatic?:boolean})
   }
   if(!activeScope||!sameScope(activeScope,scope))throw new Error(
     'La sesión o propiedad cambió. Actualiza los datos de la propiedad seleccionada.');
-  try{await downloadNativeMedia(collectNativeMedia(payloads,preferences,scope.propertyId,Boolean(options.automatic)));}
+  try{await downloadNativeMedia(collectNativeMedia(payloads,preferences,scope.propertyId,Boolean(options.automatic)).map(item=>({...item,force:!options.automatic&&Boolean(options.forceMedia)})));}
   finally{
     await reprojectQueued(scope);
     emit('sgb-v2-cache-updated',{scopeKey:offlineScopeKey(scope)});await publishState();

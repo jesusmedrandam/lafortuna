@@ -68,12 +68,15 @@ try{
   check(document.querySelector('select[aria-label="Fotos de perfil"]').value==='latest','Latest profile selection');
   document.querySelector('[aria-label="Descargas automáticas con Wi-Fi"]').click();await tick();
   check(window.offlineDownloads.length===0,'Cellular does not auto-download');
-  button('Descargar ahora').click();await until(()=>window.offlineDownloads.length===1);
+  button('Descargar ahora').click();await until(()=>button('Solo lo que falta'));button('Solo lo que falta').click();await until(()=>window.offlineDownloads.length===1);
+  check(window.offlineDownloads[0].options.forceMedia===false,'Missing-only download preserves existing files');
   await until(()=>!document.querySelector('.offline-buttons .spin'));await tick();
   check(window.offlineDownloads[0].paths.includes('/media?entityType=ANIMAL'),'Manual request uses selected photos');
   window.setOfflineNetwork(true,true);await until(()=>window.offlineDownloads.length===2);await tick();
   check(window.offlineDownloads[1].options.automatic===true,'Wi-Fi auto-download');
   check(window.offlineDownloads.length===2,'State refresh does not start repeated downloads');
+  button('Descargar ahora').click();await until(()=>button('Descargar todo'));button('Descargar todo').click();await until(()=>window.offlineDownloads.length===3);
+  check(window.offlineDownloads[2].options.forceMedia===true,'Download all explicitly refreshes existing media');
   document.querySelector('[aria-label="Descargas automáticas con Wi-Fi"]').click();await tick();
   check(document.querySelector('.offline-status').classList.contains('online')&&!document.querySelector('.offline-status').classList.contains('failed'),'Queue errors leave connection green');
   check(getComputedStyle(document.querySelector('.offline-status')).color==='rgb(37, 134, 91)','Online color is green');

@@ -82,7 +82,7 @@ export function validateReproductionMutation(entry:OutboxEntry,context:{records:
         &&service.occurredOn>=boundary&&service.occurredOn<=on,'Selecciona un servicio disponible del ciclo actual para esta hembra.');
       heatId=service.heatId;fatherId=service.fatherId;conceptionOn=service.occurredOn;
     }else{
-      if(!heatId&&settings.useLastValidHeat)heatId=trueHeats.find(row=>row.startsOn<=on)?.id;
+      if(!heatId&&settings.useLastValidHeat&&input.useLastHeat!==false)heatId=trueHeats.find(row=>row.startsOn<=on)?.id;
       if(input.gestationDays!=null&&!heatId)conceptionOn=shift(on,-Number(input.gestationDays));
     }
   }else requireValue(['INSEMINATION','EMBRYO_TRANSFER'].includes(String(input.kind)),'Selecciona inseminación o transferencia de embriones.');
