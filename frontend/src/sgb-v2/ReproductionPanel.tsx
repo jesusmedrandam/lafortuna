@@ -4,7 +4,7 @@ import {ArrowUpDown,Baby,ChevronRight,Plus,Settings2,Heart,Stethoscope,CalendarC
 import {Badge,Button,Card,CompactToolbar,EmptyState,ErrorState,FloatingActionDock,
   IconButton,LoadingState,Modal,Select} from '../components/ui';
 import {reachedReproductionAge,reproductionToday} from './reproductionAge';
-import {cycleTrueHeats} from './reproductionCycle';
+import {cycleTrueHeats,hasActivePregnancy,pregnancyHeats,pregnancyServiceAvailable} from './reproductionCycle';
 import {formatDate} from '../utils';
 import {useNavigate} from 'react-router-dom';
 import {useV2Session} from './V2Session';
@@ -76,6 +76,7 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
     !candidates.some(animal=>animal.id===initialAnimalId&&animal.sex==='FEMALE'))return;
     if(!reproductionSectionEnabled(settings,form==='SERVICE'?(action==='TRANSFERENCIA'?'EMBRYO_TRANSFER':'INSEMINATION'):form))return;
     if(form==='BIRTH'&&!confirmed.some(item=>item.cowId===initialAnimalId))return;
+    if((form==='PREGNANCY'||form==='SERVICE')&&hasActivePregnancy(records,initialAnimalId,candidates.find(row=>row.id===initialAnimalId)?.activePregnancyId))return;
     if(form==='SERVICE')setServiceKind(action==='TRANSFERENCIA'?'EMBRYO_TRANSFER':'INSEMINATION');
     setCowId(initialAnimalId);setActiveForm(form);setPrefilledAnimalId(initialAnimalId);
   },[initialAnimalId,prefilledAnimalId,candidates,canManage,initialAction,settings,records]);
@@ -83,20 +84,19 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   const availableHeats=cycleHeats.filter(heat=>heat.startsOn<=eventOn);
   const selectedHeat=records?.heats.find(heat=>heat.id===heatId);
   const selectedService=records?.services.find(service=>service.id===linkedServiceId);
-  const cowPregnant=Boolean(records?.pregnancies.some(row=>row.cowId===cowId&&row.status==='CONFIRMED'
-    &&!records.births.some(birth=>birth.pregnancyId===row.id)&&!records.losses.some(loss=>loss.pregnancyId===row.id)));
+  const cowPregnant=hasActivePregnancy(records??{},cowId,candidates.find(row=>row.id===cowId)?.activePregnancyId);
   const pregnancySources=useMemo(()=>{
     if(!records||!settings)return [];
     const eligible=(id:string,on:string)=>{const cow=candidates.find(animal=>animal.id===id);
       return cow?.sex==='FEMALE'&&(!initialAction||id===initialAnimalId)&&reachedReproductionAge(cow.birthDate,on,settings.minimumCowMonths)
-        &&!records.pregnancies.some(row=>row.cowId===id&&row.status==='CONFIRMED'&&!records.births.some(birth=>birth.pregnancyId===row.id)&&!records.losses.some(loss=>loss.pregnancyId===row.id));};
+        &&!hasActivePregnancy(records,id,cow.activePregnancyId);};
     const heats=records.heats.filter(row=>row.startsOn<=eventOn&&eligible(row.cowId,settings.useLastValidHeat?row.endsOn??row.startsOn:row.startsOn)
-      &&cycleTrueHeats(records,row.cowId,eventOn).some(heat=>heat.id===row.id))
+      &&pregnancyHeats(records,row.cowId,eventOn).some(heat=>heat.id===row.id))
       .map(row=>({value:`HEAT:${row.id}`,cowId:row.cowId,date:row.startsOn,label:`Celo · ${candidates.find(animal=>animal.id===row.cowId)?.name??row.cowName??'Hembra'} · ${formatDate(row.startsOn)}`}));
-    const services=records.services.filter(row=>reproductionSectionEnabled(settings,row.kind)&&!row.cancelled&&!row.hasPregnancy&&row.occurredOn<=eventOn&&eligible(row.cowId,row.occurredOn)
+    const services=records.services.filter(row=>reproductionSectionEnabled(settings,row.kind)&&pregnancyServiceAvailable(records,row)&&row.occurredOn<=eventOn&&eligible(row.cowId,row.occurredOn)
       &&!records.births.some(birth=>birth.motherId===row.cowId&&birth.occurredOn>row.occurredOn&&birth.occurredOn<=eventOn)
       &&!records.losses.some(loss=>loss.cowId===row.cowId&&loss.occurredOn>row.occurredOn&&loss.occurredOn<=eventOn)
-      &&(!row.heatId||cycleTrueHeats(records,row.cowId,eventOn).some(heat=>heat.id===row.heatId)))
+      &&(!row.heatId||pregnancyHeats(records,row.cowId,eventOn).some(heat=>heat.id===row.heatId)))
       .map(row=>({value:`SERVICE:${row.id}`,cowId:row.cowId,date:row.occurredOn,label:`${row.kind==='INSEMINATION'?'Inseminación':'Transferencia'} · ${candidates.find(animal=>animal.id===row.cowId)?.name??row.cowName??'Hembra'} · ${formatDate(row.occurredOn)}`}));
     return [...heats,...services].sort((a,b)=>b.date.localeCompare(a.date));
   },[records,settings,candidates,eventOn,initialAction,initialAnimalId]);
@@ -113,7 +113,8 @@ export function ReproductionPanel({ accessToken, canManage, initialAnimalId,
   estimatedConception.setUTCDate(estimatedConception.getUTCDate()-Math.min(400,Math.max(0,Number(gestationDays)||0)));
   const parentOn=activeForm==='PREGNANCY'?(selectedService?.occurredOn
     ??(selectedHeat?(settings?.useLastValidHeat?selectedHeat.endsOn??selectedHeat.startsOn:selectedHeat.startsOn):estimatedConception.toISOString().slice(0,10))):eventOn;
-  const females = candidates.filter(animal=>animal.sex==='FEMALE'&&settings&&reachedReproductionAge(animal.birthDate,parentOn,settings.minimumCowMonths));
+  const females = candidates.filter(animal=>animal.sex==='FEMALE'&&settings&&reachedReproductionAge(animal.birthDate,parentOn,settings.minimumCowMonths)
+    &&(activeForm!=='PREGNANCY'&&activeForm!=='SERVICE'||!hasActivePregnancy(records??{},animal.id,animal.activePregnancyId)));
   const males=candidates.filter(animal=>animal.sex==='MALE'&&settings&&reachedReproductionAge(animal.birthDate,parentOn,settings.minimumBullMonths));
   useEffect(()=>{if(activeForm!=='PREGNANCY')setHeatId(cycleHeats.find(heat=>heat.startsOn<=eventOn)?.id??'');},[cowId,eventOn,records,activeForm]);
   useEffect(()=>{if(activeForm!=='PREGNANCY')setLinkedServiceId('');},[cowId,activeForm]);

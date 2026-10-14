@@ -6,7 +6,7 @@ import {
   ApiRequestError, createAnimal, createCatalogItem, getAnimal, getAnimals, listBrands,
   listCatalogItems, updateAnimalBrands, updateAnimalCatalogs,
   listOwners, listAccountUsers, createOwner, updateAnimalOwners,
-  updateAnimalDescription, updateAnimalParents,
+  updateAnimalDetails, updateAnimalParents,
   listGroups, type LivestockGroup,
   listLocations,type PhysicalLocation,type AnimalFilters,
   getMedia,uploadMedia,deleteMedia,type MediaItem,
@@ -310,6 +310,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
   const [selected, setSelected] = useState<Animal | null>(null);
   const [showCreate, setShowCreate] = useState(Boolean(initialCreate));
   const [creationBirthDate,setCreationBirthDate]=useState('');
+  const [editBirthDate,setEditBirthDate]=useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [choices, setChoices] = useState<AnimalChoices | null>(null);
@@ -324,6 +325,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
   const [mediaRevision,setMediaRevision]=useState(0);
   const [editRevision,setEditRevision]=useState(0);
   const openedEdit=useRef<string|null>(null);
+  useEffect(()=>{setEditBirthDate(selected?.birthDate??'');},[selected?.id,editRevision]);
   useEffect(()=>{
     if(!initialAnimalId)return;
     let active=true;
@@ -480,6 +482,16 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     try { ownersInput = ownerInput(data); }
     catch (failure) { setError(failure instanceof Error ? failure.message : 'Propietarios inválidos.'); return; }
     const description = String(data.get('description') || '').trim() || null;
+    const details={name:String(data.get('name')??'').trim(),description,
+      sex:String(data.get('sex')) as Animal['sex'],earTagCode:String(data.get('earTagCode')??'').trim()||null,
+      birthDate:String(data.get('birthDate')??'')||null,entryDate:String(data.get('entryDate')??''),
+      initialWeight:data.get('initialWeight')?Number(data.get('initialWeight')):null,
+      initialWeightUnitCode:data.get('initialWeight')?String(data.get('weightUnit')):null,
+      groupId:String(data.get('groupId')??'')};
+    if(!details.name||!details.groupId||!details.entryDate||details.birthDate&&details.birthDate>details.entryDate
+      ||details.entryDate>reproductionToday()){
+      setError('Indica nombre, grupo y fecha de ingreso. El nacimiento no puede ser posterior al ingreso y las fechas no pueden ser futuras.');return;
+    }
     const breedIds = data.getAll('breedIds').map(String);
     const colorIds = data.getAll('colorIds').map(String);
     const brandIds = data.getAll('brandIds').map(String);
@@ -501,9 +513,10 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     setBusy(true); setError(null);
     try {
       // These endpoints share a version: save in order and keep the draft if a later section fails.
-      if (description !== selected.description)
-        updated = await updateAnimalDescription(accessToken, selected.id,
-          { description, expectedVersion: updated.version });
+      if (Object.entries(details).some(([key,value])=>key==='groupId'?value!==selected.group?.id
+        :value!==selected[key as keyof Animal]))
+        updated = await updateAnimalDetails(accessToken, selected.id,
+          { ...details, expectedVersion: updated.version });
       if (ownersInput.length !== selected.owners.length || ownersInput.some(owner => {
         const current = selected.owners.find(entry => entry.id === owner.partyId);
         return !current || current.percent !== owner.percent || current.isPrimary !== owner.isPrimary;
@@ -768,6 +781,23 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       {canUpdate&&<details id="animal-edit-panel" className="animal-edit-section"><summary>Editar ficha del animal</summary>
       <form key={`${selected.id}:${editRevision}`} onSubmit={(event) => void changeAnimal(event)}>
       <fieldset disabled={busy} style={{border:0,padding:0,margin:0,minWidth:0}}>
+      <section className="animal-catalog-edit"><h4>Datos del animal</h4><div className="animal-form-grid">
+        <label><span>Nombre *</span><input name="name" maxLength={160} required defaultValue={selected.name}/></label>
+        <label><span>Sexo *</span><Select name="sex" required defaultValue={selected.sex}>
+          <option value="FEMALE">Hembra</option><option value="MALE">Macho</option></Select></label>
+        <label><span>Grupo *</span><Select name="groupId" required defaultValue={selected.group?.id??''}>
+          <option value="">Selecciona un grupo</option>
+          {selected.group&&!groups.some(group=>group.id===selected.group?.id)&&<option value={selected.group.id}>{selected.group.name} (actual)</option>}
+          {groups.filter(group=>group.active&&group.location||group.id===selected.group?.id).map(group=><option key={group.id} value={group.id}>
+            {group.name}{group.location?` · ${group.location.name}`:''}</option>)}</Select></label>
+        <label><span>Arete individual</span><input name="earTagCode" maxLength={80} defaultValue={selected.earTagCode??''}/></label>
+        <label><span>Fecha de nacimiento</span><DateInput name="birthDate" type="date" defaultValue={selected.birthDate??''}
+          onChange={event=>setEditBirthDate(event.target.value)}/></label>
+        <label><span>Fecha de ingreso *</span><DateInput name="entryDate" type="date" required defaultValue={selected.entryDate}/></label>
+        <label><span>Peso inicial</span><input name="initialWeight" type="number" min="0.001" max="999999999" step="0.001" defaultValue={selected.initialWeight??''}/></label>
+        <label><span>Unidad de peso</span><Select name="weightUnit" defaultValue={selected.initialWeightUnitCode??'KILOGRAM'}>
+          <option value="KILOGRAM">kg</option><option value="POUND">lb</option><option value="GRAM">g</option></Select></label>
+      </div></section>
       <section className="animal-catalog-edit">
         <h4>Descripción</h4>
         <label><span>Notas del animal</span><textarea name="description" maxLength={5000}
@@ -788,8 +818,8 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       <section className="animal-catalog-edit">
         <h4>Parentesco</h4>
         <div className="animal-parent-grid">
-          <ParentField accessToken={accessToken} child={selected} role="mother" />
-          <ParentField accessToken={accessToken} child={selected} role="father" />
+          <ParentField accessToken={accessToken} child={{...selected,birthDate:editBirthDate||null}} role="mother" />
+          <ParentField accessToken={accessToken} child={{...selected,birthDate:editBirthDate||null}} role="father" />
         </div>
       </section>
       </fieldset>

@@ -1,4 +1,5 @@
 import {reachedReproductionAge,reproductionToday} from './reproductionAge';
+import {hasActivePregnancy} from './reproductionCycle';
 import {reproductionSectionEnabled} from './reproductionSections';
 import {ImagePicker} from './ImagePicker';
 import {AnimalIcon} from '../components/AnimalIcon';
@@ -227,9 +228,8 @@ export function V2AnimalDetail(){
   ];
   const today=reproductionToday();
   const reproductiveAge=Boolean(reproductionSettings&&reachedReproductionAge(animal?.birthDate,today,reproductionSettings.minimumCowMonths));
-  const activePregnancy=reproduction?.pregnancies.find(item=>item.cowId===id&&item.status==='CONFIRMED'
-    &&!reproduction.births.some(birth=>birth.pregnancyId===item.id)&&!reproduction.losses.some(loss=>loss.pregnancyId===item.id));
-  const reproductiveActions:AnimalAction[]=reproductiveAge?(activePregnancy?[
+  const pregnancyOpen=hasActivePregnancy(reproduction??{},id??'',animal?.activePregnancyId);
+  const reproductiveActions:AnimalAction[]=reproductiveAge?(pregnancyOpen?[
     ...(reproductionSectionEnabled(reproductionSettings,'HEAT')?[{label:'Registrar celo falso',run:()=>openAction('reproduction','CELO')}]:[]),
     ...(reproductionSectionEnabled(reproductionSettings,'BIRTH')?[{label:'Registrar parto',run:()=>openAction('reproduction','PARTO')}]:[]),
     ...(reproductionSectionEnabled(reproductionSettings,'LOSS')?[{label:'Registrar aborto',run:()=>openAction('reproduction','PERDIDA')}]:[]),

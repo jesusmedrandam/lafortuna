@@ -2,6 +2,7 @@ import {formatDate} from '../utils';
 import type {AuditRecord} from './api';
 
 const actions:Record<string,string>={
+  ANIMAL_DETAILS_UPDATED:'Editó los datos del animal',
   PROPERTY_INFORMATION_UPDATED:'Actualizó la información de la propiedad',
   MOVEMENT_DRAFT_EXPIRED:'Eliminó un borrador de traslado tras 24 horas',HEALTH_CAMPAIGN_DRAFT_EXPIRED:'Eliminó un borrador de tratamiento tras 24 horas',
   CLEANING_DRAFT_EXPIRED:'Eliminó un borrador de limpieza tras 24 horas',ACTIVITY_DRAFT_EXPIRED:'Eliminó un borrador de actividad tras 24 horas',

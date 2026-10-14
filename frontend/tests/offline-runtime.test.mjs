@@ -551,7 +551,7 @@ const birthScope={userId:'birth-offline',propertyId:'birth-property',roleId:'own
 online=false;await runtime.configureOfflineRuntime(birthScope,'test-token');
 await seedReproductionRules(birthScope);
 await runtime.putCache(birthScope,'/reproduction',{heats:[],services:[],births:[],losses:[],pregnancies:[{id:'pregnancy-a',cowId:'cow-a',cowName:'Madre',status:'CONFIRMED',confirmedOn:'2026-01-01'}]});
-await runtime.putCache(birthScope,'/animals?page=1',{items:[{id:'cow-a',name:'Madre',sex:'FEMALE',speciesCode:'BOVINE',owners:[{id:'owner-a',name:'Ana',percent:100,isPrimary:true}]}],page:1,total:1,hasMore:false});
+await runtime.putCache(birthScope,'/animals?page=1',{items:[{id:'cow-a',name:'Madre',sex:'FEMALE',speciesCode:'BOVINE',owners:[{id:'owner-a',name:'Ana',percent:100,isPrimary:true}],birthDate:null,classification:{code:'VACONA',name:'Vacona'}}],page:1,total:1,hasMore:false});
 await runtime.putCache(birthScope,'/owners',[{id:'owner-b',name:'Luis'}]);
 await runtime.putCache(birthScope,'/catalogs/MEDIA_TAGS/items',[{id:'tag-birth',name:'Parto',active:true}]);
 const queuedNewborn=await change('/reproduction/births',{pregnancyId:'pregnancy-a',occurredOn:'2026-10-10',kind:'NORMAL',stillbornCount:0,
@@ -559,6 +559,7 @@ const queuedNewborn=await change('/reproduction/births',{pregnancyId:'pregnancy-
 let newbornList=(await runtime.getCache(birthScope,'/animals?page=1')).payload;
 assert.equal(newbornList.items.length,3,'The mother and both calves are immediately listed');
 assert.equal(newbornList.total,3);
+assert.equal(newbornList.items.find(row=>row.id==='cow-a').classification.code,'VACA','A queued birth immediately classifies the mother as cow');
 assert.equal((await runtime.getCache(birthScope,'/animals/'+queuedNewborn.calves[0].id)).payload.mother.animalId,'cow-a');
 assert.equal((await runtime.getCache(birthScope,'/animals/'+queuedNewborn.calves[0].id)).payload.owners[0].name,'Ana','Inherit mother ownership when none is selected');
 assert.equal((await runtime.getCache(birthScope,'/animals/'+queuedNewborn.calves[1].id)).payload.owners[0].name,'Luis','Resolve the selected owner in the offline calf profile');
@@ -712,6 +713,14 @@ assert.throws(()=>validate('/reproduction/losses',{pregnancyId:'pregnancy-a',occ
  {records:{...emptyReproduction,pregnancies:[{id:'pregnancy-a',cowId:'cow-a',status:'CONFIRMED',confirmedOn:'2026-02-01'}]}}),/anterior a la confirmación/);
 assert.throws(()=>validate('/reproduction/births',{pregnancyId:'pregnancy-a',occurredOn:'2026-10-01'},
  {records:{...emptyReproduction,pregnancies:[{id:'pregnancy-a',cowId:'cow-a',status:'BORN',confirmedOn:'2026-01-01'}]}}),/todavía no tenga parto/);
+const sourceHeat={id:'used-heat',cowId:'cow-a',startsOn:'2026-09-01',isFalse:false};
+const usedPregnancy={id:'used-pregnancy',cowId:'cow-a',heatId:'used-heat',serviceId:'used-service',status:'BORN',confirmedOn:'2026-09-15'};
+for(const status of ['CONFIRMED','BORN','LOST']){
+ const history={...emptyReproduction,heats:[sourceHeat],pregnancies:[{...usedPregnancy,status}],services:[{id:'used-service',cowId:'cow-a',heatId:'used-heat',kind:'INSEMINATION',occurredOn:'2026-09-02'}]};
+ assert.throws(()=>validate('/reproduction/pregnancies',{...pregnancyInput,heatId:sourceHeat.id},{records:history}),/preñez confirmada|celo verdadero/);
+ assert.throws(()=>validate('/reproduction/pregnancies',{...pregnancyInput,serviceId:'used-service',conceptionMethod:'INSEMINATION'},{records:history}),/preñez confirmada|servicio disponible/);
+}
+assert.throws(()=>validate('/reproduction/pregnancies',{...pregnancyInput,useLastHeat:false},{candidates:reproductiveCandidates.map(row=>({...row,activePregnancyId:row.id==='cow-a'?'older-active':null}))}),/preñez confirmada/);
 console.log('PASS: reproductive ages, dates, waiting periods, pregnancy/cycle links and unknown birthdays validated before saving.');
 
 const failedParent=await change('/animals',{name:'Padre pendiente',sex:'MALE',speciesCode:'BOVINE',groupId:'group-a',owners:[{partyId:'owner-a',percent:100,isPrimary:true}]},'POST');
@@ -868,5 +877,19 @@ await runtime.downloadPaths(['/media?entityType=ANIMAL'],{automatic:true});
 assert.ok(native.length&&native.every(item=>!item.force),'Removing the local file makes it eligible for missing-only download again');
 const nonePregnancy={...pregnancyInput,useLastHeat:false,conceptionMethod:'UNKNOWN'};
 validate('/reproduction/pregnancies',nonePregnancy,{records:{...emptyReproduction,heats:[{id:'heat-before',cowId:'cow-a',startsOn:'2025-01-01',isFalse:false}]}});
-assert.equal(nonePregnancy.heatId,undefined,'None ignores an older heat, including one outside the allowed gestation interval');
+assert.equal(nonePregnancy.heatId,null,'None ignores an older heat, including one outside the allowed gestation interval');
 console.log('PASS: original phone photos survive fresh queries and restart; automatic updates reuse bytes, manual all refreshes, pregnancy None skips prior heat.');
+online=false;const editScope={userId:'details-offline',propertyId:'edit-property',roleId:'owner'};
+await runtime.configureOfflineRuntime(editScope,'test-token');await seedReproductionRules(editScope);
+await runtime.putCache(editScope,'/animals/animal-edit',{...animal,classification:{code:'VACONA',name:'Vacona'},id:'animal-edit'});
+await runtime.putCache(editScope,'/reproduction',emptyReproduction);
+const editedOffline=await change('/animals/animal-edit/details',{name:'Nombre corregido',description:'Nueva',sex:'FEMALE',earTagCode:null,
+ birthDate:null,entryDate:'2026-01-01',initialWeight:31.5,initialWeightUnitCode:'POUND',groupId:'group-a',expectedVersion:1});
+assert.equal(editedOffline.id,'animal-edit');assert.equal(editedOffline.name,'Nombre corregido');assert.equal(editedOffline.initialWeight,31.5);
+const offlineProfile=await get('/animals/animal-edit');assert.equal(offlineProfile.name,'Nombre corregido');assert.equal(offlineProfile.group.name,locatedGroup.name);
+await assert.rejects(()=>change('/animals/animal-edit/details',{...editedOffline,groupId:'group-a',name:'',expectedVersion:editedOffline.version}),/nombre/i);
+await runtime.putCache(editScope,'/reproduction',{...emptyReproduction,births:[{id:'historic-birth',motherId:'animal-edit',occurredOn:'2026-09-01'}]});
+assert.equal((await get('/animals/animal-edit')).classification.code,'VACA','Existing cached heifers are corrected from their birth history before syncing');
+assert.equal((await get('/animals/animal-edit')).hasReproductiveHistory,true,'A local birth also protects the mother historical sex');
+await assert.rejects(()=>change('/animals/animal-edit/details',{...editedOffline,groupId:'group-a',sex:'MALE',expectedVersion:editedOffline.version}),/registros de reproducción/);
+console.log('PASS: complete animal details editing and birth classification remain consistent offline.');

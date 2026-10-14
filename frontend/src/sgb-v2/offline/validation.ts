@@ -1,7 +1,7 @@
 import type {OutboxEntry} from './database';
 import type {ReproductionRecords,ReproductionSettings,ReproductionCandidate} from '../api';
 import {reachedReproductionAge,reproductionToday} from '../reproductionAge';
-import {cycleTrueHeats} from '../reproductionCycle';
+import {cycleTrueHeats,hasActivePregnancy,pregnancyHeats,pregnancyServiceAvailable} from '../reproductionCycle';
 import {reproductionSectionEnabled} from '../reproductionSections';
 
 export class LocalValidationError extends Error {
@@ -42,7 +42,7 @@ export function validateReproductionMutation(entry:OutboxEntry,context:{records:
     requireValue(reachedReproductionAge(animal.birthDate,date,months),`${animal.name} debe tener al menos ${months} meses en la fecha del evento.`);
   };
   age(cowId,'FEMALE',on);
-  const active=records.pregnancies.some(row=>row.cowId===cowId&&row.status==='CONFIRMED'&&unresolved(row.id));
+  const active=hasActivePregnancy(records,cowId,candidates.find(row=>row.id===cowId)?.activePregnancyId);
   if(kind==='heats'&&active){input.isFalse=true;delete input.trueHeatId;}
   requireValue(!active||(kind==='heats'&&input.isFalse===true),kind==='heats'?'La hembra tiene una preñez confirmada. Solo puede registrarse un celo aparente o falso.':'La hembra ya tiene una preñez confirmada.');
   const shift=(date:string,days:number)=>{const value=new Date(date+'T12:00:00Z');value.setUTCDate(value.getUTCDate()+days);return value.toISOString().slice(0,10);};
@@ -78,16 +78,16 @@ export function validateReproductionMutation(entry:OutboxEntry,context:{records:
     if(input.gestationDays!=null)requireValue(Number.isInteger(input.gestationDays)&&Number(input.gestationDays)>=0&&Number(input.gestationDays)<=400,'Los días de gestación deben ser enteros entre 0 y 400.');
     if(input.serviceId){
       const service=records.services.find(row=>row.id===input.serviceId);
-      requireValue(service&&service.cowId===cowId&&!service.cancelled&&!service.hasPregnancy&&service.kind===input.conceptionMethod
+      requireValue(service&&service.cowId===cowId&&pregnancyServiceAvailable(records,service)&&service.kind===input.conceptionMethod
         &&service.occurredOn>=boundary&&service.occurredOn<=on,'Selecciona un servicio disponible del ciclo actual para esta hembra.');
       heatId=service.heatId;fatherId=service.fatherId;conceptionOn=service.occurredOn;
     }else{
-      if(!heatId&&settings.useLastValidHeat&&input.useLastHeat!==false)heatId=trueHeats.find(row=>row.startsOn<=on)?.id;
+      if(!heatId&&settings.useLastValidHeat&&input.useLastHeat!==false)heatId=pregnancyHeats(records,cowId,on).find(row=>row.startsOn<=on)?.id;
       if(input.gestationDays!=null&&!heatId)conceptionOn=shift(on,-Number(input.gestationDays));
     }
   }else requireValue(['INSEMINATION','EMBRYO_TRANSFER'].includes(String(input.kind)),'Selecciona inseminación o transferencia de embriones.');
   if(heatId){
-    const heat=trueHeats.find(row=>row.id===heatId&&row.startsOn<=on);
+    const heat=(kind==='pregnancies'?pregnancyHeats(records,cowId,on):trueHeats).find(row=>row.id===heatId&&row.startsOn<=on);
     requireValue(heat,'Selecciona un celo verdadero del ciclo actual para esta hembra.');
     if(!fatherId&&!input.externalFather)fatherId=heat.bullId;
     if(kind==='pregnancies'&&!input.serviceId)conceptionOn=settings.useLastValidHeat?heat.endsOn??heat.startsOn:heat.startsOn;
@@ -96,6 +96,9 @@ export function validateReproductionMutation(entry:OutboxEntry,context:{records:
   if(kind==='pregnancies'){
     requireValue((Date.parse(on)-Date.parse(conceptionOn))/86400000<=400,'La confirmación supera los 400 días desde el celo o servicio.');
     age(cowId,'FEMALE',conceptionOn);
+    // Persist the resolved source so subsequent offline records see it as consumed.
+    input.heatId=heatId??null;
+    if(input.serviceId)input.fatherId=fatherId??null;
   }
   if(fatherId)age(fatherId,'MALE',conceptionOn);
   if(input.donorId)age(input.donorId,'FEMALE',on);
@@ -215,23 +218,34 @@ export function validateLocalMutation(entry:OutboxEntry,current:Record<string,un
     requireValue(Number.isInteger(input.expectedVersion),'Vuelve a abrir la opción antes de editarla.');
   }
   if(entry.path.startsWith('/animals')){
-    if(entry.path==='/animals'){
+    const details=/^\/animals\/[^/]+\/details$/.test(entry.path);
+    if(entry.path==='/animals'||details){
       requireValue(typeof input.name==='string'&&input.name.trim().length>0&&input.name.trim().length<=160,
         'El nombre debe tener entre 1 y 160 caracteres.');
       requireValue(input.groupId,'Selecciona un grupo para el animal.');
-      requireValue(['FEMALE','MALE'].includes(String(input.sex))&&input.speciesCode==='BOVINE',
+      requireValue(['FEMALE','MALE'].includes(String(input.sex))&&(details||input.speciesCode==='BOVINE'),
         'Selecciona el sexo y la especie del animal.');
-      requireValue((input.initialWeight===undefined)===(input.initialWeightUnitCode===undefined),
+      requireValue((input.initialWeight==null)===(input.initialWeightUnitCode==null),
         'Indica juntos el peso y su unidad.');
-      if(input.initialWeight!==undefined)requireValue(typeof input.initialWeight==='number'
+      if(input.initialWeight!=null)requireValue(typeof input.initialWeight==='number'
         &&input.initialWeight>0&&input.initialWeight<=999999999&&/^\d+(\.\d{1,3})?$/.test(String(input.initialWeight)),
         'El peso debe ser positivo y tener como máximo tres decimales.');
-      if(input.initialWeightUnitCode!==undefined)requireValue(/^[A-Z_]{2,30}$/.test(String(input.initialWeightUnitCode)),
+      if(input.initialWeightUnitCode!=null)requireValue(/^[A-Z_]{2,30}$/.test(String(input.initialWeightUnitCode)),
         'Selecciona una unidad de peso válida.');
+      if(details){
+        requireValue(date(input.entryDate)&&String(input.entryDate)<=reproductionToday()
+          &&(input.birthDate==null||String(input.birthDate)<=String(input.entryDate)),
+          'El nacimiento debe ser anterior al ingreso y las fechas no pueden ser futuras.');
+        if(input.sex!==current?.sex)requireValue(current?.hasReproductiveHistory===false,
+          current?.hasReproductiveHistory?'No se puede cambiar el sexo mientras existan registros de reproducción o crías vinculadas.':
+            'Falta verificar el historial para cambiar el sexo. Abre la ficha con conexión primero.');
+        if(current?.registeredBirthDate)requireValue(input.birthDate===current.registeredBirthDate,
+          'La fecha de nacimiento debe coincidir con el parto en el que nació.');
+      }
     }
     if(input.description!=null)requireValue(typeof input.description==='string'&&input.description.trim().length<=5000,
       'La descripción admite hasta 5000 caracteres.');
-    if(input.earTagCode!==undefined)requireValue(typeof input.earTagCode==='string'
+    if(input.earTagCode!=null)requireValue(typeof input.earTagCode==='string'
       &&input.earTagCode.trim().length>0&&input.earTagCode.trim().length<=80,'El arete admite entre 1 y 80 caracteres.');
     for(const key of ['breedIds','colorIds','brandIds'])if(input[key]!==undefined){
       const ids=input[key];requireValue(Array.isArray(ids)&&ids.length<=12
